@@ -15,20 +15,29 @@ static const char *TAG = "DXP_HS";
 
 #define PUB_KEY_LEN 32
 
-// ── HKDF-SHA256 ──────────────────────────────────────────────────────────────
+// ── HKDF-SHA256 ───────────────────────────────────────────────────────────────
+// info = "dxp-v1" || pub_c(32) || pub_s(32)  — matches Python SDK
 static int derive_session_key(
     const uint8_t *shared_secret, size_t secret_len,
     const uint8_t *nonce, size_t nonce_len,
+    const uint8_t *pub_c,
+    const uint8_t *pub_s,
     uint8_t *out, size_t out_len)
 {
     const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (!md)
         return -1;
-    const uint8_t info[] = "dxp-session-v1";
+
+    // info = "dxp-v1" || pub_c || pub_s
+    uint8_t info[6 + PUB_KEY_LEN + PUB_KEY_LEN];
+    memcpy(info, "dxp-v1", 6);
+    memcpy(info + 6, pub_c, PUB_KEY_LEN);
+    memcpy(info + 6 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
+
     return mbedtls_hkdf(md,
                         nonce, nonce_len,
                         shared_secret, secret_len,
-                        info, sizeof(info) - 1,
+                        info, sizeof(info),
                         out, out_len);
 }
 
@@ -111,9 +120,6 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
 
     // ── Generate keypair + export public key ──────────────────────────────────
-    // mbedtls_ecdh_make_public writes a TLS-format buffer:
-    // 1 byte (0x04 uncompressed) + 32 bytes X + 32 bytes Y = 65 bytes
-    // For Curve25519 it writes: 1 byte length prefix + 32 bytes = 33 bytes
     uint8_t pub_buf[65];
     size_t pub_buf_len = 0;
     if (mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf),
@@ -124,18 +130,19 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
 
     // Curve25519 public key is the last 32 bytes of the buffer
-    uint8_t *pub_a = pub_buf + (pub_buf_len - PUB_KEY_LEN);
+    uint8_t *pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
 
-    // ── Step 1: Send HELLO [device_id(6) || pub_A(32)] ───────────────────────
+    // ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
     esp_read_mac(session->device_id, ESP_MAC_WIFI_STA);
 
     memset(&pkt, 0, sizeof(pkt));
     pkt.magic = DXP_MAGIC;
     pkt.version = 1;
     pkt.type = DXP_TYPE_HELLO;
+    pkt.seq = 0;
     pkt.length = DXP_DEVICE_ID_LEN + PUB_KEY_LEN;
     memcpy(pkt.payload, session->device_id, DXP_DEVICE_ID_LEN);
-    memcpy(pkt.payload + DXP_DEVICE_ID_LEN, pub_a, PUB_KEY_LEN);
+    memcpy(pkt.payload + DXP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
 
     len = dxp_build_packet(&pkt, tx_buf, NULL);
     if (dxp_tcp_send(sock, tx_buf, len) < 0)
@@ -147,7 +154,7 @@ int dxp_handshake(int sock, dxp_session_t *session)
              session->device_id[0], session->device_id[1], session->device_id[2],
              session->device_id[3], session->device_id[4], session->device_id[5]);
 
-    // ── Step 2: Receive CHALLENGE [nonce(32) || pub_B(32)] ───────────────────
+    // ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] ───────────────────
     len = dxp_tcp_recv(sock, rx_buf, sizeof(rx_buf));
     if (len < 0)
     {
@@ -164,17 +171,15 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
 
     uint8_t nonce[DXP_NONCE_LEN];
-    uint8_t pub_b[PUB_KEY_LEN];
+    uint8_t pub_s[PUB_KEY_LEN];
     memcpy(nonce, pkt.payload, DXP_NONCE_LEN);
-    memcpy(pub_b, pkt.payload + DXP_NONCE_LEN, PUB_KEY_LEN);
+    memcpy(pub_s, pkt.payload + DXP_NONCE_LEN, PUB_KEY_LEN);
     ESP_LOGI(TAG, "CHALLENGE received");
 
     // ── Load server public key + compute shared secret ────────────────────────
-    // mbedtls_ecdh_read_public expects the same format make_public produced
-    // For Curve25519: prepend a length byte
     uint8_t peer_buf[33];
     peer_buf[0] = 32;
-    memcpy(peer_buf + 1, pub_b, PUB_KEY_LEN);
+    memcpy(peer_buf + 1, pub_s, PUB_KEY_LEN);
 
     if (mbedtls_ecdh_read_public(&ecdh, peer_buf, sizeof(peer_buf)) != 0)
     {
@@ -192,9 +197,10 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
     ESP_LOGI(TAG, "X25519 shared secret computed (%d bytes)", (int)shared_len);
 
-    // ── Derive session key ────────────────────────────────────────────────────
+    // ── Derive session key — info = "dxp-v1" || pub_c || pub_s ──────────────
     if (derive_session_key(shared_secret, shared_len,
                            nonce, DXP_NONCE_LEN,
+                           pub_c, pub_s,
                            session->session_key, DXP_SESSION_KEY_LEN) != 0)
     {
         ESP_LOGE(TAG, "HKDF failed");
@@ -214,8 +220,8 @@ int dxp_handshake(int sock, dxp_session_t *session)
     pkt.magic = DXP_MAGIC;
     pkt.version = 1;
     pkt.type = DXP_TYPE_HELLO_ACK;
+    pkt.seq = 0;
     pkt.length = DXP_HMAC_LEN;
-
     memcpy(pkt.payload, hmac_out, DXP_HMAC_LEN);
 
     len = dxp_build_packet(&pkt, tx_buf, NULL);

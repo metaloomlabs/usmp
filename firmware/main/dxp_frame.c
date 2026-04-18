@@ -18,33 +18,70 @@ uint16_t dxp_crc16(const uint8_t *data, uint16_t len)
     return crc;
 }
 
-// Build packet into out buffer, sets out_len to actual bytes written
-// Header is 10 bytes (before crc) + 2 bytes crc + payload
+// CRC over header bytes [0..9] + payload (matches Python SDK)
+static uint16_t compute_crc(dxp_packet_t *pkt)
+{
+    uint8_t header[10];
+    header[0] = pkt->magic & 0xFF;
+    header[1] = (pkt->magic >> 8) & 0xFF;
+    header[2] = pkt->version;
+    header[3] = pkt->type;
+    header[4] = pkt->seq & 0xFF;
+    header[5] = (pkt->seq >> 8) & 0xFF;
+    header[6] = (pkt->seq >> 16) & 0xFF;
+    header[7] = (pkt->seq >> 24) & 0xFF;
+    header[8] = pkt->length & 0xFF;
+    header[9] = (pkt->length >> 8) & 0xFF;
+
+    // Single pass: init CRC, run over header, continue over payload
+    uint16_t crc = 0xFFFF;
+    for (int i = 0; i < 10; i++)
+    {
+        crc ^= header[i];
+        for (int j = 0; j < 8; j++)
+        {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
+        }
+    }
+    for (uint16_t i = 0; i < pkt->length; i++)
+    {
+        crc ^= pkt->payload[i];
+        for (int j = 0; j < 8; j++)
+        {
+            if (crc & 1)
+
+                crc = (crc >> 1) ^ 0xA001;
+            else
+                crc >>= 1;
+        }
+    }
+    return crc;
+}
+
 int dxp_build_packet(dxp_packet_t *pkt, uint8_t *out, uint16_t *out_len)
 {
-    // Compute CRC over header fields (excluding crc field) + payload
-    // Header without crc: magic(2)+ver(1)+type(1)+seq(4)+len(2) = 10 bytes
-    uint8_t header_no_crc[10];
-    header_no_crc[0] = pkt->magic & 0xFF;
-    header_no_crc[1] = (pkt->magic >> 8) & 0xFF;
-    header_no_crc[2] = pkt->version;
-    header_no_crc[3] = pkt->type;
-    header_no_crc[4] = pkt->seq & 0xFF;
-    header_no_crc[5] = (pkt->seq >> 8) & 0xFF;
-    header_no_crc[6] = (pkt->seq >> 16) & 0xFF;
-    header_no_crc[7] = (pkt->seq >> 24) & 0xFF;
-    header_no_crc[8] = pkt->length & 0xFF;
-    header_no_crc[9] = (pkt->length >> 8) & 0xFF;
+    pkt->crc = compute_crc(pkt);
 
-    uint16_t crc = dxp_crc16(header_no_crc, sizeof(header_no_crc));
-    crc = dxp_crc16(pkt->payload, pkt->length); // chain over payload
-    pkt->crc = crc;
+    // Write header manually (packed, little-endian)
+    out[0] = pkt->magic & 0xFF;
+    out[1] = (pkt->magic >> 8) & 0xFF;
+    out[2] = pkt->version;
+    out[3] = pkt->type;
+    out[4] = pkt->seq & 0xFF;
+    out[5] = (pkt->seq >> 8) & 0xFF;
+    out[6] = (pkt->seq >> 16) & 0xFF;
+    out[7] = (pkt->seq >> 24) & 0xFF;
+    out[8] = pkt->length & 0xFF;
+    out[9] = (pkt->length >> 8) & 0xFF;
+    out[10] = pkt->crc & 0xFF;
+    out[11] = (pkt->crc >> 8) & 0xFF;
 
-    // Write full frame to out
+    memcpy(out + DXP_HEADER_SIZE, pkt->payload, pkt->length);
+
     uint16_t total = DXP_HEADER_SIZE + pkt->length;
-    memcpy(out, pkt, DXP_HEADER_SIZE);                        // header
-    memcpy(out + DXP_HEADER_SIZE, pkt->payload, pkt->length); // payload only
-
     if (out_len)
         *out_len = total;
     return total;
@@ -55,7 +92,6 @@ int dxp_parse_packet(uint8_t *data, int len, dxp_packet_t *pkt)
     if (len < DXP_HEADER_SIZE)
         return -1;
 
-    // Parse header fields manually (packed, little-endian)
     pkt->magic = data[0] | (data[1] << 8);
     pkt->version = data[2];
     pkt->type = data[3];
@@ -73,5 +109,11 @@ int dxp_parse_packet(uint8_t *data, int len, dxp_packet_t *pkt)
         return -1;
 
     memcpy(pkt->payload, data + DXP_HEADER_SIZE, pkt->length);
+
+    // Verify CRC
+    uint16_t expected = compute_crc(pkt);
+    if (pkt->crc != expected)
+        return -1;
+
     return 0;
 }
