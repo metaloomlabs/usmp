@@ -1,0 +1,38 @@
+[project]
+name = "dxp-python"
+version = "0.1.0"
+description = "DXP — Device Exchange Protocol. Python SDK for secure ESP32 communication."
+readme = "README.md"
+authors = [
+    { name = "winterx64", email = "itswinterx64@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/winterx64/dxp"
+Repository = "https://github.com/winterx64/dxp"
+
+[build-system]
+requires = ["uv_build>=0.11.6,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "dxp"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "pytest-asyncio>=1.3.0",
+]

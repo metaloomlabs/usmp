@@ -1,0 +1,87 @@
+# src/dxp/types.py
+
+from dataclasses import dataclass, field
+from enum import IntEnum
+
+
+class PacketType(IntEnum):
+    HELLO = 0x01
+    CHALLENGE = 0x02
+    HELLO_ACK = 0x03
+    SESSION_OK = 0x04
+    DATA = 0x05
+    PING = 0x06
+    PONG = 0x07
+    BYE = 0x08
+    ERROR = 0xFF
+
+
+class ErrorCode(IntEnum):
+    ERR_VERSION = 0x01
+    ERR_AUTH = 0x02
+    ERR_SEQ = 0x03
+    ERR_CRYPTO = 0x04
+    ERR_BAD_FRAME = 0x05
+    ERR_TIMEOUT = 0x06
+    ERR_INTERNAL = 0x07
+
+
+# Protocol constants
+DXP_MAGIC = 0xABCD
+DXP_VERSION = 0x01
+DXP_HEADER_SIZE = 12  # magic(2)+ver(1)+type(1)+seq(4)+len(2)+crc(2)
+DXP_MAX_PAYLOAD = 480  # max payload bytes (keeps total frame under 512)
+DXP_TAG_LEN = 16  # AES-GCM tag length
+DXP_NONCE_LEN = 32  # handshake nonce length
+DXP_DEVICE_ID_LEN = 6  # MAC address length
+DXP_PUB_KEY_LEN = 32  # X25519 public key length
+DXP_HMAC_LEN = 32  # HMAC-SHA256 output length
+DXP_SESSION_ID_LEN = 4  # session ID length
+DXP_SESSION_KEY_LEN = 32  # AES-256 key length
+DXP_GCM_NONCE_LEN = 12  # AES-GCM nonce length
+
+
+@dataclass
+class DXPFrame:
+    magic: int
+    version: int
+    type: PacketType
+    seq: int
+    length: int
+    crc: int
+    payload: bytes
+
+    def type_name(self) -> str:
+        try:
+            return PacketType(self.type).name
+        except ValueError:
+            return f"UNKNOWN(0x{self.type:02X})"
+
+    def __str__(self) -> str:
+        return (
+            f"DXPFrame("
+            f"type={self.type_name()}, "
+            f"seq={self.seq}, "
+            f"version={self.version}, "
+            f"length={self.length}, "
+            f"crc=0x{self.crc:04X}, "
+            f"payload={self.payload.hex()}"
+            f")"
+        )
+
+
+@dataclass
+class SessionInfo:
+    device_id: bytes
+    session_id: bytes
+    session_key: bytes
+    tx_seq: int = 0
+    rx_seq: int = 0
+
+    @property
+    def device_id_str(self) -> str:
+        return self.device_id.hex(":")
+
+    @property
+    def session_id_str(self) -> str:
+        return self.session_id.hex()
