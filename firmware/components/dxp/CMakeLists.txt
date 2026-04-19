@@ -1,0 +1,17 @@
+idf_component_register(
+    SRCS
+        "src/dxp_frame.c"
+        "src/dxp_crypto.c"
+        "src/dxp_handshake.c"
+        "src/dxp_session.c"
+        "src/dxp_transport.c"
+        "src/dxp_connect.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        mbedtls
+        esp_wifi
+        lwip
+)
