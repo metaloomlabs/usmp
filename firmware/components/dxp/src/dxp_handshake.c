@@ -8,6 +8,7 @@
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/md.h"
 #include "mbedtls/hkdf.h"
+#include "mbedtls/constant_time.h"
 #include <string.h>
 #include <unistd.h>
 
@@ -16,7 +17,6 @@ static const char *TAG = "DXP_HS";
 #define PUB_KEY_LEN 32
 
 // ── HKDF-SHA256 ───────────────────────────────────────────────────────────────
-// info = "dxp-v1" || pub_c(32) || pub_s(32)  — matches Python SDK
 static int derive_session_key(
     const uint8_t *shared_secret, size_t secret_len,
     const uint8_t *nonce, size_t nonce_len,
@@ -28,7 +28,6 @@ static int derive_session_key(
     if (!md)
         return -1;
 
-    // info = "dxp-v1" || pub_c || pub_s
     uint8_t info[6 + PUB_KEY_LEN + PUB_KEY_LEN];
     memcpy(info, "dxp-v1", 6);
     memcpy(info + 6, pub_c, PUB_KEY_LEN);
@@ -41,21 +40,15 @@ static int derive_session_key(
                         out, out_len);
 }
 
-// ── HMAC-SHA256(PSK, nonce || device_id) ─────────────────────────────────────
+// ── HMAC-SHA256(PSK, data) ────────────────────────────────────────────────────
 static int compute_hmac(
-    const uint8_t *nonce,
-    const uint8_t *device_id,
+    const uint8_t *psk, size_t psk_len,
+    const uint8_t *data, size_t data_len,
     uint8_t *out)
 {
-    const uint8_t *psk = (const uint8_t *)DXP_PSK;
-    size_t psk_len = strlen(DXP_PSK);
-
-    uint8_t input[DXP_NONCE_LEN + DXP_DEVICE_ID_LEN];
-    memcpy(input, nonce, DXP_NONCE_LEN);
-    memcpy(input + DXP_NONCE_LEN, device_id, DXP_DEVICE_ID_LEN);
-
     mbedtls_md_context_t ctx;
     mbedtls_md_init(&ctx);
+
     const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
     if (!info)
         return -1;
@@ -71,7 +64,7 @@ static int compute_hmac(
         ret = -1;
         goto done;
     }
-    if (mbedtls_md_hmac_update(&ctx, input, sizeof(input)) != 0)
+    if (mbedtls_md_hmac_update(&ctx, data, data_len) != 0)
     {
         ret = -1;
         goto done;
@@ -104,6 +97,9 @@ int dxp_handshake(int sock, dxp_session_t *session)
     dxp_packet_t pkt;
     int len;
 
+    const uint8_t *psk = (const uint8_t *)DXP_PSK;
+    size_t psk_len = strlen(DXP_PSK);
+
     // ── Seed RNG ──────────────────────────────────────────────────────────────
     if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
                               (const uint8_t *)"dxp", 3) != 0)
@@ -129,7 +125,6 @@ int dxp_handshake(int sock, dxp_session_t *session)
         goto cleanup;
     }
 
-    // Curve25519 public key is the last 32 bytes of the buffer
     uint8_t *pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
 
     // ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
@@ -176,7 +171,7 @@ int dxp_handshake(int sock, dxp_session_t *session)
     memcpy(pub_s, pkt.payload + DXP_NONCE_LEN, PUB_KEY_LEN);
     ESP_LOGI(TAG, "CHALLENGE received");
 
-    // ── Load server public key + compute shared secret ────────────────────────
+    // ── Compute X25519 shared secret ──────────────────────────────────────────
     uint8_t peer_buf[33];
     peer_buf[0] = 32;
     memcpy(peer_buf + 1, pub_s, PUB_KEY_LEN);
@@ -197,7 +192,7 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
     ESP_LOGI(TAG, "X25519 shared secret computed (%d bytes)", (int)shared_len);
 
-    // ── Derive session key — info = "dxp-v1" || pub_c || pub_s ──────────────
+    // ── Derive session key ────────────────────────────────────────────────────
     if (derive_session_key(shared_secret, shared_len,
                            nonce, DXP_NONCE_LEN,
                            pub_c, pub_s,
@@ -208,12 +203,18 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
     ESP_LOGI(TAG, "Session key derived");
 
-    // ── Step 3: Send HELLO_ACK [hmac(32)] ────────────────────────────────────
-    uint8_t hmac_out[DXP_HMAC_LEN];
-    if (compute_hmac(nonce, session->device_id, hmac_out) != 0)
+    // ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
+    // hmac_client = HMAC(PSK, nonce || device_id)
+    uint8_t hmac_client[DXP_HMAC_LEN];
     {
-        ESP_LOGE(TAG, "HMAC failed");
-        goto cleanup;
+        uint8_t input[DXP_NONCE_LEN + DXP_DEVICE_ID_LEN];
+        memcpy(input, nonce, DXP_NONCE_LEN);
+        memcpy(input + DXP_NONCE_LEN, session->device_id, DXP_DEVICE_ID_LEN);
+        if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_client) != 0)
+        {
+            ESP_LOGE(TAG, "Client HMAC computation failed");
+            goto cleanup;
+        }
     }
 
     memset(&pkt, 0, sizeof(pkt));
@@ -222,7 +223,7 @@ int dxp_handshake(int sock, dxp_session_t *session)
     pkt.type = DXP_TYPE_HELLO_ACK;
     pkt.seq = 0;
     pkt.length = DXP_HMAC_LEN;
-    memcpy(pkt.payload, hmac_out, DXP_HMAC_LEN);
+    memcpy(pkt.payload, hmac_client, DXP_HMAC_LEN);
 
     len = dxp_build_packet(&pkt, tx_buf, NULL);
     if (dxp_tcp_send(sock, tx_buf, len) < 0)
@@ -232,7 +233,7 @@ int dxp_handshake(int sock, dxp_session_t *session)
     }
     ESP_LOGI(TAG, "HELLO_ACK sent");
 
-    // ── Step 4: Receive SESSION_OK ────────────────────────────────────────────
+    // ── Step 4: Receive SESSION_OK [session_id(4) || hmac_server(32)] ────────
     len = dxp_tcp_recv(sock, rx_buf, sizeof(rx_buf));
     if (len < 0)
     {
@@ -242,13 +243,39 @@ int dxp_handshake(int sock, dxp_session_t *session)
 
     if (dxp_parse_packet(rx_buf, len, &pkt) != 0 ||
         pkt.type != DXP_TYPE_SESSION_OK ||
-        pkt.length != DXP_SESSION_ID_LEN)
+        pkt.length != DXP_SESSION_ID_LEN + DXP_HMAC_LEN)
     {
-        ESP_LOGE(TAG, "Bad SESSION_OK frame");
+        ESP_LOGE(TAG, "Bad SESSION_OK frame (type=0x%02x len=%u)", pkt.type, pkt.length);
         goto cleanup;
     }
 
+    // Extract session_id and server HMAC
+    uint8_t hmac_server_received[DXP_HMAC_LEN];
     memcpy(session->session_id, pkt.payload, DXP_SESSION_ID_LEN);
+    memcpy(hmac_server_received, pkt.payload + DXP_SESSION_ID_LEN, DXP_HMAC_LEN);
+
+    // ── Verify server HMAC ────────────────────────────────────────────────────
+    // hmac_server = HMAC(PSK, nonce || session_id)
+    uint8_t hmac_server_expected[DXP_HMAC_LEN];
+    {
+        uint8_t input[DXP_NONCE_LEN + DXP_SESSION_ID_LEN];
+        memcpy(input, nonce, DXP_NONCE_LEN);
+        memcpy(input + DXP_NONCE_LEN, session->session_id, DXP_SESSION_ID_LEN);
+        if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected) != 0)
+        {
+            ESP_LOGE(TAG, "Server HMAC computation failed");
+            goto cleanup;
+        }
+    }
+
+    if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, DXP_HMAC_LEN) != 0)
+    {
+        ESP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
+        goto cleanup;
+    }
+
+    ESP_LOGI(TAG, "Server authenticated OK");
+
     session->established = true;
     ret = 0;
 
