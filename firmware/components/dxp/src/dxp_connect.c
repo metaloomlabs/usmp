@@ -3,11 +3,10 @@
 #include "dxp_handshake.h"
 #include "dxp_session.h"
 #include "dxp_frame.h"
-#include "esp_log.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include "dxp_port.h"
 #include <unistd.h>
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "DXP";
 
@@ -15,26 +14,32 @@ int dxp_connect(dxp_t *ctx, const char *server_ip, int port)
 {
     if (!ctx)
         return -1;
+
+    char _msg[128];
     memset(ctx, 0, sizeof(dxp_t));
     ctx->sock = -1;
 
-    // ── TCP connect with retries ───────────────────────────────────────────────
+    // ── TCP connect with retries ──────────────────────────────────────────────
     for (int attempt = 1; attempt <= DXP_CONNECT_RETRIES; ++attempt)
     {
         ctx->sock = dxp_tcp_connect(server_ip, port);
         if (ctx->sock >= 0)
         {
-            ESP_LOGI(TAG, "TCP connected (attempt %d)", attempt);
+            snprintf(_msg, sizeof(_msg), "TCP connected (attempt %d)", attempt);
+            DXP_LOGI(TAG, _msg);
             break;
         }
-        ESP_LOGW(TAG, "Connection attempt %d failed, retrying in %dms...",
+        snprintf(_msg, sizeof(_msg),
+                 "Connection attempt %d failed, retrying in %dms...",
                  attempt, DXP_CONNECT_RETRY_MS);
-        vTaskDelay(pdMS_TO_TICKS(DXP_CONNECT_RETRY_MS));
+        DXP_LOGW(TAG, _msg);
+        dxp_port_delay_ms(DXP_CONNECT_RETRY_MS);
     }
 
     if (ctx->sock < 0)
     {
-        ESP_LOGE(TAG, "Unable to connect to %s:%d", server_ip, port);
+        snprintf(_msg, sizeof(_msg), "Unable to connect to %s:%d", server_ip, port);
+        DXP_LOGE(TAG, _msg);
         return -1;
     }
 
@@ -42,7 +47,7 @@ int dxp_connect(dxp_t *ctx, const char *server_ip, int port)
     dxp_session_t hs = {0};
     if (dxp_handshake(ctx->sock, &hs) != 0)
     {
-        ESP_LOGE(TAG, "Handshake failed");
+        DXP_LOGE(TAG, "Handshake failed");
         close(ctx->sock);
         ctx->sock = -1;
         return -1;
@@ -56,9 +61,10 @@ int dxp_connect(dxp_t *ctx, const char *server_ip, int port)
     ctx->tx_seq = 0;
     ctx->rx_seq = 0;
 
-    ESP_LOGI(TAG, "Session established — id: %02x%02x%02x%02x",
+    snprintf(_msg, sizeof(_msg), "Session established — id: %02x%02x%02x%02x",
              ctx->session_id[0], ctx->session_id[1],
              ctx->session_id[2], ctx->session_id[3]);
+    DXP_LOGI(TAG, _msg);
 
     return 0;
 }
@@ -73,5 +79,5 @@ void dxp_close(dxp_t *ctx)
         ctx->sock = -1;
     }
     ctx->established = false;
-    ESP_LOGI(TAG, "Session closed");
+    DXP_LOGI(TAG, "Session closed");
 }

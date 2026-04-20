@@ -6,6 +6,7 @@ idf_component_register(
         "src/dxp_session.c"
         "src/dxp_transport.c"
         "src/dxp_connect.c"
+        "port/dxp_port_esp32.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -14,4 +15,5 @@ idf_component_register(
         mbedtls
         esp_wifi
         lwip
+        esp_timer
 )

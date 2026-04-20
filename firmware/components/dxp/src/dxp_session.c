@@ -3,8 +3,9 @@
 #include "dxp_frame.h"
 #include "dxp_crypto.h"
 #include "dxp_transport.h"
-#include "esp_log.h"
+#include "dxp_port.h"
 #include <string.h>
+#include <stdio.h>
 
 static const char *TAG = "DXP_SESSION";
 
@@ -30,6 +31,7 @@ int dxp_send(dxp_t *ctx, const uint8_t *data, uint16_t len)
     if (!ctx || !ctx->established)
         return -1;
 
+    char _msg[64];
     dxp_packet_t pkt;
     memset(&pkt, 0, sizeof(pkt));
 
@@ -50,7 +52,7 @@ int dxp_send(dxp_t *ctx, const uint8_t *data, uint16_t len)
                         data, len,
                         pkt.payload, &out_len) != 0)
     {
-        ESP_LOGE(TAG, "Encryption failed");
+        DXP_LOGE(TAG, "Encryption failed");
         return -1;
     }
 
@@ -62,11 +64,13 @@ int dxp_send(dxp_t *ctx, const uint8_t *data, uint16_t len)
 
     if (dxp_tcp_send(ctx->sock, tx_buf, tx_len) < 0)
     {
-        ESP_LOGE(TAG, "Send failed");
+        DXP_LOGE(TAG, "Send failed");
         return -1;
     }
 
-    ESP_LOGI(TAG, "TX seq=%lu len=%u", (unsigned long)ctx->tx_seq, len);
+    snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u",
+             (unsigned long)ctx->tx_seq, len);
+    DXP_LOGI(TAG, _msg);
     ctx->tx_seq++;
     return 0;
 }
@@ -76,32 +80,35 @@ int dxp_recv(dxp_t *ctx, uint8_t *out, uint16_t max_len)
     if (!ctx || !ctx->established)
         return -1;
 
+    char _msg[64];
     uint8_t rx_buf[DXP_HEADER_SIZE + DXP_MAX_PAYLOAD];
     dxp_packet_t pkt;
 
     int len = dxp_tcp_recv(ctx->sock, rx_buf, sizeof(rx_buf));
     if (len < 0)
     {
-        ESP_LOGE(TAG, "Recv failed");
+        DXP_LOGE(TAG, "Recv failed");
         return -1;
     }
 
     if (dxp_parse_packet(rx_buf, len, &pkt) != 0)
     {
-        ESP_LOGE(TAG, "Parse failed");
+        DXP_LOGE(TAG, "Parse failed");
         return -1;
     }
 
     if (pkt.type != DXP_TYPE_DATA)
     {
-        ESP_LOGE(TAG, "Unexpected type 0x%02x", pkt.type);
+        snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
+        DXP_LOGE(TAG, _msg);
         return -1;
     }
 
     if (pkt.seq != ctx->rx_seq)
     {
-        ESP_LOGE(TAG, "Seq mismatch: expected %lu got %lu",
+        snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu",
                  (unsigned long)ctx->rx_seq, (unsigned long)pkt.seq);
+        DXP_LOGE(TAG, _msg);
         return -1;
     }
 
@@ -115,11 +122,13 @@ int dxp_recv(dxp_t *ctx, uint8_t *out, uint16_t max_len)
                         pkt.payload, pkt.length,
                         out, &out_len) != 0)
     {
-        ESP_LOGE(TAG, "Decryption failed");
+        DXP_LOGE(TAG, "Decryption failed");
         return -1;
     }
 
     ctx->rx_seq++;
-    ESP_LOGI(TAG, "RX seq=%lu len=%d", (unsigned long)pkt.seq, (int)out_len);
+    snprintf(_msg, sizeof(_msg), "RX seq=%lu len=%d",
+             (unsigned long)pkt.seq, (int)out_len);
+    DXP_LOGI(TAG, _msg);
     return (int)out_len;
 }
