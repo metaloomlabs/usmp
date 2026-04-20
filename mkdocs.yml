@@ -1,0 +1,105 @@
+site_name: DXP — Device Exchange Protocol
+site_description: Secure, lightweight communication protocol for embedded devices
+site_author: winterx64
+site_url: https://winterx64.github.io/dxp
+
+repo_name: winterx64/dxp
+repo_url: https://github.com/winterx64/dxp
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  logo: assets/logo.png
+  favicon: assets/favicon.png
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+
+plugins:
+  - search
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - What is DXP?: getting-started/what-is-dxp.md
+    - Quick Start (ESP32): getting-started/quickstart-esp32.md
+    - Quick Start (Python): getting-started/quickstart-python.md
+    - Installation: getting-started/installation.md
+  - Protocol:
+    - Overview: protocol/overview.md
+    - Frame Format: protocol/frame-format.md
+    - Handshake: protocol/handshake.md
+    - Encryption: protocol/encryption.md
+    - Sequence Numbers: protocol/sequence-numbers.md
+    - Error Handling: protocol/error-handling.md
+  - Ports:
+    - ESP32: ports/esp32.md
+    - Porting Guide: ports/porting-guide.md
+  - SDK:
+    - Python SDK: sdk/python.md
+    - DXPServer: sdk/server.md
+    - DXPClient: sdk/client.md
+    - DXPSession: sdk/session.md
+  - Tools:
+    - CLI (coming soon): tools/cli.md
+  - Security:
+    - Security Model: security/model.md
+    - PSK Management: security/psk.md
+    - Threat Model: security/threat-model.md
+  - Examples:
+    - ESP32 + Python Server: examples/esp32-python.md
+    - D2D (coming soon): examples/d2d.md
+  - Spec: spec.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/winterx64/dxp
+
+copyright: Copyright &copy; 2026 winterx64

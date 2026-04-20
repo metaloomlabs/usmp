@@ -1,0 +1,23 @@
+[project]
+name = "dxp"
+version = "0.1.0"
+description = "DXP — Device Exchange Protocol"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "dxp-python",
+]
+
+[tool.uv.workspace]
+members = [
+    "sdk/python",
+]
+
+[tool.uv.sources]
+dxp-python = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "mkdocs-material>=9.7.6",
+    "mkdocs-minify-plugin>=0.8.0",
+]
