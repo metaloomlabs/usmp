@@ -1,5 +1,0 @@
-version: "0.1.0"
-description: "DXP — Device Exchange Protocol. Secure authenticated communication for ESP32."
-url: "https://github.com/winterx64/dxp"
-dependencies:
-  idf: ">=5.0.0"
