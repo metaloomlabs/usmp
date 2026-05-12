@@ -1,6 +1,6 @@
 # examples/esp32_server.py
 import asyncio
-from dxp import DXPServer, DXPSession
+from dxp import DXPServer, DXPSession, ConnectionClosedError
 
 PSK = b"dxp-dev-psk-change-me-before-prod"
 HOST = "192.168.137.1"
@@ -12,11 +12,12 @@ server = DXPServer(host=HOST, port=PORT, psk=PSK)
 @server.on_session
 async def handle(session: DXPSession):
     print(f"[SESSION] device={session.device_id} session={session.session_id}")
-
-    while True:
-        data = await session.recv()
-        print(f"[RX] {data!r}")
-        await session.send(b"ACK")
+    try:
+        while True:
+            data = await session.recv()  # transparently handles PING/PONG
+            print(f"[RX] {data}")
+    except ConnectionClosedError:
+        print(f"[CLOSED] {session.device_id}")
 
 
 asyncio.run(server.serve())
