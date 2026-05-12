@@ -11,7 +11,6 @@ idf_component_register(
         "transport/dxp_transport_tcp.c"
     INCLUDE_DIRS
         "../../core/include"
-        "transport"
     PRIV_INCLUDE_DIRS
         "../../core/src"
     REQUIRES
