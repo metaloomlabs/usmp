@@ -1,4 +1,5 @@
 #include "dxp_handshake.h"
+#include "dxp.h"
 #include "dxp_frame.h"
 #include "dxp_port.h"
 #include "mbedtls/ecdh.h"
@@ -75,7 +76,7 @@ done:
     return ret;
 }
 
-int dxp_handshake(dxp_transport_t *transport, dxp_session_t *session)
+int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
 {
     int ret = -1;
     char _msg[128];
@@ -93,9 +94,18 @@ int dxp_handshake(dxp_transport_t *transport, dxp_session_t *session)
     dxp_packet_t pkt;
     int len;
 
-    const uint8_t *psk = (const uint8_t *)DXP_PSK;
-    size_t psk_len = strlen(DXP_PSK);
-
+    const uint8_t *psk;
+    size_t psk_len;
+    if (session->psk && session->psk_len > 0)
+    {
+        psk = session->psk;
+        psk_len = session->psk_len;
+    }
+    else
+    {
+        psk = (const uint8_t *)DXP_PSK;
+        psk_len = strlen(DXP_PSK);
+    }
     // ── Seed RNG ──────────────────────────────────────────────────────────────
     if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
                               (const uint8_t *)"dxp", 3) != 0)

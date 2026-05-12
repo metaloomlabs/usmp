@@ -3,6 +3,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include "dxp_frame.h"
+#include "dxp_transport.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -11,7 +13,7 @@ extern "C"
 
 // ── Version ───────────────────────────────────────────────────────────────────
 #define DXP_VERSION_MAJOR 0
-#define DXP_VERSION_MINOR 1
+#define DXP_VERSION_MINOR 2
 #define DXP_VERSION_PATCH 0
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -35,16 +37,7 @@ extern "C"
 #define DXP_DEVICE_ID_LEN 6
 #define DXP_SESSION_ID_LEN 4
 #define DXP_SESSION_KEY_LEN 32
-#define DXP_MAX_DATA_LEN 448
-
-    // ── Transport interface ───────────────────────────────────────────────────────
-    typedef struct dxp_transport_s
-    {
-        int (*send)(struct dxp_transport_s *t, const uint8_t *data, size_t len);
-        int (*recv)(struct dxp_transport_s *t, uint8_t *buf, size_t max_len);
-        void (*close)(struct dxp_transport_s *t);
-        void *ctx; // transport-specific state (socket fd, UART handle, etc.)
-    } dxp_transport_t;
+#define DXP_MAX_DATA_LEN (DXP_MAX_PAYLOAD - DXP_GCM_TAG_LEN)
 
     // ── Session context ───────────────────────────────────────────────────────────
     typedef struct
@@ -53,31 +46,32 @@ extern "C"
         uint8_t session_id[DXP_SESSION_ID_LEN];
         uint8_t session_key[DXP_SESSION_KEY_LEN];
         bool established;
-        dxp_transport_t transport; // ← replaces raw sock
+        dxp_transport_t transport;
         uint32_t tx_seq;
         uint32_t rx_seq;
+        uint32_t keepalive_ms;
+        uint32_t last_tx_ms;
+        // ── Runtime PSK — overrides DXP_PSK macro when set ────────────────────
+        const uint8_t *psk; // NULL = use DXP_PSK compile-time default
+        size_t psk_len;
     } dxp_t;
 
-    // ── API ───────────────────────────────────────────────────────────────────────
+    // ── Connection API ────────────────────────────────────────────────────────────
 
     /**
-     * Connect using a pre-configured transport and perform DXP handshake.
-     * The transport must already be connected before calling this.
+     * Connect using a transport and perform DXP handshake.
      */
     int dxp_connect(dxp_t *ctx, dxp_transport_t *transport);
 
     /**
-     * Send data over an established DXP session (encrypted).
+     * Explicit reconnect — re-dials transport and performs a full new handshake.
+     * Resets tx_seq and rx_seq. Caller must handle session change.
+     * Returns 0 on success, -1 on failure.
      */
-    int dxp_send(dxp_t *ctx, const uint8_t *data, uint16_t len);
+    int dxp_reconnect(dxp_t *ctx);
 
     /**
-     * Receive and decrypt data from an established DXP session.
-     */
-    int dxp_recv(dxp_t *ctx, uint8_t *out, uint16_t max_len);
-
-    /**
-     * Close the DXP session.
+     * Close the DXP session gracefully.
      */
     void dxp_close(dxp_t *ctx);
 
@@ -88,6 +82,35 @@ extern "C"
     {
         return ctx && ctx->established;
     }
+
+    // ── Data API ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Send encrypted data. Max len: DXP_MAX_DATA_LEN bytes.
+     * Returns 0 on success, -1 on failure.
+     */
+    int dxp_send(dxp_t *ctx, const uint8_t *data, uint16_t len);
+
+    /**
+     * Receive and decrypt data. Transparently handles inbound PONG frames.
+     * Returns byte count on success, -1 on failure.
+     */
+    int dxp_recv(dxp_t *ctx, uint8_t *out, uint16_t max_len);
+
+    // ── Keepalive API ─────────────────────────────────────────────────────────────
+
+    /**
+     * Send an encrypted PING frame. Updates last_tx_ms.
+     * Returns 0 on success, -1 on failure (dead socket).
+     */
+    int dxp_ping(dxp_t *ctx);
+
+    /**
+     * Call in main loop. Sends PING if keepalive_ms has elapsed since last tx.
+     * No-op if ctx->keepalive_ms == 0.
+     * Returns 0 ok, -1 if PING failed (time to call dxp_reconnect).
+     */
+    int dxp_keepalive_tick(dxp_t *ctx);
 
 #ifdef __cplusplus
 }

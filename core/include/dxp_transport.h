@@ -1,24 +1,23 @@
 #pragma once
-
-#include "dxp.h"
+#include <stdint.h>
+#include <stddef.h>
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-    /**
-     * Initialize a TCP transport and connect to server_ip:port.
-     * Fills in t->send, t->recv, t->close, t->ctx.
-     * Returns 0 on success, -1 on failure.
-     */
-    int dxp_transport_tcp_init(dxp_transport_t *t, const char *server_ip, int port);
+    typedef struct dxp_transport_s
+    {
+        int (*send)(struct dxp_transport_s *t, const uint8_t *data, size_t len);
+        int (*recv)(struct dxp_transport_s *t, uint8_t *buf, size_t max_len);
+        void (*close)(struct dxp_transport_s *t);
+        int (*reconnect)(struct dxp_transport_s *t);
+        int (*available)(struct dxp_transport_s *t); // ← new: bytes waiting, 0=none, NULL=unsupported
+        void *ctx;
+    } dxp_transport_t;
 
-    /**
-     * Initialize a UART transport.
-     * Returns 0 on success, -1 on failure.
-     */
-    // int dxp_transport_uart_init(dxp_transport_t *t, int uart_num, int baud_rate);
+    int dxp_transport_tcp_init(dxp_transport_t *t, const char *server_ip, int port);
 
 #ifdef __cplusplus
 }
