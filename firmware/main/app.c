@@ -23,7 +23,7 @@ void app_main(void)
     dxp_t ctx = {0};
     dxp_transport_t transport = {0};
 
-    // ── Connect transport with retries ────────────────────────────────────────
+    // ── Initial connect with retries ──────────────────────────────────────────
     bool connected = false;
     for (int attempt = 1; attempt <= DXP_CONNECT_RETRIES; ++attempt)
     {
@@ -43,28 +43,42 @@ void app_main(void)
         return;
     }
 
-    // ── DXP handshake + session ───────────────────────────────────────────────
     if (dxp_connect(&ctx, &transport) != 0)
     {
         ESP_LOGE(TAG, "DXP connect failed");
         return;
     }
 
-    // ── Send test message ─────────────────────────────────────────────────────
+    ctx.keepalive_ms = 15000; // PING every 15s if idle
+
     const char *msg = "hello encrypted world";
     if (dxp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
         ESP_LOGI(TAG, "Message sent");
 
-    // ── Keepalive loop ────────────────────────────────────────────────────────
-    while (dxp_is_connected(&ctx))
+    // ── Main loop — keepalive + reconnect ─────────────────────────────────────
+    while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        if (dxp_send(&ctx, (const uint8_t *)"ping", 4) != 0)
-        {
-            ESP_LOGW(TAG, "Send failed");
-            break;
-        }
-    }
+        vTaskDelay(pdMS_TO_TICKS(1000));
 
-    dxp_close(&ctx);
+        if (dxp_keepalive_tick(&ctx) == 0)
+            continue;
+
+        // ── Connection lost — reconnect ───────────────────────────────────────
+        ESP_LOGW(TAG, "Connection lost, reconnecting...");
+
+        int backoff_ms = 2000;
+        while (dxp_reconnect(&ctx) != 0)
+        {
+            ESP_LOGW(TAG, "Reconnect failed, retrying in %dms...", backoff_ms);
+            vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+            if (backoff_ms < 30000)
+                backoff_ms *= 2; // exponential backoff, cap at 30s
+        }
+
+        ESP_LOGI(TAG, "Reconnected");
+
+        // Re-send hello after new session
+        if (dxp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
+            ESP_LOGI(TAG, "Message sent");
+    }
 }
