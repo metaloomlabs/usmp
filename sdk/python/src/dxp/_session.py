@@ -1,9 +1,10 @@
 # src/dxp/_session.py
 
+import time
 from .types import PacketType, SessionInfo, DXP_MAGIC, DXP_VERSION
-from ._frame import read_frame, write_frame, encode_frame
+from ._frame import read_frame, write_frame
 from ._crypto import encrypt, decrypt
-from .errors import SequenceError, CryptoError, ConnectionClosedError
+from .errors import SequenceError, ConnectionClosedError
 
 
 class DXPSession:
@@ -21,6 +22,7 @@ class DXPSession:
         self._reader = reader
         self._writer = writer
         self._info = info
+        self._last_recv: float = time.monotonic()  # updated on every inbound frame
 
     @property
     def device_id(self) -> str:
@@ -46,8 +48,9 @@ class DXPSession:
         self._info.tx_seq += 1
 
     async def recv(self) -> bytes:
-        """Receive and decrypt a DATA frame."""
+        """Receive and decrypt a DATA frame. Transparently handles inbound PING."""
         frame = await read_frame(self._reader)
+        self._last_recv = time.monotonic()  # update on every valid inbound frame
 
         if frame.type == PacketType.BYE:
             raise ConnectionClosedError("Remote sent BYE")
