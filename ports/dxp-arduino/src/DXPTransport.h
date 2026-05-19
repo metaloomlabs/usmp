@@ -6,8 +6,8 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-#include "dxp_core/include/dxp_transport.h"
-#include "dxp_core/include/dxp_frame.h"
+#include "dxp_transport.h"
+#include "dxp_frame.h"
 #ifdef __cplusplus
 }
 #endif

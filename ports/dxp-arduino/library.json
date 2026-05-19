@@ -1,0 +1,35 @@
+{
+  "name": "DXP",
+  "version": "0.2.0",
+  "description": "Secure, lightweight, encrypted device communication protocol. X25519 + AES-256-GCM + HMAC-SHA256.",
+  "keywords": ["iot", "security", "encryption", "esp32", "protocol"],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/opsid-io/dxp"
+  },
+  "authors": [
+    {
+      "name": "opsid.io",
+      "url": "https://opsid.io"
+    }
+  ],
+  "license": "MIT",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"],
+  "build": {
+    "srcDir": "src",
+    "flags": ["-std=gnu++17"]
+  },
+  "examples": [
+    {
+      "name": "basic",
+      "base": "examples/basic",
+      "files": ["basic.ino"]
+    },
+    {
+      "name": "callbacks",
+      "base": "examples/callbacks",
+      "files": ["callbacks.ino"]
+    }
+  ]
+}
