@@ -48,16 +48,21 @@ class DXPSession:
         self._info.tx_seq += 1
 
     async def recv(self) -> bytes:
-        """Receive and decrypt a DATA frame. Transparently handles inbound PING."""
+        """Receive and decrypt a DATA frame. Transparently handles inbound PING/PONG."""
         frame = await read_frame(self._reader)
-        self._last_recv = time.monotonic()  # update on every valid inbound frame
+        self._last_recv = time.monotonic()
 
         if frame.type == PacketType.BYE:
             raise ConnectionClosedError("Remote sent BYE")
 
         if frame.type == PacketType.PING:
+            self._info.rx_seq += 1  # ← add this
             await self._send_pong()
-            return await self.recv()  # wait for next data frame
+            return await self.recv()
+
+        if frame.type == PacketType.PONG:
+            self._info.rx_seq += 1
+            return await self.recv()
 
         if frame.type != PacketType.DATA:
             raise ValueError(f"Unexpected frame type: {frame.type_name()}")
