@@ -5,7 +5,7 @@ $ErrorActionPreference = "Stop"
 
 $OUT  = "DXP"
 $ZIP  = "dxp-arduino.zip"
-$REPO = $PSScriptRoot
+$REPO = "./"
 
 Write-Host "Cleaning..."
 Remove-Item -Recurse -Force $OUT -ErrorAction SilentlyContinue
