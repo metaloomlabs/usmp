@@ -3,7 +3,7 @@ import asyncio
 from dxp import DXPServer, DXPSession, ConnectionClosedError
 
 PSK = b"dxp-dev-psk-change-me-before-prod"
-HOST = "192.168.137.1"
+HOST = "0.0.0.0"
 PORT = 9000
 
 server = DXPServer(host=HOST, port=PORT, psk=PSK)
