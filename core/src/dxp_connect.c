@@ -1,4 +1,4 @@
-#include "dxp_api.h"
+#include "dxp.h"
 #include "dxp_transport.h"
 #include "dxp_handshake.h"
 #include "dxp_session.h"

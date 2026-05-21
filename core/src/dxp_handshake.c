@@ -1,5 +1,5 @@
 #include "dxp_handshake.h"
-#include "dxp_api.h"
+#include "dxp.h"
 #include "dxp_frame.h"
 #include "dxp_port.h"
 #include "mbedtls/ecdh.h"

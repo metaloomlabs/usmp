@@ -1,4 +1,4 @@
-#include "dxp_api.h"
+#include "dxp.h"
 #include "dxp_session.h"
 #include "dxp_frame.h"
 #include "dxp_crypto.h"
