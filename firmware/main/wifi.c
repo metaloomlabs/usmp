@@ -8,8 +8,8 @@
 #include "lwip/ip4_addr.h"
 #include <string.h>
 
-#define WIFI_SSID "Team8"
-#define WIFI_PASS "12345678"
+#define WIFI_SSID "your-ssid-here"
+#define WIFI_PASS "your-password-here"
 #define STATIC_IP "192.168.137.100"
 #define STATIC_GW "192.168.137.1"
 #define STATIC_NETMASK "255.255.255.0"
