@@ -2,13 +2,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#define DXP_GCM_NONCE_LEN 12
-#define DXP_GCM_TAG_LEN   16
+#define USMP_GCM_NONCE_LEN 12
+#define USMP_GCM_TAG_LEN   16
 
 // Encrypt plaintext into out (ciphertext + tag appended)
-// out must be at least plain_len + DXP_GCM_TAG_LEN bytes
+// out must be at least plain_len + USMP_GCM_TAG_LEN bytes
 // seq and session_id are used to construct the nonce
-int dxp_gcm_encrypt(
+int usmp_gcm_encrypt(
     const uint8_t *key,         // 32 bytes
     uint32_t       seq,
     const uint8_t *session_id,  // 4 bytes
@@ -21,7 +21,7 @@ int dxp_gcm_encrypt(
 
 // Decrypt and verify
 // ciphertext_and_tag is ciphertext followed by 16-byte tag
-int dxp_gcm_decrypt(
+int usmp_gcm_decrypt(
     const uint8_t *key,
     uint32_t       seq,
     const uint8_t *session_id,

@@ -1,7 +1,7 @@
-#include "dxp_handshake.h"
-#include "dxp.h"
-#include "dxp_frame.h"
-#include "dxp_port.h"
+#include "usmp_handshake.h"
+#include "usmp.h"
+#include "usmp_frame.h"
+#include "usmp_port.h"
 #include "mbedtls/ecdh.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
@@ -11,7 +11,7 @@
 #include <string.h>
 #include <stdio.h>
 
-static const char *TAG = "DXP_HS";
+static const char *TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
 
@@ -27,7 +27,7 @@ static int derive_session_key(
         return -1;
 
     uint8_t info[6 + PUB_KEY_LEN + PUB_KEY_LEN];
-    memcpy(info, "dxp-v1", 6);
+    memcpy(info, "usmp-v1", 6);
     memcpy(info + 6, pub_c, PUB_KEY_LEN);
     memcpy(info + 6 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
 
@@ -76,7 +76,7 @@ done:
     return ret;
 }
 
-int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
+int usmp_handshake(usmp_transport_t *transport, usmp_t *session)
 {
     int ret = -1;
     char _msg[128];
@@ -91,7 +91,7 @@ int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
 
     uint8_t tx_buf[512];
     uint8_t rx_buf[512];
-    dxp_packet_t pkt;
+    usmp_packet_t pkt;
     int len;
 
     const uint8_t *psk;
@@ -103,21 +103,21 @@ int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
     }
     else
     {
-        psk = (const uint8_t *)DXP_PSK;
-        psk_len = strlen(DXP_PSK);
+        psk = (const uint8_t *)USMP_PSK;
+        psk_len = strlen(USMP_PSK);
     }
     // ── Seed RNG ──────────────────────────────────────────────────────────────
     if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                              (const uint8_t *)"dxp", 3) != 0)
+                              (const uint8_t *)"usmp", 3) != 0)
     {
-        DXP_LOGE(TAG, "RNG seed failed");
+        USMP_LOGE(TAG, "RNG seed failed");
         goto cleanup;
     }
 
     // ── Setup Curve25519 ──────────────────────────────────────────────────────
     if (mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519) != 0)
     {
-        DXP_LOGE(TAG, "ECDH setup failed");
+        USMP_LOGE(TAG, "ECDH setup failed");
         goto cleanup;
     }
 
@@ -127,59 +127,59 @@ int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
     if (mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf),
                                  mbedtls_ctr_drbg_random, &ctr_drbg) != 0)
     {
-        DXP_LOGE(TAG, "ECDH make_public failed");
+        USMP_LOGE(TAG, "ECDH make_public failed");
         goto cleanup;
     }
 
     uint8_t *pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
 
     // ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
-    dxp_port_get_device_id(session->device_id, DXP_DEVICE_ID_LEN);
+    usmp_port_get_device_id(session->device_id, USMP_DEVICE_ID_LEN);
 
     memset(&pkt, 0, sizeof(pkt));
-    pkt.magic = DXP_MAGIC;
+    pkt.magic = USMP_MAGIC;
     pkt.version = 1;
-    pkt.type = DXP_TYPE_HELLO;
+    pkt.type = USMP_TYPE_HELLO;
     pkt.seq = 0;
-    pkt.length = DXP_DEVICE_ID_LEN + PUB_KEY_LEN;
-    memcpy(pkt.payload, session->device_id, DXP_DEVICE_ID_LEN);
-    memcpy(pkt.payload + DXP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
+    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN;
+    memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
+    memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
 
-    len = dxp_build_packet(&pkt, tx_buf, NULL);
+    len = usmp_build_packet(&pkt, tx_buf, NULL);
     if (transport->send(transport, tx_buf, len) < 0)
     {
-        DXP_LOGE(TAG, "Failed to send HELLO");
+        USMP_LOGE(TAG, "Failed to send HELLO");
         goto cleanup;
     }
     snprintf(_msg, sizeof(_msg),
              "HELLO sent (device_id: %02x:%02x:%02x:%02x:%02x:%02x)",
              session->device_id[0], session->device_id[1], session->device_id[2],
              session->device_id[3], session->device_id[4], session->device_id[5]);
-    DXP_LOGI(TAG, _msg);
+    USMP_LOGI(TAG, _msg);
 
     // ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] ───────────────────
     len = transport->recv(transport, rx_buf, sizeof(rx_buf));
     if (len < 0)
     {
-        DXP_LOGE(TAG, "Failed to receive CHALLENGE");
+        USMP_LOGE(TAG, "Failed to receive CHALLENGE");
         goto cleanup;
     }
 
-    if (dxp_parse_packet(rx_buf, len, &pkt) != 0 ||
-        pkt.type != DXP_TYPE_CHALLENGE ||
-        pkt.length != DXP_NONCE_LEN + PUB_KEY_LEN)
+    if (usmp_parse_packet(rx_buf, len, &pkt) != 0 ||
+        pkt.type != USMP_TYPE_CHALLENGE ||
+        pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN)
     {
         snprintf(_msg, sizeof(_msg),
                  "Bad CHALLENGE frame (type=0x%02x len=%u)", pkt.type, pkt.length);
-        DXP_LOGE(TAG, _msg);
+        USMP_LOGE(TAG, _msg);
         goto cleanup;
     }
 
-    uint8_t nonce[DXP_NONCE_LEN];
+    uint8_t nonce[USMP_NONCE_LEN];
     uint8_t pub_s[PUB_KEY_LEN];
-    memcpy(nonce, pkt.payload, DXP_NONCE_LEN);
-    memcpy(pub_s, pkt.payload + DXP_NONCE_LEN, PUB_KEY_LEN);
-    DXP_LOGI(TAG, "CHALLENGE received");
+    memcpy(nonce, pkt.payload, USMP_NONCE_LEN);
+    memcpy(pub_s, pkt.payload + USMP_NONCE_LEN, PUB_KEY_LEN);
+    USMP_LOGI(TAG, "CHALLENGE received");
 
     // ── Compute X25519 shared secret ──────────────────────────────────────────
     uint8_t peer_buf[33];
@@ -188,7 +188,7 @@ int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
 
     if (mbedtls_ecdh_read_public(&ecdh, peer_buf, sizeof(peer_buf)) != 0)
     {
-        DXP_LOGE(TAG, "Failed to load server public key");
+        USMP_LOGE(TAG, "Failed to load server public key");
         goto cleanup;
     }
 
@@ -197,101 +197,101 @@ int dxp_handshake(dxp_transport_t *transport, dxp_t *session)
     if (mbedtls_ecdh_calc_secret(&ecdh, &shared_len, shared_secret, sizeof(shared_secret),
                                  mbedtls_ctr_drbg_random, &ctr_drbg) != 0)
     {
-        DXP_LOGE(TAG, "X25519 shared secret failed");
+        USMP_LOGE(TAG, "X25519 shared secret failed");
         goto cleanup;
     }
     snprintf(_msg, sizeof(_msg), "X25519 shared secret computed (%d bytes)", (int)shared_len);
-    DXP_LOGI(TAG, _msg);
+    USMP_LOGI(TAG, _msg);
 
     // ── Derive session key ────────────────────────────────────────────────────
     if (derive_session_key(shared_secret, shared_len,
-                           nonce, DXP_NONCE_LEN,
+                           nonce, USMP_NONCE_LEN,
                            pub_c, pub_s,
-                           session->session_key, DXP_SESSION_KEY_LEN) != 0)
+                           session->session_key, USMP_SESSION_KEY_LEN) != 0)
     {
-        DXP_LOGE(TAG, "HKDF failed");
+        USMP_LOGE(TAG, "HKDF failed");
         goto cleanup;
     }
-    DXP_LOGI(TAG, "Session key derived");
+    USMP_LOGI(TAG, "Session key derived");
 
     // ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-    uint8_t hmac_client[DXP_HMAC_LEN];
+    uint8_t hmac_client[USMP_HMAC_LEN];
     {
-        uint8_t input[DXP_NONCE_LEN + DXP_DEVICE_ID_LEN];
-        memcpy(input, nonce, DXP_NONCE_LEN);
-        memcpy(input + DXP_NONCE_LEN, session->device_id, DXP_DEVICE_ID_LEN);
+        uint8_t input[USMP_NONCE_LEN + USMP_DEVICE_ID_LEN];
+        memcpy(input, nonce, USMP_NONCE_LEN);
+        memcpy(input + USMP_NONCE_LEN, session->device_id, USMP_DEVICE_ID_LEN);
         if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_client) != 0)
         {
-            DXP_LOGE(TAG, "Client HMAC computation failed");
+            USMP_LOGE(TAG, "Client HMAC computation failed");
             goto cleanup;
         }
     }
 
     memset(&pkt, 0, sizeof(pkt));
-    pkt.magic = DXP_MAGIC;
+    pkt.magic = USMP_MAGIC;
     pkt.version = 1;
-    pkt.type = DXP_TYPE_HELLO_ACK;
+    pkt.type = USMP_TYPE_HELLO_ACK;
     pkt.seq = 0;
-    pkt.length = DXP_HMAC_LEN;
-    memcpy(pkt.payload, hmac_client, DXP_HMAC_LEN);
+    pkt.length = USMP_HMAC_LEN;
+    memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
 
-    len = dxp_build_packet(&pkt, tx_buf, NULL);
+    len = usmp_build_packet(&pkt, tx_buf, NULL);
     if (transport->send(transport, tx_buf, len) < 0)
     {
-        DXP_LOGE(TAG, "Failed to send HELLO_ACK");
+        USMP_LOGE(TAG, "Failed to send HELLO_ACK");
         goto cleanup;
     }
-    DXP_LOGI(TAG, "HELLO_ACK sent");
+    USMP_LOGI(TAG, "HELLO_ACK sent");
 
     // ── Step 4: Receive SESSION_OK [session_id(4) || hmac_server(32)] ────────
     len = transport->recv(transport, rx_buf, sizeof(rx_buf));
     if (len < 0)
     {
-        DXP_LOGE(TAG, "Failed to receive SESSION_OK");
+        USMP_LOGE(TAG, "Failed to receive SESSION_OK");
         goto cleanup;
     }
 
-    if (dxp_parse_packet(rx_buf, len, &pkt) != 0 ||
-        pkt.type != DXP_TYPE_SESSION_OK ||
-        pkt.length != DXP_SESSION_ID_LEN + DXP_HMAC_LEN)
+    if (usmp_parse_packet(rx_buf, len, &pkt) != 0 ||
+        pkt.type != USMP_TYPE_SESSION_OK ||
+        pkt.length != USMP_SESSION_ID_LEN + USMP_HMAC_LEN)
     {
         snprintf(_msg, sizeof(_msg),
                  "Bad SESSION_OK frame (type=0x%02x len=%u)", pkt.type, pkt.length);
-        DXP_LOGE(TAG, _msg);
+        USMP_LOGE(TAG, _msg);
         goto cleanup;
     }
 
-    uint8_t hmac_server_received[DXP_HMAC_LEN];
-    memcpy(session->session_id, pkt.payload, DXP_SESSION_ID_LEN);
-    memcpy(hmac_server_received, pkt.payload + DXP_SESSION_ID_LEN, DXP_HMAC_LEN);
+    uint8_t hmac_server_received[USMP_HMAC_LEN];
+    memcpy(session->session_id, pkt.payload, USMP_SESSION_ID_LEN);
+    memcpy(hmac_server_received, pkt.payload + USMP_SESSION_ID_LEN, USMP_HMAC_LEN);
 
     // ── Verify server HMAC ────────────────────────────────────────────────────
-    uint8_t hmac_server_expected[DXP_HMAC_LEN];
+    uint8_t hmac_server_expected[USMP_HMAC_LEN];
     {
-        uint8_t input[DXP_NONCE_LEN + DXP_SESSION_ID_LEN];
-        memcpy(input, nonce, DXP_NONCE_LEN);
-        memcpy(input + DXP_NONCE_LEN, session->session_id, DXP_SESSION_ID_LEN);
+        uint8_t input[USMP_NONCE_LEN + USMP_SESSION_ID_LEN];
+        memcpy(input, nonce, USMP_NONCE_LEN);
+        memcpy(input + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
         if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected) != 0)
         {
-            DXP_LOGE(TAG, "Server HMAC computation failed");
+            USMP_LOGE(TAG, "Server HMAC computation failed");
             goto cleanup;
         }
     }
 
-    if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, DXP_HMAC_LEN) != 0)
+    if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, USMP_HMAC_LEN) != 0)
     {
-        DXP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
+        USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
         goto cleanup;
     }
 
-    DXP_LOGI(TAG, "Server authenticated OK");
+    USMP_LOGI(TAG, "Server authenticated OK");
     session->established = true;
     ret = 0;
 
     snprintf(_msg, sizeof(_msg), "SESSION_OK — session_id: %02x%02x%02x%02x",
              session->session_id[0], session->session_id[1],
              session->session_id[2], session->session_id[3]);
-    DXP_LOGI(TAG, _msg);
+    USMP_LOGI(TAG, _msg);
 
 cleanup:
     mbedtls_ecdh_free(&ecdh);

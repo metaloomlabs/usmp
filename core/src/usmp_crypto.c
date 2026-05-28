@@ -1,4 +1,4 @@
-#include "dxp_crypto.h"
+#include "usmp_crypto.h"
 #include "mbedtls/gcm.h"
 #include <string.h>
 
@@ -13,7 +13,7 @@ static void build_nonce(uint32_t seq, const uint8_t *session_id, uint8_t *nonce)
     memset(nonce + 8, 0, 4);
 }
 
-int dxp_gcm_encrypt(
+int usmp_gcm_encrypt(
     const uint8_t *key,
     uint32_t seq,
     const uint8_t *session_id,
@@ -28,20 +28,20 @@ int dxp_gcm_encrypt(
     mbedtls_gcm_init(&gcm);
 
     int ret = -1;
-    uint8_t nonce[DXP_GCM_NONCE_LEN];
+    uint8_t nonce[USMP_GCM_NONCE_LEN];
     build_nonce(seq, session_id, nonce);
 
     if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0)
         goto done;
 
     if (mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT,
-                                  plain_len, nonce, DXP_GCM_NONCE_LEN,
+                                  plain_len, nonce, USMP_GCM_NONCE_LEN,
                                   aad, aad_len,
                                   plaintext, out,
-                                  DXP_GCM_TAG_LEN, out + plain_len) != 0)
+                                  USMP_GCM_TAG_LEN, out + plain_len) != 0)
         goto done;
 
-    *out_len = plain_len + DXP_GCM_TAG_LEN;
+    *out_len = plain_len + USMP_GCM_TAG_LEN;
     ret = 0;
 
 done:
@@ -49,7 +49,7 @@ done:
     return ret;
 }
 
-int dxp_gcm_decrypt(
+int usmp_gcm_decrypt(
     const uint8_t *key,
     uint32_t seq,
     const uint8_t *session_id,
@@ -60,26 +60,26 @@ int dxp_gcm_decrypt(
     uint8_t *out,
     size_t *out_len)
 {
-    if (ct_len < DXP_GCM_TAG_LEN)
+    if (ct_len < USMP_GCM_TAG_LEN)
         return -1;
 
     mbedtls_gcm_context gcm;
     mbedtls_gcm_init(&gcm);
 
     int ret = -1;
-    uint8_t nonce[DXP_GCM_NONCE_LEN];
+    uint8_t nonce[USMP_GCM_NONCE_LEN];
     build_nonce(seq, session_id, nonce);
 
-    size_t cipher_len = ct_len - DXP_GCM_TAG_LEN;
+    size_t cipher_len = ct_len - USMP_GCM_TAG_LEN;
     const uint8_t *tag = ciphertext_and_tag + cipher_len;
 
     if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0)
         goto done;
 
     if (mbedtls_gcm_auth_decrypt(&gcm, cipher_len,
-                                 nonce, DXP_GCM_NONCE_LEN,
+                                 nonce, USMP_GCM_NONCE_LEN,
                                  aad, aad_len,
-                                 tag, DXP_GCM_TAG_LEN,
+                                 tag, USMP_GCM_TAG_LEN,
                                  ciphertext_and_tag, out) != 0)
         goto done;
 

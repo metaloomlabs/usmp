@@ -1,7 +1,7 @@
-#include "dxp_frame.h"
+#include "usmp_frame.h"
 #include <string.h>
 
-uint16_t dxp_crc16(const uint8_t *data, uint16_t len)
+uint16_t usmp_crc16(const uint8_t *data, uint16_t len)
 {
     uint16_t crc = 0xFFFF;
     for (int i = 0; i < len; i++)
@@ -19,7 +19,7 @@ uint16_t dxp_crc16(const uint8_t *data, uint16_t len)
 }
 
 // CRC over header bytes [0..9] + payload (matches Python SDK)
-static uint16_t compute_crc(dxp_packet_t *pkt)
+static uint16_t compute_crc(usmp_packet_t *pkt)
 {
     uint8_t header[10];
     header[0] = pkt->magic & 0xFF;
@@ -61,7 +61,7 @@ static uint16_t compute_crc(dxp_packet_t *pkt)
     return crc;
 }
 
-int dxp_build_packet(dxp_packet_t *pkt, uint8_t *out, uint16_t *out_len)
+int usmp_build_packet(usmp_packet_t *pkt, uint8_t *out, uint16_t *out_len)
 {
     pkt->crc = compute_crc(pkt);
 
@@ -79,17 +79,17 @@ int dxp_build_packet(dxp_packet_t *pkt, uint8_t *out, uint16_t *out_len)
     out[10] = pkt->crc & 0xFF;
     out[11] = (pkt->crc >> 8) & 0xFF;
 
-    memcpy(out + DXP_HEADER_SIZE, pkt->payload, pkt->length);
+    memcpy(out + USMP_HEADER_SIZE, pkt->payload, pkt->length);
 
-    uint16_t total = DXP_HEADER_SIZE + pkt->length;
+    uint16_t total = USMP_HEADER_SIZE + pkt->length;
     if (out_len)
         *out_len = total;
     return total;
 }
 
-int dxp_parse_packet(uint8_t *data, int len, dxp_packet_t *pkt)
+int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt)
 {
-    if (len < DXP_HEADER_SIZE)
+    if (len < USMP_HEADER_SIZE)
         return -1;
 
     pkt->magic = data[0] | (data[1] << 8);
@@ -99,16 +99,16 @@ int dxp_parse_packet(uint8_t *data, int len, dxp_packet_t *pkt)
     pkt->length = data[8] | (data[9] << 8);
     pkt->crc = data[10] | (data[11] << 8);
 
-    if (pkt->magic != DXP_MAGIC)
+    if (pkt->magic != USMP_MAGIC)
         return -1;
 
-    if (len < DXP_HEADER_SIZE + pkt->length)
+    if (len < USMP_HEADER_SIZE + pkt->length)
         return -1;
 
-    if (pkt->length > DXP_MAX_PAYLOAD)
+    if (pkt->length > USMP_MAX_PAYLOAD)
         return -1;
 
-    memcpy(pkt->payload, data + DXP_HEADER_SIZE, pkt->length);
+    memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
 
     // Verify CRC
     uint16_t expected = compute_crc(pkt);

@@ -8,10 +8,10 @@ extern "C" {
 #endif
 
 // ── Platform hooks ────────────────────────────────────────────────────────────
-// Implement these in dxp_port_<platform>.c for your target board.
-// ESP32 implementation: port/dxp_port_esp32.c
-// Arduino:              port/dxp_port_arduino.cpp
-// STM32:                port/dxp_port_stm32.c
+// Implement these in usmp_port_<platform>.c for your target board.
+// ESP32 implementation: port/usmp_port_esp32.c
+// Arduino:              port/usmp_port_arduino.cpp
+// STM32:                port/usmp_port_stm32.c
 
 /**
  * Get a unique device identifier.
@@ -23,7 +23,7 @@ extern "C" {
  * @param len  Length of out buffer (minimum 6 bytes)
  * @return     0 on success, -1 on failure
  */
-int dxp_port_get_device_id(uint8_t *out, size_t len);
+int usmp_port_get_device_id(uint8_t *out, size_t len);
 
 /**
  * Fill buffer with cryptographically random bytes.
@@ -35,7 +35,7 @@ int dxp_port_get_device_id(uint8_t *out, size_t len);
  * @param len  Number of random bytes to generate
  * @return     0 on success, -1 on failure
  */
-int dxp_port_random(uint8_t *out, size_t len);
+int usmp_port_random(uint8_t *out, size_t len);
 
 /**
  * Delay for a given number of milliseconds.
@@ -45,7 +45,7 @@ int dxp_port_random(uint8_t *out, size_t len);
  *
  * @param ms  Milliseconds to delay
  */
-void dxp_port_delay_ms(uint32_t ms);
+void usmp_port_delay_ms(uint32_t ms);
 
 /**
  * Get current time in milliseconds since boot.
@@ -56,7 +56,7 @@ void dxp_port_delay_ms(uint32_t ms);
  *
  * @return  Milliseconds since boot (wraps at UINT32_MAX)
  */
-uint32_t dxp_port_millis(void);
+uint32_t usmp_port_millis(void);
 
 /**
  * Log a message.
@@ -68,12 +68,12 @@ uint32_t dxp_port_millis(void);
  * @param tag    Module tag string
  * @param msg    Message string
  */
-void dxp_port_log(char level, const char *tag, const char *msg);
+void usmp_port_log(char level, const char *tag, const char *msg);
 
 // ── Convenience macros ────────────────────────────────────────────────────────
-#define DXP_LOGI(tag, msg) dxp_port_log('I', tag, msg)
-#define DXP_LOGW(tag, msg) dxp_port_log('W', tag, msg)
-#define DXP_LOGE(tag, msg) dxp_port_log('E', tag, msg)
+#define USMP_LOGI(tag, msg) usmp_port_log('I', tag, msg)
+#define USMP_LOGW(tag, msg) usmp_port_log('W', tag, msg)
+#define USMP_LOGE(tag, msg) usmp_port_log('E', tag, msg)
 
 #ifdef __cplusplus
 }
