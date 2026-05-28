@@ -10,17 +10,17 @@ SDKDIR="$REPO/sdk/python"
 
 cd "$SDKDIR"
 
-echo "[DXP] Running tests before publish..."
+echo "[USMP] Running tests before publish..."
 uv run pytest tests/ -q
 
-echo "[DXP] Building distribution..."
+echo "[USMP] Building distribution..."
 uv build
 
-echo "[DXP] Publishing to PyPI..."
+echo "[USMP] Publishing to PyPI..."
 if [ -n "${PYPI_TOKEN:-}" ]; then
     uv publish --token "$PYPI_TOKEN"
 else
     uv publish   # will prompt for credentials
 fi
 
-echo "[DXP] Published successfully"
+echo "[USMP] Published successfully"

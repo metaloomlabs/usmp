@@ -1,16 +1,16 @@
 # examples/esp32_server.py
 import asyncio
-from dxp import DXPServer, DXPSession, ConnectionClosedError
+from usmp import USMPServer, USMPSession, ConnectionClosedError
 
-PSK = b"dxp-dev-psk-change-me-before-prod"
+PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "0.0.0.0"
 PORT = 9000
 
-server = DXPServer(host=HOST, port=PORT, psk=PSK)
+server = USMPServer(host=HOST, port=PORT, psk=PSK)
 
 
 @server.on_session
-async def handle(session: DXPSession):
+async def handle(session: USMPSession):
     print(f"[SESSION] device={session.device_id} session={session.session_id}")
     try:
         while True:

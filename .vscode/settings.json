@@ -3,5 +3,5 @@
     "idf.portWin": "COM5",
     "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
     "C_Cpp.intelliSenseEngine": "default",
-    "cmake.sourceDirectory": "C:/Users/main/codinways/opsid.io/dxp/firmware"
+    "cmake.sourceDirectory": "C:/Users/main/codinways/opsid.io/usmp/firmware"
 }

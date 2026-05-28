@@ -10,21 +10,21 @@ $SDKDIR = "$REPO\sdk\python"
 
 Set-Location $SDKDIR
 
-Write-Host "[DXP] Running tests before publish..."
+Write-Host "[USMP] Running tests before publish..."
 uv run pytest tests/ -q
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Tests failed — aborting publish"
     exit 1
 }
 
-Write-Host "[DXP] Building distribution..."
+Write-Host "[USMP] Building distribution..."
 uv build
 
-Write-Host "[DXP] Publishing to PyPI..."
+Write-Host "[USMP] Publishing to PyPI..."
 if ($env:PYPI_TOKEN) {
     uv publish --token $env:PYPI_TOKEN
 } else {
     uv publish   # will prompt for credentials
 }
 
-Write-Host "[DXP] Published successfully"
+Write-Host "[USMP] Published successfully"

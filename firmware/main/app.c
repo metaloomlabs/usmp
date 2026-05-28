@@ -1,5 +1,5 @@
-#include "dxp.h"
-#include "dxp_transport.h"
+#include "usmp.h"
+#include "usmp_transport.h"
 #include "wifi.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -18,23 +18,23 @@ void app_main(void)
     }
 
     const char *server_ip = "192.168.137.1";
-    const int port = DXP_DEFAULT_PORT;
+    const int port = USMP_DEFAULT_PORT;
 
-    dxp_t ctx = {0};
-    dxp_transport_t transport = {0};
+    usmp_t ctx = {0};
+    usmp_transport_t transport = {0};
 
     // ── Initial connect with retries ──────────────────────────────────────────
     bool connected = false;
-    for (int attempt = 1; attempt <= DXP_CONNECT_RETRIES; ++attempt)
+    for (int attempt = 1; attempt <= USMP_CONNECT_RETRIES; ++attempt)
     {
-        if (dxp_transport_tcp_init(&transport, server_ip, port) == 0)
+        if (usmp_transport_tcp_init(&transport, server_ip, port) == 0)
         {
             ESP_LOGI(TAG, "TCP connected (attempt %d)", attempt);
             connected = true;
             break;
         }
         ESP_LOGW(TAG, "Attempt %d failed, retrying...", attempt);
-        vTaskDelay(pdMS_TO_TICKS(DXP_CONNECT_RETRY_MS));
+        vTaskDelay(pdMS_TO_TICKS(USMP_CONNECT_RETRY_MS));
     }
 
     if (!connected)
@@ -43,16 +43,16 @@ void app_main(void)
         return;
     }
 
-    if (dxp_connect(&ctx, &transport) != 0)
+    if (usmp_connect(&ctx, &transport) != 0)
     {
-        ESP_LOGE(TAG, "DXP connect failed");
+        ESP_LOGE(TAG, "USMP connect failed");
         return;
     }
 
     ctx.keepalive_ms = 15000; // PING every 15s if idle
 
     const char *msg = "hello encrypted world";
-    if (dxp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
+    if (usmp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
         ESP_LOGI(TAG, "Message sent");
 
     // ── Main loop — keepalive + reconnect ─────────────────────────────────────
@@ -60,14 +60,14 @@ void app_main(void)
     {
         vTaskDelay(pdMS_TO_TICKS(1000));
 
-        if (dxp_keepalive_tick(&ctx) == 0)
+        if (usmp_keepalive_tick(&ctx) == 0)
             continue;
 
         // ── Connection lost — reconnect ───────────────────────────────────────
         ESP_LOGW(TAG, "Connection lost, reconnecting...");
 
         int backoff_ms = 2000;
-        while (dxp_reconnect(&ctx) != 0)
+        while (usmp_reconnect(&ctx) != 0)
         {
             ESP_LOGW(TAG, "Reconnect failed, retrying in %dms...", backoff_ms);
             vTaskDelay(pdMS_TO_TICKS(backoff_ms));
@@ -78,7 +78,7 @@ void app_main(void)
         ESP_LOGI(TAG, "Reconnected");
 
         // Re-send hello after new session
-        if (dxp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
+        if (usmp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
             ESP_LOGI(TAG, "Message sent");
     }
 }
