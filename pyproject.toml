@@ -1,11 +1,11 @@
 [project]
-name = "dxp"
-version = "0.1.0"
-description = "DXP — Device Exchange Protocol"
+name = "usmp-workspace"
+version = "0.2.0"
+description = "USMP — Unified Secure Multi-transport Protocol"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "dxp-python",
+    "usmp",
 ]
 
 [tool.uv.workspace]
@@ -14,7 +14,7 @@ members = [
 ]
 
 [tool.uv.sources]
-dxp-python = { workspace = true }
+usmp = { workspace = true }
 
 [dependency-groups]
 dev = [

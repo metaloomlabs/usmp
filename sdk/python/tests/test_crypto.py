@@ -1,5 +1,5 @@
 import pytest
-from dxp._crypto import (
+from usmp._crypto import (
     generate_keypair,
     derive_session_key,
     build_gcm_nonce,
@@ -7,8 +7,8 @@ from dxp._crypto import (
     encrypt,
     decrypt,
 )
-from dxp.errors import CryptoError
-from dxp.types import DXP_MAGIC, DXP_VERSION, PacketType
+from usmp.errors import CryptoError
+from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
 
 
 def test_keypair_generation():
@@ -49,8 +49,8 @@ def test_gcm_nonce_construction():
 
 def test_aad_construction():
     aad = build_aad(
-        magic=DXP_MAGIC,
-        version=DXP_VERSION,
+        magic=USMP_MAGIC,
+        version=USMP_VERSION,
         type_=int(PacketType.DATA),
         seq=0,
         length=37,
@@ -68,8 +68,8 @@ def test_encrypt_decrypt_roundtrip():
         seq=0,
         session_id=session_id,
         type_=int(PacketType.DATA),
-        version=DXP_VERSION,
-        magic=DXP_MAGIC,
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
         plaintext=plaintext,
     )
 
@@ -78,8 +78,8 @@ def test_encrypt_decrypt_roundtrip():
         seq=0,
         session_id=session_id,
         type_=int(PacketType.DATA),
-        version=DXP_VERSION,
-        magic=DXP_MAGIC,
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
         length=len(ct),
         ciphertext_and_tag=ct,
     )
@@ -97,8 +97,8 @@ def test_decrypt_fails_on_tampered_ciphertext():
             seq=0,
             session_id=session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=b"secret",
         )
     )
@@ -110,8 +110,8 @@ def test_decrypt_fails_on_tampered_ciphertext():
             seq=0,
             session_id=session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             length=len(ct),
             ciphertext_and_tag=bytes(ct),
         )
@@ -127,8 +127,8 @@ def test_decrypt_fails_on_wrong_seq():
         seq=0,
         session_id=session_id,
         type_=int(PacketType.DATA),
-        version=DXP_VERSION,
-        magic=DXP_MAGIC,
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
         plaintext=plaintext,
     )
 
@@ -139,8 +139,8 @@ def test_decrypt_fails_on_wrong_seq():
             seq=1,
             session_id=session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             length=len(ct),
             ciphertext_and_tag=ct,
         )

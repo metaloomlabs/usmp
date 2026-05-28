@@ -5,11 +5,11 @@ import os
 from .types import (
     PacketType,
     SessionInfo,
-    DXP_NONCE_LEN,
-    DXP_DEVICE_ID_LEN,
-    DXP_PUB_KEY_LEN,
-    DXP_HMAC_LEN,
-    DXP_SESSION_ID_LEN,
+    USMP_NONCE_LEN,
+    USMP_DEVICE_ID_LEN,
+    USMP_PUB_KEY_LEN,
+    USMP_HMAC_LEN,
+    USMP_SESSION_ID_LEN,
 )
 from ._frame import read_frame, write_frame
 from ._crypto import generate_keypair, derive_session_key
@@ -41,17 +41,17 @@ async def server_handshake(
     if frame.type != PacketType.HELLO:
         raise HandshakeError(f"Expected HELLO, got {frame.type_name()}")
 
-    if frame.length != DXP_DEVICE_ID_LEN + DXP_PUB_KEY_LEN:
+    if frame.length != USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN:
         raise HandshakeError(f"Bad HELLO length: {frame.length}")
 
-    device_id = frame.payload[:DXP_DEVICE_ID_LEN]
-    pub_c = frame.payload[DXP_DEVICE_ID_LEN : DXP_DEVICE_ID_LEN + DXP_PUB_KEY_LEN]
+    device_id = frame.payload[:USMP_DEVICE_ID_LEN]
+    pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
 
     # ── Generate server keypair ───────────────────────────────────────────────
     priv_s, pub_s = generate_keypair()
 
     # ── Step 2: Send CHALLENGE [nonce(32) || pub_S(32)] ──────────────────────
-    nonce = os.urandom(DXP_NONCE_LEN)
+    nonce = os.urandom(USMP_NONCE_LEN)
     await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
 
     # ── Derive session key ────────────────────────────────────────────────────
@@ -66,18 +66,18 @@ async def server_handshake(
     if frame.type != PacketType.HELLO_ACK:
         raise HandshakeError(f"Expected HELLO_ACK, got {frame.type_name()}")
 
-    if frame.length != DXP_HMAC_LEN:
+    if frame.length != USMP_HMAC_LEN:
         raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
     # ── Verify client HMAC ────────────────────────────────────────────────────
     expected_client = _compute_hmac(psk, nonce, device_id)
-    received_client = frame.payload[:DXP_HMAC_LEN]
+    received_client = frame.payload[:USMP_HMAC_LEN]
 
     if not hmac.compare_digest(expected_client, received_client):
         raise AuthError("Client HMAC verification failed")
 
     # ── Step 4: Send SESSION_OK [session_id(4) || hmac_server(32)] ───────────
-    session_id = os.urandom(DXP_SESSION_ID_LEN)
+    session_id = os.urandom(USMP_SESSION_ID_LEN)
     hmac_server = _compute_hmac(psk, nonce, session_id)
     await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
@@ -113,11 +113,11 @@ async def client_handshake(
     if frame.type != PacketType.CHALLENGE:
         raise HandshakeError(f"Expected CHALLENGE, got {frame.type_name()}")
 
-    if frame.length != DXP_NONCE_LEN + DXP_PUB_KEY_LEN:
+    if frame.length != USMP_NONCE_LEN + USMP_PUB_KEY_LEN:
         raise HandshakeError(f"Bad CHALLENGE length: {frame.length}")
 
-    nonce = frame.payload[:DXP_NONCE_LEN]
-    pub_s = frame.payload[DXP_NONCE_LEN : DXP_NONCE_LEN + DXP_PUB_KEY_LEN]
+    nonce = frame.payload[:USMP_NONCE_LEN]
+    pub_s = frame.payload[USMP_NONCE_LEN : USMP_NONCE_LEN + USMP_PUB_KEY_LEN]
 
     # ── Derive session key ────────────────────────────────────────────────────
     session_key = derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
@@ -137,12 +137,14 @@ async def client_handshake(
     if frame.type != PacketType.SESSION_OK:
         raise HandshakeError(f"Expected SESSION_OK, got {frame.type_name()}")
 
-    expected_len = DXP_SESSION_ID_LEN + DXP_HMAC_LEN
+    expected_len = USMP_SESSION_ID_LEN + USMP_HMAC_LEN
     if frame.length != expected_len:
         raise HandshakeError(f"Bad SESSION_OK length: {frame.length}")
 
-    session_id = frame.payload[:DXP_SESSION_ID_LEN]
-    hmac_server = frame.payload[DXP_SESSION_ID_LEN : DXP_SESSION_ID_LEN + DXP_HMAC_LEN]
+    session_id = frame.payload[:USMP_SESSION_ID_LEN]
+    hmac_server = frame.payload[
+        USMP_SESSION_ID_LEN : USMP_SESSION_ID_LEN + USMP_HMAC_LEN
+    ]
 
     # ── Verify server HMAC ────────────────────────────────────────────────────
     expected_server = _compute_hmac(psk, nonce, session_id)

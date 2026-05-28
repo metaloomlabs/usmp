@@ -1,15 +1,15 @@
 # src/dxp/_session.py
 
 import time
-from .types import PacketType, SessionInfo, DXP_MAGIC, DXP_VERSION
+from .types import PacketType, SessionInfo, USMP_MAGIC, USMP_VERSION
 from ._frame import read_frame, write_frame
 from ._crypto import encrypt, decrypt
 from .errors import SequenceError, ConnectionClosedError
 
 
-class DXPSession:
+class USMPSession:
     """
-    Represents an established DXP session.
+    Represents an established USMP session.
     Handles encrypted send/recv with sequence number tracking.
     """
 
@@ -40,8 +40,8 @@ class DXPSession:
             seq=seq,
             session_id=self._info.session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=data,
         )
         await write_frame(self._writer, PacketType.DATA, ciphertext, seq=seq)
@@ -93,8 +93,8 @@ class DXPSession:
             seq=seq,
             session_id=self._info.session_id,
             type_=int(PacketType.PING),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=b"",
         )
         await write_frame(self._writer, PacketType.PING, ciphertext, seq=seq)
@@ -108,8 +108,8 @@ class DXPSession:
             seq=seq,
             session_id=self._info.session_id,
             type_=int(PacketType.BYE),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=b"",
         )
         await write_frame(self._writer, PacketType.BYE, ciphertext, seq=seq)
@@ -123,8 +123,8 @@ class DXPSession:
             seq=seq,
             session_id=self._info.session_id,
             type_=int(PacketType.PONG),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=b"",
         )
         await write_frame(self._writer, PacketType.PONG, ciphertext, seq=seq)

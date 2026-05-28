@@ -8,9 +8,9 @@ wrong PSK rejection, BYE handling.
 import asyncio
 import pytest
 
-import dxp
-from dxp import DXPServer, DXPClient, DXPSession
-from dxp.errors import ConnectionClosedError
+import usmp
+from usmp import USMPServer, USMPClient, USMPSession
+from usmp.errors import ConnectionClosedError
 
 PSK = b"dxp-test-psk-integration"
 WRONG_PSK = b"wrong-psk"
@@ -20,7 +20,7 @@ HOST = "127.0.0.1"
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-async def _run(server: DXPServer, client_coro):
+async def _run(server: USMPServer, client_coro):
     """Start server, run client coroutine, cancel server."""
     srv_task = asyncio.create_task(server.serve())
     await asyncio.sleep(0.05)  # let server bind
@@ -50,16 +50,16 @@ async def test_basic_send_recv():
     port = _free_port()
     received = []
 
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         data = await session.recv()
         received.append(data)
         await session.send(b"ACK:" + data)
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         await client.send(b"hello integration")
         reply = await client.recv()
@@ -74,16 +74,16 @@ async def test_basic_send_recv():
 @pytest.mark.asyncio
 async def test_multiple_messages():
     port = _free_port()
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         for _ in range(3):
             data = await session.recv()
             await session.send(b"echo:" + data)
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         replies = []
         for i in range(3):
@@ -100,14 +100,14 @@ async def test_multiple_messages():
 @pytest.mark.asyncio
 async def test_wrong_psk_rejected():
     port = _free_port()
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         await session.recv()
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=WRONG_PSK)
+        client = USMPClient(host=HOST, port=port, psk=WRONG_PSK)
         with pytest.raises(Exception):
             await client.connect()
 
@@ -118,17 +118,17 @@ async def test_wrong_psk_rejected():
 async def test_session_id_is_unique():
     port = _free_port()
     session_ids = []
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         session_ids.append(session.session_id)
         await session.recv()
 
     async def client_coro():
         ids = []
         for _ in range(2):
-            client = DXPClient(host=HOST, port=port, psk=PSK)
+            client = USMPClient(host=HOST, port=port, psk=PSK)
             await client.connect()
             ids.append(client.session_id)
             await client.send(b"hi")
@@ -143,16 +143,16 @@ async def test_session_id_is_unique():
 @pytest.mark.asyncio
 async def test_ping_pong_transparent():
     port = _free_port()
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         # PING is handled transparently — handler only sees DATA
         data = await session.recv()
         await session.send(b"after-ping:" + data)
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         await client.ping()  # PING → server sends PONG
         await client.send(b"payload")  # DATA follows
@@ -167,15 +167,15 @@ async def test_ping_pong_transparent():
 @pytest.mark.asyncio
 async def test_bye_closes_session():
     port = _free_port()
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         with pytest.raises(ConnectionClosedError):
             await session.recv()
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         await client.disconnect()  # sends BYE
         await asyncio.sleep(0.1)
@@ -191,7 +191,7 @@ async def test_session_timeout_fires():
     async def on_timeout(device_id: str, session_id: str):
         timed_out.append((device_id, session_id))
 
-    server = DXPServer(
+    server = USMPServer(
         host=HOST,
         port=port,
         psk=PSK,
@@ -200,14 +200,14 @@ async def test_session_timeout_fires():
     )
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         try:
             await session.recv()
         except Exception:
             pass
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         # send nothing — let watchdog fire after 0.5s
         await asyncio.sleep(1.2)
@@ -220,15 +220,15 @@ async def test_session_timeout_fires():
 @pytest.mark.asyncio
 async def test_large_payload():
     port = _free_port()
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         data = await session.recv()
         await session.send(data)  # echo back
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK)
+        client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
         payload = bytes(range(256)) * 1  # 256 bytes — well within DXP_MAX_DATA_LEN
         await client.send(payload)
@@ -244,17 +244,17 @@ async def test_large_payload():
 async def test_device_id_visible_on_server():
     port = _free_port()
     seen_device_ids = []
-    server = DXPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0)
 
     @server.on_session
-    async def handler(session: DXPSession):
+    async def handler(session: USMPSession):
         seen_device_ids.append(session.device_id)
         await session.recv()
 
     fixed_id = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
 
     async def client_coro():
-        client = DXPClient(host=HOST, port=port, psk=PSK, device_id=fixed_id)
+        client = USMPClient(host=HOST, port=port, psk=PSK, device_id=fixed_id)
         await client.connect()
         await client.send(b"hi")
         await client.disconnect()

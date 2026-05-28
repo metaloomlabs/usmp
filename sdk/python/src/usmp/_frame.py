@@ -2,12 +2,12 @@
 
 import struct
 from .types import (
-    DXPFrame,
+    USMPFrame,
     PacketType,
-    DXP_MAGIC,
-    DXP_VERSION,
-    DXP_HEADER_SIZE,
-    DXP_MAX_PAYLOAD,
+    USMP_MAGIC,
+    USMP_VERSION,
+    USMP_HEADER_SIZE,
+    USMP_MAX_PAYLOAD,
 )
 from .errors import MagicError, VersionError, PayloadError, CRCError, FrameError
 
@@ -43,26 +43,26 @@ def encode_frame(
     type_: PacketType,
     payload: bytes,
     seq: int = 0,
-    version: int = DXP_VERSION,
+    version: int = USMP_VERSION,
 ) -> bytes:
-    """Encode a DXP frame to bytes."""
-    if len(payload) > DXP_MAX_PAYLOAD:
+    """Encode a USMP frame to bytes."""
+    if len(payload) > USMP_MAX_PAYLOAD:
         raise PayloadError(
-            f"Payload too large: {len(payload)} bytes, max {DXP_MAX_PAYLOAD}"
+            f"Payload too large: {len(payload)} bytes, max {USMP_MAX_PAYLOAD}"
         )
 
     length = len(payload)
-    crc = compute_frame_crc(DXP_MAGIC, version, int(type_), seq, length, payload)
+    crc = compute_frame_crc(USMP_MAGIC, version, int(type_), seq, length, payload)
 
-    header = struct.pack("<HBBI", DXP_MAGIC, version, int(type_), seq)
+    header = struct.pack("<HBBI", USMP_MAGIC, version, int(type_), seq)
     header += struct.pack("<HH", length, crc)
     return header + payload
 
 
-def decode_frame(data: bytes, verify_crc: bool = True) -> DXPFrame:
-    """Decode a DXP frame from bytes."""
-    if len(data) < DXP_HEADER_SIZE:
-        raise FrameError(f"Frame too short: {len(data)} bytes, need {DXP_HEADER_SIZE}")
+def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
+    """Decode a USMP frame from bytes."""
+    if len(data) < USMP_HEADER_SIZE:
+        raise FrameError(f"Frame too short: {len(data)} bytes, need {USMP_HEADER_SIZE}")
 
     magic = struct.unpack_from("<H", data, 0)[0]
     version = data[2]
@@ -71,21 +71,21 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> DXPFrame:
     length = struct.unpack_from("<H", data, 8)[0]
     crc = struct.unpack_from("<H", data, 10)[0]
 
-    if magic != DXP_MAGIC:
-        raise MagicError(f"Bad magic: 0x{magic:04X}, expected 0x{DXP_MAGIC:04X}")
+    if magic != USMP_MAGIC:
+        raise MagicError(f"Bad magic: 0x{magic:04X}, expected 0x{USMP_MAGIC:04X}")
 
-    if version != DXP_VERSION:
+    if version != USMP_VERSION:
         raise VersionError(f"Unsupported version: {version}")
 
-    if length > DXP_MAX_PAYLOAD:
+    if length > USMP_MAX_PAYLOAD:
         raise PayloadError(f"Payload too large: {length} bytes")
 
-    if len(data) < DXP_HEADER_SIZE + length:
+    if len(data) < USMP_HEADER_SIZE + length:
         raise PayloadError(
-            f"Payload truncated: have {len(data) - DXP_HEADER_SIZE}, need {length}"
+            f"Payload truncated: have {len(data) - USMP_HEADER_SIZE}, need {length}"
         )
 
-    payload = data[DXP_HEADER_SIZE : DXP_HEADER_SIZE + length]
+    payload = data[USMP_HEADER_SIZE : USMP_HEADER_SIZE + length]
 
     if verify_crc:
         expected_crc = compute_frame_crc(magic, version, type_, seq, length, payload)
@@ -94,7 +94,7 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> DXPFrame:
                 f"CRC mismatch: got 0x{crc:04X}, expected 0x{expected_crc:04X}"
             )
 
-    return DXPFrame(
+    return USMPFrame(
         magic=magic,
         version=version,
         type=PacketType(type_),
@@ -105,19 +105,19 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> DXPFrame:
     )
 
 
-async def read_frame(reader, verify_crc: bool = True) -> DXPFrame:
+async def read_frame(reader, verify_crc: bool = True) -> USMPFrame:
     """
-    Read exactly one DXP frame from an asyncio StreamReader.
+    Read exactly one USMP frame from an asyncio StreamReader.
     Reads header first, then exact payload bytes — handles TCP stream fragmentation.
     """
-    header = await reader.readexactly(DXP_HEADER_SIZE)
+    header = await reader.readexactly(USMP_HEADER_SIZE)
 
     magic = struct.unpack_from("<H", header, 0)[0]
-    if magic != DXP_MAGIC:
+    if magic != USMP_MAGIC:
         raise MagicError(f"Bad magic: 0x{magic:04X}")
 
     length = struct.unpack_from("<H", header, 8)[0]
-    if length > DXP_MAX_PAYLOAD:
+    if length > USMP_MAX_PAYLOAD:
         raise PayloadError(f"Payload too large: {length}")
 
     payload = await reader.readexactly(length) if length > 0 else b""

@@ -1,6 +1,5 @@
 # src/dxp/_crypto.py
 
-import os
 import struct
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PrivateKey,
@@ -9,11 +8,7 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from .types import (
-    DXP_GCM_NONCE_LEN,
-    DXP_SESSION_KEY_LEN,
-    DXP_TAG_LEN,
-)
+from .types import USMP_SESSION_KEY_LEN, USMP_TAG_LEN
 from .errors import CryptoError
 
 
@@ -47,7 +42,7 @@ def derive_session_key(
 
     return HKDF(
         algorithm=hashes.SHA256(),
-        length=DXP_SESSION_KEY_LEN,
+        length=USMP_SESSION_KEY_LEN,
         salt=nonce,
         info=info,
     ).derive(shared_secret)
@@ -94,7 +89,7 @@ def encrypt(
     """
     nonce = build_gcm_nonce(seq, session_id)
     # AAD uses the post-encryption length (plaintext + tag)
-    enc_length = len(plaintext) + DXP_TAG_LEN
+    enc_length = len(plaintext) + USMP_TAG_LEN
     aad = build_aad(magic, version, type_, seq, enc_length)
 
     aesgcm = AESGCM(key)

@@ -1,6 +1,6 @@
 # src/dxp/types.py
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
 
 
@@ -27,22 +27,22 @@ class ErrorCode(IntEnum):
 
 
 # Protocol constants
-DXP_MAGIC = 0xABCD
-DXP_VERSION = 0x01
-DXP_HEADER_SIZE = 12  # magic(2)+ver(1)+type(1)+seq(4)+len(2)+crc(2)
-DXP_MAX_PAYLOAD = 480  # max payload bytes (keeps total frame under 512)
-DXP_TAG_LEN = 16  # AES-GCM tag length
-DXP_NONCE_LEN = 32  # handshake nonce length
-DXP_DEVICE_ID_LEN = 6  # MAC address length
-DXP_PUB_KEY_LEN = 32  # X25519 public key length
-DXP_HMAC_LEN = 32  # HMAC-SHA256 output length
-DXP_SESSION_ID_LEN = 4  # session ID length
-DXP_SESSION_KEY_LEN = 32  # AES-256 key length
-DXP_GCM_NONCE_LEN = 12  # AES-GCM nonce length
+USMP_MAGIC = 0xABCD
+USMP_VERSION = 0x01
+USMP_HEADER_SIZE = 12  # magic(2)+ver(1)+type(1)+seq(4)+len(2)+crc(2)
+USMP_MAX_PAYLOAD = 480  # max payload bytes (keeps total frame under 512)
+USMP_TAG_LEN = 16  # AES-GCM tag length
+USMP_NONCE_LEN = 32  # handshake nonce length
+USMP_DEVICE_ID_LEN = 6  # MAC address length
+USMP_PUB_KEY_LEN = 32  # X25519 public key length
+USMP_HMAC_LEN = 32  # HMAC-SHA256 output length
+USMP_SESSION_ID_LEN = 4  # session ID length
+USMP_SESSION_KEY_LEN = 32  # AES-256 key length
+USMP_GCM_NONCE_LEN = 12  # AES-GCM nonce length
 
 
 @dataclass
-class DXPFrame:
+class USMPFrame:
     magic: int
     version: int
     type: PacketType

@@ -1,8 +1,8 @@
 # src/dxp/__init__.py
 
-from .types import DXPFrame, SessionInfo, PacketType, ErrorCode
+from .types import USMPFrame, SessionInfo, PacketType, ErrorCode
 from .errors import (
-    DXPError,
+    USMPError,
     FrameError,
     CRCError,
     MagicError,
@@ -15,18 +15,18 @@ from .errors import (
     ConnectionClosedError,
 )
 from ._frame import encode_frame, decode_frame, read_frame, write_frame
-from ._session import DXPSession
-from ._server import DXPServer
-from ._client import DXPClient
+from ._session import USMPSession
+from ._server import USMPServer
+from ._client import USMPClient
 
 __all__ = [
     # Types
-    "DXPFrame",
+    "USMPFrame",
     "SessionInfo",
     "PacketType",
     "ErrorCode",
     # Errors
-    "DXPError",
+    "USMPError",
     "FrameError",
     "CRCError",
     "MagicError",
@@ -43,11 +43,11 @@ __all__ = [
     "read_frame",
     "write_frame",
     # Session
-    "DXPSession",
+    "USMPSession",
     # Server
-    "DXPServer",
+    "USMPServer",
     # Client
-    "DXPClient",
+    "USMPClient",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"

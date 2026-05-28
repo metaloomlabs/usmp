@@ -1,7 +1,7 @@
 [project]
-name = "dxp-python"
-version = "0.1.0"
-description = "DXP — Device Exchange Protocol. Python SDK for secure ESP32 communication."
+name = "usmp"
+version = "0.2.0"
+description = "USMP — Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 authors = [
     { name = "winterx64", email = "itswinterx64@gmail.com" }
@@ -18,15 +18,15 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/winterx64/dxp"
-Repository = "https://github.com/winterx64/dxp"
+Homepage = "https://github.com/winterx64/usmp"
+Repository = "https://github.com/winterx64/usmp"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "dxp"
+module-name = "usmp"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

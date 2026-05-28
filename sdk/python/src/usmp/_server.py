@@ -5,18 +5,18 @@ import logging
 import time
 from typing import Callable, Awaitable
 from ._handshake import server_handshake
-from ._session import DXPSession
-from .errors import HandshakeError, DXPError
+from ._session import USMPSession
+from .errors import HandshakeError, USMPError
 
-logger = logging.getLogger("dxp")
+logger = logging.getLogger("usmp")
 
 
-class DXPServer:
+class USMPServer:
     """
-    Asyncio DXP server. Accepts multiple concurrent device connections.
+    Asyncio USMP server. Accepts multiple concurrent device connections.
 
     Usage:
-        server = DXPServer(
+        server = USMPServer(
             host="0.0.0.0",
             port=9000,
             psk=b"your-psk",
@@ -25,7 +25,7 @@ class DXPServer:
         )
 
         @server.on_session
-        async def handle(session: DXPSession):
+        async def handle(session: USMPSession):
             data = await session.recv()
             await session.send(b"ACK")
 
@@ -47,17 +47,17 @@ class DXPServer:
         self._handshake_timeout = handshake_timeout
         self._session_timeout = session_timeout
         self._on_timeout = on_timeout
-        self._handler: Callable[[DXPSession], Awaitable[None]] | None = None
+        self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
 
     def on_session(
         self,
-        fn: Callable[[DXPSession], Awaitable[None]],
-    ) -> Callable[[DXPSession], Awaitable[None]]:
+        fn: Callable[[USMPSession], Awaitable[None]],
+    ) -> Callable[[USMPSession], Awaitable[None]]:
         """Decorator to register a session handler."""
         self._handler = fn
         return fn
 
-    async def _watchdog(self, session: DXPSession) -> None:
+    async def _watchdog(self, session: USMPSession) -> None:
         """
         Monitors session activity. Closes the session if no DATA or PING
         is received within session_timeout seconds.
@@ -105,12 +105,12 @@ class DXPServer:
                 info.session_id_str,
             )
 
-            session = DXPSession(reader, writer, info)
+            session = USMPSession(reader, writer, info)
 
             # Start watchdog alongside the handler
             watchdog_task = asyncio.create_task(
                 self._watchdog(session),
-                name=f"dxp-watchdog-{info.session_id_str}",
+                name=f"usmp-watchdog-{info.session_id_str}",
             )
 
             if self._handler:
@@ -120,7 +120,7 @@ class DXPServer:
             logger.warning("Handshake failed (%s): %s", addr, e)
         except asyncio.TimeoutError:
             logger.warning("Handshake timeout (%s)", addr)
-        except DXPError as e:
+        except USMPError as e:
             logger.warning("Protocol error (%s): %s", addr, e)
         except Exception as e:
             logger.error("Unexpected error (%s): %s", addr, e)
@@ -128,7 +128,7 @@ class DXPServer:
             logger.warning("Handshake failed (%s): %s", addr, e)
         except asyncio.TimeoutError:
             logger.warning("Handshake timeout (%s)", addr)
-        except DXPError as e:
+        except USMPError as e:
             logger.warning("Protocol error (%s): %s", addr, e)
         except (OSError, ConnectionResetError, EOFError) as e:
             logger.warning("Connection lost (%s): %s", addr, e)

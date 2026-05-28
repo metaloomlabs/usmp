@@ -1,11 +1,11 @@
 # src/dxp/errors.py
 
 
-class DXPError(Exception):
-    """Base exception for all DXP errors."""
+class USMPError(Exception):
+    """Base exception for all USMP errors."""
 
 
-class FrameError(DXPError):
+class FrameError(USMPError):
     """Malformed or invalid frame."""
 
 
@@ -14,7 +14,7 @@ class CRCError(FrameError):
 
 
 class MagicError(FrameError):
-    """Bad magic bytes — not a DXP frame."""
+    """Bad magic bytes — not a USMP frame."""
 
 
 class VersionError(FrameError):
@@ -25,7 +25,7 @@ class PayloadError(FrameError):
     """Payload truncated or exceeds maximum size."""
 
 
-class HandshakeError(DXPError):
+class HandshakeError(USMPError):
     """Handshake failed."""
 
 
@@ -33,17 +33,17 @@ class AuthError(HandshakeError):
     """HMAC verification failed — PSK mismatch or tampered frame."""
 
 
-class CryptoError(DXPError):
+class CryptoError(USMPError):
     """AES-GCM decryption or tag verification failed."""
 
 
-class SequenceError(DXPError):
+class SequenceError(USMPError):
     """Sequence number out of order — possible replay attack."""
 
 
-class TimeoutError(DXPError):
+class TimeoutError(USMPError):
     """Handshake or keepalive timeout."""
 
 
-class ConnectionClosedError(DXPError):
+class ConnectionClosedError(USMPError):
     """Connection closed by remote."""

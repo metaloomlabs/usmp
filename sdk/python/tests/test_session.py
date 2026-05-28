@@ -1,8 +1,8 @@
 import asyncio
 import pytest
-from dxp._handshake import server_handshake, client_handshake
-from dxp._session import DXPSession
-from dxp.errors import SequenceError
+from usmp._handshake import server_handshake, client_handshake
+from usmp._session import USMPSession
+from usmp.errors import SequenceError
 
 PSK = b"test-psk-1234"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
@@ -14,7 +14,7 @@ async def _connected_pair():
 
     async def server_side(reader, writer):
         info = await server_handshake(reader, writer, PSK)
-        server_info_holder["session"] = DXPSession(reader, writer, info)
+        server_info_holder["session"] = USMPSession(reader, writer, info)
         # keep connection open
         await asyncio.sleep(5)
 
@@ -23,7 +23,7 @@ async def _connected_pair():
 
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     client_info = await client_handshake(reader, writer, PSK, DEVICE_ID)
-    client_session = DXPSession(reader, writer, client_info)
+    client_session = USMPSession(reader, writer, client_info)
 
     # Give server side time to finish handshake
     await asyncio.sleep(0.1)

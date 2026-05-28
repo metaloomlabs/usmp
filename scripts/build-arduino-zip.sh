@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$REPO/DXP"
+OUT="./"
 ZIP="$REPO/dxp-arduino.zip"
 
 echo "[DXP] Cleaning..."

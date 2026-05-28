@@ -3,17 +3,17 @@
 import asyncio
 import os
 from ._handshake import client_handshake
-from ._session import DXPSession
-from .types import DXP_DEVICE_ID_LEN
+from ._session import USMPSession
+from .types import USMP_DEVICE_ID_LEN
 
 
-class DXPClient:
+class USMPClient:
     """
-    Asyncio DXP client. Used to connect to a DXP server from Python.
-    Useful for testing, CLI tools, or Python-to-Python DXP communication.
+    Asyncio USMP client. Used to connect to a USMP server from Python.
+    Useful for testing, CLI tools, or Python-to-Python USMP communication.
 
     Usage:
-        client = DXPClient(host="192.168.137.1", port=9000, psk=b"your-psk")
+        client = USMPClient(host="192.168.137.1", port=9000, psk=b"your-psk")
         await client.connect()
         await client.send(b"hello")
         data = await client.recv()
@@ -30,16 +30,16 @@ class DXPClient:
         self._host = host
         self._port = port
         self._psk = psk
-        self._device_id = device_id or os.urandom(DXP_DEVICE_ID_LEN)
-        self._session: DXPSession | None = None
+        self._device_id = device_id or os.urandom(USMP_DEVICE_ID_LEN)
+        self._session: USMPSession | None = None
 
     async def connect(self) -> None:
-        """Connect to a DXP server and complete the handshake."""
+        """Connect to a USMP server and complete the handshake."""
         reader, writer = await asyncio.open_connection(self._host, self._port)
         info = await client_handshake(reader, writer, self._psk, self._device_id)
-        self._session = DXPSession(reader, writer, info)
+        self._session = USMPSession(reader, writer, info)
         print(
-            f"[DXP] Connected to {self._host}:{self._port} session={info.session_id_str}"
+            f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}"
         )
 
     async def send(self, data: bytes) -> None:

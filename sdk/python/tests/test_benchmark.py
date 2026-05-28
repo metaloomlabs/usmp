@@ -4,11 +4,11 @@ import asyncio
 import time
 import statistics
 import pytest
-from dxp._handshake import server_handshake, client_handshake
-from dxp._session import DXPSession
-from dxp._crypto import generate_keypair, derive_session_key, encrypt, decrypt
-from dxp._frame import encode_frame, decode_frame
-from dxp.types import PacketType, DXP_MAGIC, DXP_VERSION
+from usmp._handshake import server_handshake, client_handshake
+from usmp._session import USMPSession
+from usmp._crypto import generate_keypair, derive_session_key, encrypt, decrypt
+from usmp._frame import encode_frame, decode_frame
+from usmp.types import PacketType, USMP_MAGIC, USMP_VERSION
 
 PSK = b"test-psk-1234"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
@@ -117,8 +117,8 @@ def test_bench_aes_gcm_encrypt():
             seq=0,
             session_id=session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             plaintext=plaintext,
         )
         times.append(time.perf_counter() - t0)
@@ -136,8 +136,8 @@ def test_bench_aes_gcm_decrypt():
         seq=0,
         session_id=session_id,
         type_=int(PacketType.DATA),
-        version=DXP_VERSION,
-        magic=DXP_MAGIC,
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
         plaintext=plaintext,
     )
     times = []
@@ -149,8 +149,8 @@ def test_bench_aes_gcm_decrypt():
             seq=0,
             session_id=session_id,
             type_=int(PacketType.DATA),
-            version=DXP_VERSION,
-            magic=DXP_MAGIC,
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
             length=len(ct),
             ciphertext_and_tag=ct,
         )
@@ -207,7 +207,7 @@ async def _connected_pair():
 
     async def server_side(reader, writer):
         info = await server_handshake(reader, writer, PSK)
-        server_session_holder["session"] = DXPSession(reader, writer, info)
+        server_session_holder["session"] = USMPSession(reader, writer, info)
         await asyncio.sleep(10)
 
     srv = await asyncio.start_server(server_side, "127.0.0.1", 0)
@@ -215,7 +215,7 @@ async def _connected_pair():
 
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     client_info = await client_handshake(reader, writer, PSK, DEVICE_ID)
-    client_session = DXPSession(reader, writer, client_info)
+    client_session = USMPSession(reader, writer, client_info)
 
     await asyncio.sleep(0.1)
     srv.close()
