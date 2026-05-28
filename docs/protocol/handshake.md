@@ -1,6 +1,6 @@
 # Handshake
 
-The DXP handshake establishes a mutually authenticated, encrypted session.
+The USMP handshake establishes a mutually authenticated, encrypted session.
 It completes in **4 messages** and takes approximately **200ms** on ESP32.
 
 ## Flow
@@ -72,7 +72,7 @@ shared        = X25519(priv_local, pub_peer)
 session_key   = HKDF-SHA256(
     ikm   = shared,
     salt  = nonce,
-    info  = "dxp-v1" || pub_C || pub_S,
+    info  = "usmp-v1" || pub_C || pub_S,
     len   = 32 bytes
 )
 

@@ -1,6 +1,6 @@
 # Frame Format
 
-Every DXP message — handshake or data — uses the same binary frame format.
+Every USMP message — handshake or data — uses the same binary frame format.
 
 ## Wire layout
 

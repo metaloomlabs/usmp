@@ -32,7 +32,7 @@ before closing the connection.
 
 !!! important
     After any error, the connection MUST be closed.
-    DXP has no error recovery within a session — start a new handshake.
+    USMP has no error recovery within a session — start a new handshake.
 
 | Situation | Action |
 |-----------|--------|
@@ -49,8 +49,8 @@ before closing the connection.
 ## Python SDK exceptions
 
 ```python
-from dxp.errors import (
-    DXPError,           # base class
+from usmp.errors import (
+    USMPError,           # base class
     FrameError,         # malformed frame
     CRCError,           # CRC mismatch
     MagicError,         # bad magic bytes

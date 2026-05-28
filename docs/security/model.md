@@ -1,10 +1,10 @@
 # Security Model
 
-DXP is designed with security as a first-class requirement, not an afterthought.
+USMP is designed with security as a first-class requirement, not an afterthought.
 
 ## Threat model
 
-DXP protects against:
+USMP protects against:
 
 | Threat | Protection |
 |--------|-----------|
@@ -17,7 +17,7 @@ DXP protects against:
 | Frame tampering | AES-GCM authentication tag |
 | Frame corruption | CRC-16 |
 
-DXP does **not** protect against:
+USMP does **not** protect against:
 
 | Threat | Notes |
 |--------|-------|
@@ -39,7 +39,7 @@ All primitives are standard, audited, and widely deployed:
 | HMAC-SHA256 | Mutual authentication | RFC 2104 |
 | CRC-16/IBM | Frame integrity | — |
 
-DXP does not invent new cryptography. Every primitive is a standard building block with a well-understood security proof.
+USMP does not invent new cryptography. Every primitive is a standard building block with a well-understood security proof.
 
 ---
 
@@ -57,7 +57,7 @@ The session key is derived via HKDF-SHA256:
 session_key = HKDF-SHA256(
     ikm  = X25519(priv_local, pub_peer),
     salt = nonce,
-    info = "dxp-v1" || pub_C || pub_S,
+    info = "usmp-v1" || pub_C || pub_S,
     len  = 32 bytes
 )
 ```
@@ -98,7 +98,7 @@ nonce = seq(4 bytes LE) || session_id(4 bytes) || 0x00000000(4 bytes)
 ## PSK management
 
 !!! warning "Change the default PSK"
-    The default PSK `dxp-dev-psk-change-me-before-prod` is public.
+    The default PSK `usmp-dev-psk-change-me-before-prod` is public.
     Always use a secret, randomly generated PSK in production.
 
 For production deployments:
@@ -111,6 +111,6 @@ For production deployments:
 
 **Single PSK** — the current implementation uses one PSK for all devices. If one device is compromised, the PSK must be rotated on all devices. Per-device PSK support is planned.
 
-**No certificate infrastructure** — DXP uses PSK-based authentication, not PKI. This is simpler but means you must securely provision the PSK to each device. Ed25519 server certificates are planned for Phase 2.
+**No certificate infrastructure** — USMP uses PSK-based authentication, not PKI. This is simpler but means you must securely provision the PSK to each device. Ed25519 server certificates are planned for Phase 2.
 
 **No session resumption** — every reconnect requires a full handshake. This is intentional — it ensures fresh keys and prevents session hijacking.

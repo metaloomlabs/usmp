@@ -1,12 +1,12 @@
-# DXPClient
+# USMPClient
 
-Connects to a DXP server from Python. Useful for testing, CLI tools,
-and Python-to-Python DXP communication.
+Connects to a USMP server from Python. Useful for testing, CLI tools,
+and Python-to-Python USMP communication.
 
 ## Constructor
 
 ```python
-DXPClient(
+USMPClient(
     host:      str,
     port:      int,
     psk:       bytes,
@@ -41,10 +41,10 @@ client.session_id  # str | None — current session ID
 
 ```python
 import asyncio
-from dxp import DXPClient
+from usmp import USMPClient
 
 async def main():
-    client = DXPClient(
+    client = USMPClient(
         host="192.168.1.100",
         port=9000,
         psk=b"my-secret-psk",

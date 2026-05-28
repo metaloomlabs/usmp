@@ -1,10 +1,10 @@
-site_name: DXP — Device Exchange Protocol
+site_name: USMP — Device Exchange Protocol
 site_description: Secure, lightweight communication protocol for embedded devices
 site_author: winterx64
-site_url: https://winterx64.github.io/dxp
+site_url: https://winterx64.github.io/usmp
 
-repo_name: winterx64/dxp
-repo_url: https://github.com/winterx64/dxp
+repo_name: winterx64/usmp
+repo_url: https://github.com/winterx64/usmp
 edit_uri: edit/main/docs/
 
 theme:
@@ -67,7 +67,7 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
-    - What is DXP?: getting-started/what-is-dxp.md
+    - What is USMP?: getting-started/what-is-usmp.md
     - Quick Start (ESP32): getting-started/quickstart-esp32.md
     - Quick Start (Python): getting-started/quickstart-python.md
     - Installation: getting-started/installation.md
@@ -83,9 +83,9 @@ nav:
     - Porting Guide: ports/porting-guide.md
   - SDK:
     - Python SDK: sdk/python.md
-    - DXPServer: sdk/server.md
-    - DXPClient: sdk/client.md
-    - DXPSession: sdk/session.md
+    - USMPServer: sdk/server.md
+    - USMPClient: sdk/client.md
+    - USMPSession: sdk/session.md
   - Tools:
     - CLI (coming soon): tools/cli.md
   - Security:
@@ -100,6 +100,6 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/winterx64/dxp
+      link: https://github.com/winterx64/usmp
 
 copyright: Copyright &copy; 2026 winterx64

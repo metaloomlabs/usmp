@@ -1,6 +1,6 @@
 # Quick Start — ESP32
 
-Get a secure DXP session running between your ESP32 and a Python gateway in under 10 minutes.
+Get a secure USMP session running between your ESP32 and a Python gateway in under 10 minutes.
 
 ## Prerequisites
 
@@ -9,13 +9,13 @@ Get a secure DXP session running between your ESP32 and a Python gateway in unde
 - Python 3.11+
 - A WiFi network both your laptop and ESP32 can join (or use your laptop's hotspot)
 
-## Step 1 — Add the DXP component
+## Step 1 — Add the USMP component
 
 In your ESP-IDF project's `CMakeLists.txt`:
 
 ```cmake
 set(EXTRA_COMPONENT_DIRS
-    "/path/to/dxp/ports/dxp-esp32"
+    "/path/to/usmp/ports/usmp-esp32"
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
@@ -28,7 +28,7 @@ In your `main/CMakeLists.txt`:
 idf_component_register(
     SRCS "app.c" "wifi.c"
     INCLUDE_DIRS "."
-    REQUIRES dxp-esp32
+    REQUIRES usmp-esp32
     PRIV_REQUIRES nvs_flash esp_wifi
 )
 ```
@@ -36,8 +36,8 @@ idf_component_register(
 ## Step 2 — Write your application
 
 ```c title="main/app.c"
-#include "dxp.h"
-#include "dxp_transport.h"
+#include "usmp.h"
+#include "usmp_transport.h"
 #include "wifi.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -52,16 +52,16 @@ void app_main(void)
     wifi_init();
 
     // Initialize TCP transport
-    dxp_transport_t transport = {0};
-    if (dxp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
+    usmp_transport_t transport = {0};
+    if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
         ESP_LOGE(TAG, "TCP connect failed");
         return;
     }
 
-    // DXP handshake — mutual auth + key exchange
-    dxp_t ctx = {0};
-    if (dxp_connect(&ctx, &transport) != 0) {
-        ESP_LOGE(TAG, "DXP connect failed");
+    // USMP handshake — mutual auth + key exchange
+    usmp_t ctx = {0};
+    if (usmp_connect(&ctx, &transport) != 0) {
+        ESP_LOGE(TAG, "USMP connect failed");
         return;
     }
 
@@ -69,25 +69,25 @@ void app_main(void)
 
     // Send encrypted data
     const char *msg = "hello from ESP32";
-    dxp_send(&ctx, (const uint8_t *)msg, strlen(msg));
+    usmp_send(&ctx, (const uint8_t *)msg, strlen(msg));
 
     // Receive response
     uint8_t buf[256];
-    int len = dxp_recv(&ctx, buf, sizeof(buf));
+    int len = usmp_recv(&ctx, buf, sizeof(buf));
     if (len > 0) {
         ESP_LOGI(TAG, "Received: %.*s", len, buf);
     }
 
-    dxp_close(&ctx);
+    usmp_close(&ctx);
 }
 ```
 
 !!! tip "PSK Configuration"
-    The default PSK is `dxp-dev-psk-change-me-before-prod`.
-    Change it by defining `DXP_PSK` before including `dxp.h`:
+    The default PSK is `usmp-dev-psk-change-me-before-prod`.
+    Change it by defining `USMP_PSK` before including `usmp.h`:
     ```c
-    #define DXP_PSK "your-secret-key-here"
-    #include "dxp.h"
+    #define USMP_PSK "your-secret-key-here"
+    #include "usmp.h"
     ```
 
 ## Step 3 — Build and flash
@@ -103,7 +103,7 @@ See [Quick Start (Python)](quickstart-python.md) to set up the receiving end.
 
 ## What just happened?
 
-When `dxp_connect` runs, DXP performs a full 4-step handshake:
+When `usmp_connect` runs, USMP performs a full 4-step handshake:
 
 1. **HELLO** — ESP32 sends its device ID and an ephemeral X25519 public key
 2. **CHALLENGE** — Gateway sends a random nonce and its own X25519 public key

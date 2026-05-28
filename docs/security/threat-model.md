@@ -2,7 +2,7 @@
 
 ## Assumptions
 
-DXP assumes:
+USMP assumes:
 
 - The **network is hostile** — an attacker can intercept, modify, and replay traffic
 - The **PSK is secret** — devices and gateways have been securely provisioned
@@ -10,7 +10,7 @@ DXP assumes:
 
 ## Attacker capabilities
 
-| Capability | DXP's response |
+| Capability | USMP's response |
 |------------|----------------|
 | Passive eavesdropping | AES-256-GCM — traffic is opaque |
 | Modify frames in transit | GCM tag fails — connection dropped |

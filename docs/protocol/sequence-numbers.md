@@ -29,9 +29,9 @@ expected_seq++;
 
 ## Why strict equality?
 
-DXP uses strict equality rather than a window-based check.
+USMP uses strict equality rather than a window-based check.
 
-**Rationale:** DXP runs over reliable transports (TCP, UART with ACK).
+**Rationale:** USMP runs over reliable transports (TCP, UART with ACK).
 On a reliable transport, frames arrive in order. A frame with an unexpected
 sequence number means either:
 

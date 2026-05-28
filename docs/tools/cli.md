@@ -1,41 +1,41 @@
 # CLI Tool
 
 !!! warning "Coming soon"
-    The DXP CLI tool is under active development.
+    The USMP CLI tool is under active development.
 
-The `dxp` CLI tool lets you interact with DXP devices on your LAN
+The `usmp` CLI tool lets you interact with USMP devices on your LAN
 directly from the terminal — like SSH for IoT devices.
 
 ## Planned commands
 
 ```bash
-# Scan LAN for DXP devices
-dxp scan
+# Scan LAN for USMP devices
+usmp scan
 
 # Connect to a device (interactive shell)
-dxp connect aa:bb:cc:dd:ee:ff
+usmp connect aa:bb:cc:dd:ee:ff
 
 # Stream logs from a device
-dxp logs aa:bb:cc:dd:ee:ff
+usmp logs aa:bb:cc:dd:ee:ff
 
 # Send a one-shot command
-dxp send aa:bb:cc:dd:ee:ff "reboot"
+usmp send aa:bb:cc:dd:ee:ff "reboot"
 
 # Monitor all devices
-dxp monitor
+usmp monitor
 ```
 
 ## Planned output
 
 ```
-$ dxp scan
-Scanning LAN for DXP devices...
-  aa:bb:cc:dd:ee:ff  192.168.1.60  ESP32  DXP v0.1  online
-  aa:bb:cc:dd:ee:00  192.168.1.61  ESP32  DXP v0.1  online
+$ usmp scan
+Scanning LAN for USMP devices...
+  aa:bb:cc:dd:ee:ff  192.168.1.60  ESP32  USMP v0.1  online
+  aa:bb:cc:dd:ee:00  192.168.1.61  ESP32  USMP v0.1  online
 
-$ dxp connect aa:bb:cc:dd:ee:ff
+$ usmp connect aa:bb:cc:dd:ee:ff
 Connecting to aa:bb:cc:dd:ee:ff (192.168.1.60)...
-[DXP] Handshake complete — session a3f1b2c4
+[USMP] Handshake complete — session a3f1b2c4
 > get_sensor
 temperature: 23.4C
 > exit
@@ -44,7 +44,7 @@ temperature: 23.4C
 ## Installation (when available)
 
 ```bash
-pip install dxp-cli
+pip install usmp-cli
 ```
 
 ```
@@ -55,7 +55,7 @@ pip install dxp-cli
 ```markdown
 # PSK Management
 
-The Pre-Shared Key (PSK) is the root secret in DXP.
+The Pre-Shared Key (PSK) is the root secret in USMP.
 Both the device and gateway must have the same PSK.
 
 ## Generating a PSK
@@ -72,8 +72,8 @@ Use at least 32 bytes (64 hex chars) of random data.
 === "ESP32 (development)"
     ```c
     // For development only — never commit to source control
-    #define DXP_PSK "your-generated-psk-here"
-    #include "dxp.h"
+    #define USMP_PSK "your-generated-psk-here"
+    #include "usmp.h"
     ```
 
 === "ESP32 (production)"
@@ -81,7 +81,7 @@ Use at least 32 bytes (64 hex chars) of random data.
     ```c
     // Read PSK from NVS at runtime
     nvs_handle_t handle;
-    nvs_open("dxp", NVS_READONLY, &handle);
+    nvs_open("usmp", NVS_READONLY, &handle);
     size_t len = 64;
     char psk[64];
     nvs_get_str(handle, "psk", psk, &len);
@@ -93,10 +93,10 @@ Use at least 32 bytes (64 hex chars) of random data.
     import os
 
     # From environment variable
-    PSK = os.environ["DXP_PSK"].encode()
+    PSK = os.environ["USMP_PSK"].encode()
 
     # From file
-    PSK = open("/etc/dxp/psk", "rb").read().strip()
+    PSK = open("/etc/usmp/psk", "rb").read().strip()
     ```
 
 ## Multi-device PSK
@@ -107,7 +107,7 @@ For larger deployments, derive per-device PSKs from a master secret:
 ```python
 import hmac, hashlib
 
-MASTER_SECRET = os.environ["DXP_MASTER_SECRET"].encode()
+MASTER_SECRET = os.environ["USMP_MASTER_SECRET"].encode()
 
 def get_psk(device_id: bytes) -> bytes:
     return hmac.new(MASTER_SECRET, device_id, hashlib.sha256).digest()

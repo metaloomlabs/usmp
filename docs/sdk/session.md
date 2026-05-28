@@ -1,6 +1,6 @@
-# DXPSession
+# USMPSession
 
-Represents an established DXP session. Returned by `DXPServer`
+Represents an established USMP session. Returned by `USMPServer`
 to your session handler.
 
 ## Properties
@@ -50,7 +50,7 @@ Sends a BYE frame and closes the connection gracefully.
 
 ```python
 @server.on_session
-async def handle(session: DXPSession):
+async def handle(session: USMPSession):
     # Echo server
     while True:
         data = await session.recv()

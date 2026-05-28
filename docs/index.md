@@ -1,16 +1,16 @@
-# DXP — Device Exchange Protocol
+# USMP — Device Exchange Protocol
 
 > Secure, lightweight, transport-agnostic communication for embedded devices.
 
-DXP is a binary application-layer protocol that gives your ESP32 (or any embedded device) a **secure, authenticated, encrypted session** with a gateway — with three function calls.
+USMP is a binary application-layer protocol that gives your ESP32 (or any embedded device) a **secure, authenticated, encrypted session** with a gateway — with three function calls.
 
 ```c
-dxp_transport_tcp_init(&transport, "192.168.137.1", 9000);
-dxp_connect(&ctx, &transport);
-dxp_send(&ctx, data, len);
+usmp_transport_tcp_init(&transport, "192.168.137.1", 9000);
+usmp_connect(&ctx, &transport);
+usmp_send(&ctx, data, len);
 ```
 
-## Why DXP?
+## Why USMP?
 
 Most IoT protocols make you choose between **simple** and **secure**:
 
@@ -20,9 +20,9 @@ Most IoT protocols make you choose between **simple** and **secure**:
 | MQTT     | ✓      | Needs TLS | Partial           |
 | TLS      | ✗      | ✓         | Heavy             |
 | CoAP     | ✓      | Needs DTLS| ✓                 |
-| **DXP**  | **✓**  | **✓**     | **✓**             |
+| **USMP**  | **✓**  | **✓**     | **✓**             |
 
-DXP is **secure by default**. There is no insecure mode. Every session is:
+USMP is **secure by default**. There is no insecure mode. Every session is:
 
 - **Mutually authenticated** — both device and gateway verify each other
 - **Encrypted** — AES-256-GCM, mandatory
@@ -84,4 +84,4 @@ The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5m
 - [Quick Start (Python)](getting-started/quickstart-python.md)
 - [Protocol Specification](spec.md)
 - [Security Model](security/model.md)
-- [GitHub](https://github.com/winterx64/dxp)
+- [GitHub](https://github.com/winterx64/usmp)

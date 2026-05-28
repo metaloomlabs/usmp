@@ -17,7 +17,7 @@ There is no silent corruption.
 
 ## Nonce construction
 
-AES-GCM requires a unique 12-byte nonce per encryption. DXP constructs it as:
+AES-GCM requires a unique 12-byte nonce per encryption. USMP constructs it as:
 
 ```
 
@@ -34,7 +34,7 @@ nonce = seq(4 bytes LE) || session_id(4 bytes) || 0x00000000(4 bytes)
 !!! danger "Nonce reuse"
     Reusing a nonce with AES-GCM and the same key is catastrophic —
     it breaks both confidentiality and authenticity.
-    DXP's nonce construction makes reuse impossible as long as sequence
+    USMP's nonce construction makes reuse impossible as long as sequence
     numbers are monotonic and session IDs are random.
 
 ---

@@ -1,11 +1,11 @@
-# DXPServer
+# USMPServer
 
-Accepts incoming DXP connections from devices.
+Accepts incoming USMP connections from devices.
 
 ## Constructor
 
 ```python
-DXPServer(
+USMPServer(
     host: str = "0.0.0.0",
     port: int = 9000,
     psk:  bytes = b"",
@@ -26,7 +26,7 @@ DXPServer(
 
 ```python
 @server.on_session
-async def handle(session: DXPSession) -> None:
+async def handle(session: USMPSession) -> None:
     ...
 ```
 
@@ -49,12 +49,12 @@ asyncio.run(server.serve())
 
 ```python
 import asyncio
-from dxp import DXPServer, DXPSession
-from dxp.errors import ConnectionClosedError
+from usmp import USMPServer, USMPSession
+from usmp.errors import ConnectionClosedError
 
 PSK = b"my-secret-psk"
 
-server = DXPServer(
+server = USMPServer(
     host="0.0.0.0",
     port=9000,
     psk=PSK,
@@ -63,7 +63,7 @@ server = DXPServer(
 )
 
 @server.on_session
-async def handle(session: DXPSession):
+async def handle(session: USMPSession):
     print(f"[{session.device_id}] connected, session={session.session_id}")
     try:
         while True:

@@ -1,6 +1,6 @@
 # Protocol Overview
 
-DXP is a layered protocol stack. Each layer has a single, well-defined responsibility.
+USMP is a layered protocol stack. Each layer has a single, well-defined responsibility.
 
 ```txt
 ┌─────────────────────────────────────────────┐

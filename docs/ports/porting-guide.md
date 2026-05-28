@@ -1,51 +1,51 @@
 # Porting Guide
 
-Porting DXP to a new platform requires implementing two things:
+Porting USMP to a new platform requires implementing two things:
 
-1. **Platform hooks** — 5 functions in `dxp_port_<platform>.c`
+1. **Platform hooks** — 5 functions in `usmp_port_<platform>.c`
 2. **Transport** — at minimum one transport (TCP or UART)
 
-The DXP core (`core/`) never calls platform-specific functions directly.
+The USMP core (`core/`) never calls platform-specific functions directly.
 All platform dependencies go through these interfaces.
 
 ---
 
 ## Step 1 — Implement platform hooks
 
-Create `ports/<your-platform>/port/dxp_port_<platform>.c`
+Create `ports/<your-platform>/port/usmp_port_<platform>.c`
 and implement these 5 functions:
 
 ```c
-#include "dxp_port.h"
+#include "usmp_port.h"
 
 // Get unique device ID (MAC address, chip UID, etc.)
-int dxp_port_get_device_id(uint8_t *out, size_t len)
+int usmp_port_get_device_id(uint8_t *out, size_t len)
 {
     // Fill out with at least 6 bytes of unique ID
     // Return 0 on success, -1 on failure
 }
 
 // Cryptographically random bytes
-int dxp_port_random(uint8_t *out, size_t len)
+int usmp_port_random(uint8_t *out, size_t len)
 {
     // Fill out with len random bytes
     // Return 0 on success, -1 on failure
 }
 
 // Millisecond delay
-void dxp_port_delay_ms(uint32_t ms)
+void usmp_port_delay_ms(uint32_t ms)
 {
     // Block for ms milliseconds
 }
 
 // Milliseconds since boot
-uint32_t dxp_port_millis(void)
+uint32_t usmp_port_millis(void)
 {
     // Return uptime in milliseconds
 }
 
 // Log output
-void dxp_port_log(char level, const char *tag, const char *msg)
+void usmp_port_log(char level, const char *tag, const char *msg)
 {
     // level: 'I' = info, 'W' = warn, 'E' = error
     // Print to serial, UART, semihosting, etc.
@@ -56,14 +56,14 @@ void dxp_port_log(char level, const char *tag, const char *msg)
 
 === "STM32 (HAL)"
     ```c
-    int dxp_port_get_device_id(uint8_t *out, size_t len) {
+    int usmp_port_get_device_id(uint8_t *out, size_t len) {
         // STM32 96-bit unique ID at fixed address
         uint32_t*uid = (uint32_t *)0x1FFF7590;
         memcpy(out, uid, len < 12 ? len : 12);
         return 0;
     }
 
-    int dxp_port_random(uint8_t *out, size_t len) {
+    int usmp_port_random(uint8_t *out, size_t len) {
         for (size_t i = 0; i < len; i += 4) {
             uint32_t r;
             HAL_RNG_GenerateRandomNumber(&hrng, &r);
@@ -72,26 +72,26 @@ void dxp_port_log(char level, const char *tag, const char *msg)
         return 0;
     }
 
-    void dxp_port_delay_ms(uint32_t ms) { HAL_Delay(ms); }
-    uint32_t dxp_port_millis(void) { return HAL_GetTick(); }
+    void usmp_port_delay_ms(uint32_t ms) { HAL_Delay(ms); }
+    uint32_t usmp_port_millis(void) { return HAL_GetTick(); }
     ```
 
 === "Arduino"
     ```cpp
-    int dxp_port_get_device_id(uint8_t *out, size_t len) {
+    int usmp_port_get_device_id(uint8_t *out, size_t len) {
         uint64_t mac = ESP.getEfuseMac();
         memcpy(out, &mac, len < 6 ? len : 6);
         return 0;
     }
 
-    int dxp_port_random(uint8_t *out, size_t len) {
+    int usmp_port_random(uint8_t *out, size_t len) {
         for (size_t i = 0; i < len; i++)
             out[i] = (uint8_t)esp_random();
         return 0;
     }
 
-    void dxp_port_delay_ms(uint32_t ms) { delay(ms); }
-    uint32_t dxp_port_millis(void) { return millis(); }
+    void usmp_port_delay_ms(uint32_t ms) { delay(ms); }
+    uint32_t usmp_port_millis(void) { return millis(); }
     ```
 
 === "Linux (for testing)"
@@ -99,20 +99,20 @@ void dxp_port_log(char level, const char *tag, const char *msg)
     #include <time.h>
     #include <fcntl.h>
 
-    int dxp_port_get_device_id(uint8_t *out, size_t len) {
+    int usmp_port_get_device_id(uint8_t *out, size_t len) {
         // Use /etc/machine-id or a fixed test ID
         memset(out, 0xAB, len);
         return 0;
     }
 
-    int dxp_port_random(uint8_t *out, size_t len) {
+    int usmp_port_random(uint8_t *out, size_t len) {
         int fd = open("/dev/urandom", O_RDONLY);
         read(fd, out, len);
         close(fd);
         return 0;
     }
 
-    void dxp_port_delay_ms(uint32_t ms) {
+    void usmp_port_delay_ms(uint32_t ms) {
         struct timespec ts = { ms / 1000, (ms % 1000) * 1000000 };
         nanosleep(&ts, NULL);
     }
@@ -122,31 +122,31 @@ void dxp_port_log(char level, const char *tag, const char *msg)
 
 ## Step 2 — Implement a transport
 
-Create `ports/<your-platform>/transport/dxp_transport_<type>.c`
+Create `ports/<your-platform>/transport/usmp_transport_<type>.c`
 and implement the transport interface:
 
 ```c
-#include "dxp_transport.h"
+#include "usmp_transport.h"
 
-static int my_send(dxp_transport_t *t, const uint8_t *data, size_t len)
+static int my_send(usmp_transport_t *t, const uint8_t *data, size_t len)
 {
     // Send exactly len bytes
     // Return 0 on success, -1 on failure
 }
 
-static int my_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
+static int my_recv(usmp_transport_t *t, uint8_t *buf, size_t max_len)
 {
     // Receive up to max_len bytes
     // Return number of bytes received, -1 on failure
 }
 
-static void my_close(dxp_transport_t *t)
+static void my_close(usmp_transport_t *t)
 {
     // Close the connection and free resources
 }
 
 // Factory function
-int dxp_transport_my_init(dxp_transport_t *t, /* your params */)
+int usmp_transport_my_init(usmp_transport_t *t, /* your params */)
 {
     // Initialize your transport
     // Set up t->ctx with transport-specific state
@@ -167,13 +167,13 @@ int dxp_transport_my_init(dxp_transport_t *t, /* your params */)
     ```cmake
     idf_component_register(
         SRCS
-            "../../core/src/dxp_frame.c"
-            "../../core/src/dxp_crypto.c"
-            "../../core/src/dxp_handshake.c"
-            "../../core/src/dxp_session.c"
-            "../../core/src/dxp_connect.c"
-            "port/dxp_port_myplatform.c"
-            "transport/dxp_transport_tcp.c"
+            "../../core/src/usmp_frame.c"
+            "../../core/src/usmp_crypto.c"
+            "../../core/src/usmp_handshake.c"
+            "../../core/src/usmp_session.c"
+            "../../core/src/usmp_connect.c"
+            "port/usmp_port_myplatform.c"
+            "transport/usmp_transport_tcp.c"
         INCLUDE_DIRS
             "../../core/include"
             "transport"
@@ -188,13 +188,13 @@ int dxp_transport_my_init(dxp_transport_t *t, /* your params */)
     ```cmake
     add_subdirectory(../../core)
 
-    add_library(dxp-myplatform
-        port/dxp_port_myplatform.c
-        transport/dxp_transport_tcp.c
+    add_library(usmp-myplatform
+        port/usmp_port_myplatform.c
+        transport/usmp_transport_tcp.c
     )
 
-    target_link_libraries(dxp-myplatform
-        dxp-core
+    target_link_libraries(usmp-myplatform
+        usmp-core
         mbedtls
     )
     ```
@@ -203,16 +203,16 @@ int dxp_transport_my_init(dxp_transport_t *t, /* your params */)
     ```
 Copy core/src/* and core/include/* into your library folder.
     Add your port and transport files.
-    Include dxp.h in your sketch.
+    Include usmp.h in your sketch.
     ```
 
 ---
 
 ## Checklist
 
-- [ ] `dxp_port_get_device_id` returns at least 6 unique bytes
-- [ ] `dxp_port_random` uses a hardware RNG or CSPRNG (not `rand()`)
+- [ ] `usmp_port_get_device_id` returns at least 6 unique bytes
+- [ ] `usmp_port_random` uses a hardware RNG or CSPRNG (not `rand()`)
 - [ ] Transport `send` guarantees delivery of all bytes or returns -1
 - [ ] Transport `recv` blocks until data is available or returns -1 on error
-- [ ] Stack size is at least 8KB for the task running `dxp_connect`
+- [ ] Stack size is at least 8KB for the task running `usmp_connect`
 - [ ] mbedtls is available and compiled with `MBEDTLS_HKDF_C=y`

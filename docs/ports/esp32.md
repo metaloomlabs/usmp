@@ -1,17 +1,17 @@
 # ESP32 Port
 
-The ESP32 port implements the DXP platform hooks and TCP transport
+The ESP32 port implements the USMP platform hooks and TCP transport
 for ESP-IDF v5.0+.
 
 ## Component structure
 
 ```
 
-ports/dxp-esp32/
+ports/usmp-esp32/
   port/
-    dxp_port_esp32.c     ← platform hooks (MAC, RNG, delay, log)
+    usmp_port_esp32.c     ← platform hooks (MAC, RNG, delay, log)
   transport/
-    dxp_transport_tcp.c  ← TCP transport implementation
+    usmp_transport_tcp.c  ← TCP transport implementation
   CMakeLists.txt
   idf_component.yml
 
@@ -19,15 +19,15 @@ ports/dxp-esp32/
 
 ## Platform hooks
 
-The ESP32 port implements these functions from `dxp_port.h`:
+The ESP32 port implements these functions from `usmp_port.h`:
 
 | Function | ESP-IDF call |
 |----------|-------------|
-| `dxp_port_get_device_id` | `esp_read_mac(ESP_MAC_WIFI_STA)` |
-| `dxp_port_random` | `esp_fill_random()` |
-| `dxp_port_delay_ms` | `vTaskDelay(pdMS_TO_TICKS(ms))` |
-| `dxp_port_millis` | `esp_timer_get_time() / 1000` |
-| `dxp_port_log` | `ESP_LOGI/W/E` |
+| `usmp_port_get_device_id` | `esp_read_mac(ESP_MAC_WIFI_STA)` |
+| `usmp_port_random` | `esp_fill_random()` |
+| `usmp_port_delay_ms` | `vTaskDelay(pdMS_TO_TICKS(ms))` |
+| `usmp_port_millis` | `esp_timer_get_time() / 1000` |
+| `usmp_port_log` | `ESP_LOGI/W/E` |
 
 ## TCP transport
 
@@ -36,21 +36,21 @@ for lower handshake latency.
 
 ```c
 // Initialize and connect
-dxp_transport_t transport = {0};
-if (dxp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
+usmp_transport_t transport = {0};
+if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
     // connection failed
 }
 
-// Pass to dxp_connect
-dxp_t ctx = {0};
-dxp_connect(&ctx, &transport);
+// Pass to usmp_connect
+usmp_t ctx = {0};
+usmp_connect(&ctx, &transport);
 ```
 
 ## Memory usage
 
 | Component | RAM |
 |-----------|-----|
-| `dxp_t` context | ~60 bytes |
+| `usmp_t` context | ~60 bytes |
 | TX/RX buffers | ~1KB (stack, during send/recv) |
 | mbedtls ECDH (handshake only) | ~4KB (stack, freed after handshake) |
 

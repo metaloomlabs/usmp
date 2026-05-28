@@ -1,8 +1,8 @@
-# DXP — Device Exchange Protocol | Specification v0.1
+# USMP — Device Exchange Protocol | Specification v0.1
 
 ## 1. Overview
 
-DXP is a lightweight, binary, application-layer protocol for secure authenticated
+USMP is a lightweight, binary, application-layer protocol for secure authenticated
 communication between constrained embedded devices and a host gateway.
 
 ### Design principles
@@ -25,7 +25,7 @@ communication between constrained embedded devices and a host gateway.
 
 ## 3. Frame Format
 
-Every DXP message is a frame with the following structure:
+Every USMP message is a frame with the following structure:
 
 ```
 Offset  Size  Field    Description
@@ -160,7 +160,7 @@ shared        = X25519(priv_local, pub_peer)
 session_key   = HKDF-SHA256(
     ikm   = shared,
     salt  = nonce,
-    info  = "dxp-v1" || pub_C(32) || pub_S(32),
+    info  = "usmp-v1" || pub_C(32) || pub_S(32),
     len   = 32
 )
 ```
@@ -350,7 +350,7 @@ shared_secret : (32 bytes of 0x01)
 nonce         : (32 bytes of 0x02)
 pub_C         : (32 bytes of 0x03)
 pub_S         : (32 bytes of 0x04)
-info          : "dxp-v1" || pub_C || pub_S
+info          : "usmp-v1" || pub_C || pub_S
 
 expected_key  : to be computed by reference implementation
 ```

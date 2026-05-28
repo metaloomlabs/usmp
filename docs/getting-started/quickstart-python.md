@@ -1,6 +1,6 @@
 # Quick Start — Python Gateway
 
-Set up a DXP gateway in Python that accepts connections from ESP32 devices.
+Set up a USMP gateway in Python that accepts connections from ESP32 devices.
 
 ## Prerequisites
 
@@ -12,13 +12,13 @@ Set up a DXP gateway in Python that accepts connections from ESP32 devices.
 ## Step 1 — Install the SDK
 
 ```bash
-pip install dxp-python
+pip install usmp-python
 ```
 
 Or with uv:
 
 ```bash
-uv add dxp-python
+uv add usmp-python
 ```
 
 ---
@@ -27,16 +27,16 @@ uv add dxp-python
 
 ```python title="server.py"
 import asyncio
-from dxp import DXPServer, DXPSession
+from usmp import USMPServer, USMPSession
 
-PSK    = b"dxp-dev-psk-change-me-before-prod"
+PSK    = b"usmp-dev-psk-change-me-before-prod"
 HOST   = "0.0.0.0"
 PORT   = 9000
 
-server = DXPServer(host=HOST, port=PORT, psk=PSK)
+server = USMPServer(host=HOST, port=PORT, psk=PSK)
 
 @server.on_session
-async def handle(session: DXPSession):
+async def handle(session: USMPSession):
     print(f"Device connected: {session.device_id}")
 
     while True:
@@ -60,9 +60,9 @@ python server.py
 Flash your ESP32 with the [ESP32 Quick Start](quickstart-esp32.md) code pointing to your machine's IP address. You should see:
 
 ```txt
-[DXP] Listening on 0.0.0.0:9000
-[DXP] TCP connected: ('192.168.1.x', xxxxx)
-[DXP] Session established: device=aa:bb:cc:dd:ee:ff session=12345678
+[USMP] Listening on 0.0.0.0:9000
+[USMP] TCP connected: ('192.168.1.x', xxxxx)
+[USMP] Session established: device=aa:bb:cc:dd:ee:ff session=12345678
 Device connected: aa:bb:cc:dd:ee:ff
 Received: b'hello from ESP32'
 ```
@@ -71,16 +71,16 @@ Received: b'hello from ESP32'
 
 ## Connect as a client (Python → Python)
 
-You can also use DXP from Python to Python — useful for testing:
+You can also use USMP from Python to Python — useful for testing:
 
 ```python title="client.py"
 import asyncio
-from dxp import DXPClient
+from usmp import USMPClient
 
-PSK = b"dxp-dev-psk-change-me-before-prod"
+PSK = b"usmp-dev-psk-change-me-before-prod"
 
 async def main():
-    client = DXPClient(host="127.0.0.1", port=9000, psk=PSK)
+    client = USMPClient(host="127.0.0.1", port=9000, psk=PSK)
     await client.connect()
 
     await client.send(b"hello from Python")
@@ -96,11 +96,11 @@ asyncio.run(main())
 
 ## Multiple devices
 
-`DXPServer` handles multiple concurrent connections automatically:
+`USMPServer` handles multiple concurrent connections automatically:
 
 ```python
 @server.on_session
-async def handle(session: DXPSession):
+async def handle(session: USMPSession):
     # This runs concurrently for each connected device
     device = session.device_id
     print(f"[{device}] connected")
