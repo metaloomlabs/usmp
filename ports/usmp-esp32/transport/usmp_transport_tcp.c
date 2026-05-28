@@ -1,6 +1,6 @@
-#include "dxp_transport.h"
-#include "dxp_port.h"
-#include "dxp_frame.h"
+#include "usmp_transport.h"
+#include "usmp_port.h"
+#include "usmp_frame.h"
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/tcp.h>
@@ -10,18 +10,18 @@
 #include <sys/ioctl.h>
 
 // ── TCP context ───────────────────────────────────────────────────────────────
-// Allocated once in dxp_transport_tcp_init, lives for the lifetime of the
+// Allocated once in usmp_transport_tcp_init, lives for the lifetime of the
 // transport. Not freed on close — allows reconnect without losing ip/port.
 typedef struct
 {
     int sock;
     char server_ip[64];
     int port;
-} dxp_tcp_ctx_t;
+} usmp_tcp_ctx_t;
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-static int tcp_dial(dxp_tcp_ctx_t *tcp)
+static int tcp_dial(usmp_tcp_ctx_t *tcp)
 {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0)
@@ -53,9 +53,9 @@ static int tcp_dial(dxp_tcp_ctx_t *tcp)
 
 // ── Transport hooks ───────────────────────────────────────────────────────────
 
-static int dxp_tcp_send(dxp_transport_t *t, const uint8_t *data, size_t len)
+static int usmp_tcp_send(usmp_transport_t *t, const uint8_t *data, size_t len)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)t->ctx;
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
     size_t sent = 0;
     while (sent < len)
     {
@@ -67,17 +67,17 @@ static int dxp_tcp_send(dxp_transport_t *t, const uint8_t *data, size_t len)
     return 0;
 }
 
-static int dxp_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
+static int usmp_tcp_recv(usmp_transport_t *t, uint8_t *buf, size_t max_len)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)t->ctx;
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
 
     // Step 1: read header exactly
-    if (max_len < DXP_HEADER_SIZE)
+    if (max_len < USMP_HEADER_SIZE)
         return -1;
     size_t received = 0;
-    while (received < DXP_HEADER_SIZE)
+    while (received < USMP_HEADER_SIZE)
     {
-        ssize_t n = recv(tcp->sock, buf + received, DXP_HEADER_SIZE - received, 0);
+        ssize_t n = recv(tcp->sock, buf + received, USMP_HEADER_SIZE - received, 0);
         if (n <= 0)
             return -1;
         received += n;
@@ -85,16 +85,16 @@ static int dxp_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
 
     // Step 2: parse payload length from header
     uint16_t payload_len = buf[8] | (buf[9] << 8);
-    if (payload_len > DXP_MAX_PAYLOAD)
+    if (payload_len > USMP_MAX_PAYLOAD)
         return -1;
-    if (DXP_HEADER_SIZE + payload_len > max_len)
+    if (USMP_HEADER_SIZE + payload_len > max_len)
         return -1;
 
     // Step 3: read payload exactly
-    while (received < DXP_HEADER_SIZE + payload_len)
+    while (received < USMP_HEADER_SIZE + payload_len)
     {
         ssize_t n = recv(tcp->sock, buf + received,
-                         DXP_HEADER_SIZE + payload_len - received, 0);
+                         USMP_HEADER_SIZE + payload_len - received, 0);
         if (n <= 0)
             return -1;
         received += n;
@@ -103,9 +103,9 @@ static int dxp_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
     return (int)received;
 }
 
-static void dxp_tcp_close(dxp_transport_t *t)
+static void usmp_tcp_close(usmp_transport_t *t)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)t->ctx;
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
     if (tcp && tcp->sock >= 0)
     {
         close(tcp->sock);
@@ -114,9 +114,9 @@ static void dxp_tcp_close(dxp_transport_t *t)
     // ctx intentionally NOT freed — ip/port retained for reconnect
 }
 
-static int dxp_tcp_reconnect(dxp_transport_t *t)
+static int usmp_tcp_reconnect(usmp_transport_t *t)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)t->ctx;
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
     if (!tcp)
         return -1;
 
@@ -130,9 +130,9 @@ static int dxp_tcp_reconnect(dxp_transport_t *t)
     return tcp_dial(tcp);
 }
 
-static int dxp_tcp_available(dxp_transport_t *t)
+static int usmp_tcp_available(usmp_transport_t *t)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)t->ctx;
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
     if (!tcp || tcp->sock < 0)
         return 0;
     int count = 0;
@@ -143,9 +143,9 @@ static int dxp_tcp_available(dxp_transport_t *t)
 
 // ── Factory ───────────────────────────────────────────────────────────────────
 
-int dxp_transport_tcp_init(dxp_transport_t *t, const char *server_ip, int port)
+int usmp_transport_tcp_init(usmp_transport_t *t, const char *server_ip, int port)
 {
-    dxp_tcp_ctx_t *tcp = (dxp_tcp_ctx_t *)malloc(sizeof(dxp_tcp_ctx_t));
+    usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)malloc(sizeof(usmp_tcp_ctx_t));
     if (!tcp)
         return -1;
 
@@ -160,11 +160,11 @@ int dxp_transport_tcp_init(dxp_transport_t *t, const char *server_ip, int port)
         return -1;
     }
 
-    t->send = dxp_tcp_send;
-    t->recv = dxp_tcp_recv;
-    t->close = dxp_tcp_close;
-    t->reconnect = dxp_tcp_reconnect;
-    t->available = dxp_tcp_available;
+    t->send = usmp_tcp_send;
+    t->recv = usmp_tcp_recv;
+    t->close = usmp_tcp_close;
+    t->reconnect = usmp_tcp_reconnect;
+    t->available = usmp_tcp_available;
     t->ctx = tcp;
 
     return 0;

@@ -1,4 +1,4 @@
-#include "dxp_port.h"
+#include "usmp_port.h"
 #include "esp_mac.h"
 #include "esp_random.h"
 #include "esp_timer.h"
@@ -8,14 +8,14 @@
 #include <stdio.h>
 #include <string.h>
 
-int dxp_port_get_device_id(uint8_t *out, size_t len)
+int usmp_port_get_device_id(uint8_t *out, size_t len)
 {
     if (!out || len < 6)
         return -1;
     return esp_read_mac(out, ESP_MAC_WIFI_STA) == ESP_OK ? 0 : -1;
 }
 
-int dxp_port_random(uint8_t *out, size_t len)
+int usmp_port_random(uint8_t *out, size_t len)
 {
     if (!out)
         return -1;
@@ -23,17 +23,17 @@ int dxp_port_random(uint8_t *out, size_t len)
     return 0;
 }
 
-void dxp_port_delay_ms(uint32_t ms)
+void usmp_port_delay_ms(uint32_t ms)
 {
     vTaskDelay(pdMS_TO_TICKS(ms));
 }
 
-uint32_t dxp_port_millis(void)
+uint32_t usmp_port_millis(void)
 {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
-void dxp_port_log(char level, const char *tag, const char *msg)
+void usmp_port_log(char level, const char *tag, const char *msg)
 {
     switch (level)
     {

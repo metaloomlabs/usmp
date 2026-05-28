@@ -1,8 +1,8 @@
-#include "DXP.h"
+#include "USMP.h"
 #include <string.h>
 #include <stdio.h>
 
-DXPClient::DXPClient(const char *psk)
+USMPClient::USMPClient(const char *psk)
     : _psk(psk),
       _initialized(false),
       _backoff_ms(2000),
@@ -19,47 +19,47 @@ DXPClient::DXPClient(const char *psk)
 
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
-void DXPClient::_apply_psk()
+void USMPClient::_apply_psk()
 {
     _ctx.psk     = (const uint8_t *)_psk;
     _ctx.psk_len = strlen(_psk);
 }
 
-bool DXPClient::_do_reconnect()
+bool USMPClient::_do_reconnect()
 {
     _apply_psk();
-    return dxp_reconnect(&_ctx) == 0;
+    return usmp_reconnect(&_ctx) == 0;
 }
 
 // ── begin ─────────────────────────────────────────────────────────────────────
 
-bool DXPClient::begin(DXPTCPTransport transport)
+bool USMPClient::begin(USMPTCPTransport transport)
 {
     // ── WiFi ──────────────────────────────────────────────────────────────────
     if (transport._ssid) {
-        Serial.printf("[DXP] Connecting to WiFi: %s\n", transport._ssid);
+        Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
         if (!transport.connectWiFi()) {
-            Serial.println("[DXP] WiFi connect failed");
+            Serial.println("[USMP] WiFi connect failed");
             return false;
         }
-        Serial.printf("[DXP] WiFi connected — IP: %s\n",
+        Serial.printf("[USMP] WiFi connected — IP: %s\n",
                       WiFi.localIP().toString().c_str());
     }
 
     // ── TCP transport init ────────────────────────────────────────────────────
     memset(&_transport, 0, sizeof(_transport));
     if (!transport.init(&_transport)) {
-        Serial.println("[DXP] TCP connect failed");
+        Serial.println("[USMP] TCP connect failed");
         return false;
     }
 
-    // ── DXP handshake ─────────────────────────────────────────────────────────
+    // ── USMP handshake ─────────────────────────────────────────────────────────
     memset(&_ctx, 0, sizeof(_ctx));
     _apply_psk();
     _ctx.keepalive_ms = 30000; // 30s default
 
-    if (dxp_connect(&_ctx, &_transport) != 0) {
-        Serial.println("[DXP] Handshake failed");
+    if (usmp_connect(&_ctx, &_transport) != 0) {
+        Serial.println("[USMP] Handshake failed");
         return false;
     }
 
@@ -73,34 +73,34 @@ bool DXPClient::begin(DXPTCPTransport transport)
 
 // ── send ──────────────────────────────────────────────────────────────────────
 
-bool DXPClient::send(const char *str)
+bool USMPClient::send(const char *str)
 {
     return send((const uint8_t *)str, strlen(str));
 }
 
-bool DXPClient::send(const String &str)
+bool USMPClient::send(const String &str)
 {
     return send((const uint8_t *)str.c_str(), str.length());
 }
 
-bool DXPClient::send(const uint8_t *data, size_t len)
+bool USMPClient::send(const uint8_t *data, size_t len)
 {
     if (!_ctx.established) return false;
-    return dxp_send(&_ctx, data, (uint16_t)len) == 0;
+    return usmp_send(&_ctx, data, (uint16_t)len) == 0;
 }
 
 // ── receive ───────────────────────────────────────────────────────────────────
 
-bool DXPClient::available()
+bool USMPClient::available()
 {
     if (!_ctx.established)       return false;
     if (!_transport.available)   return false;
     return _transport.available(&_transport) > 0;
 }
 
-String DXPClient::read()
+String USMPClient::read()
 {
-    int n = dxp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
+    int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
     if (n <= 0) {
         _ctx.established = false;
         if (_on_disconnect) _on_disconnect();
@@ -109,9 +109,9 @@ String DXPClient::read()
     return String((char *)_rx_buf, n);
 }
 
-int DXPClient::read(uint8_t *buf, size_t max_len)
+int USMPClient::read(uint8_t *buf, size_t max_len)
 {
-    int n = dxp_recv(&_ctx, buf, max_len);
+    int n = usmp_recv(&_ctx, buf, max_len);
     if (n < 0) {
         _ctx.established = false;
         if (_on_disconnect) _on_disconnect();
@@ -121,12 +121,12 @@ int DXPClient::read(uint8_t *buf, size_t max_len)
 
 // ── state ─────────────────────────────────────────────────────────────────────
 
-bool DXPClient::alive()
+bool USMPClient::alive()
 {
-    return dxp_is_connected(&_ctx);
+    return usmp_is_connected(&_ctx);
 }
 
-String DXPClient::deviceId()
+String USMPClient::deviceId()
 {
     char buf[18];
     snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x",
@@ -135,7 +135,7 @@ String DXPClient::deviceId()
     return String(buf);
 }
 
-String DXPClient::sessionId()
+String USMPClient::sessionId()
 {
     char buf[9];
     snprintf(buf, sizeof(buf), "%02x%02x%02x%02x",
@@ -146,14 +146,14 @@ String DXPClient::sessionId()
 
 // ── keepalive ─────────────────────────────────────────────────────────────────
 
-void DXPClient::keepalive(uint32_t ms)
+void USMPClient::keepalive(uint32_t ms)
 {
     _ctx.keepalive_ms = ms;
 }
 
 // ── maintain ──────────────────────────────────────────────────────────────────
 
-void DXPClient::maintain()
+void USMPClient::maintain()
 {
     if (!_initialized) return;
 
@@ -174,7 +174,7 @@ void DXPClient::maintain()
     }
 
     // ── Alive — send keepalive PING if idle ───────────────────────────────────
-    if (dxp_keepalive_tick(&_ctx) < 0) {
+    if (usmp_keepalive_tick(&_ctx) < 0) {
         _ctx.established = false;
         if (_on_disconnect) _on_disconnect();
         return;
@@ -182,7 +182,7 @@ void DXPClient::maintain()
 
     // ── Non-blocking receive — fire onMessage if data waiting ─────────────────
     if (_on_message && available()) {
-        int n = dxp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
+        int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
         if (n > 0) {
             _on_message(_rx_buf, (size_t)n);
         } else if (n < 0) {
@@ -194,14 +194,14 @@ void DXPClient::maintain()
 
 // ── callbacks ─────────────────────────────────────────────────────────────────
 
-void DXPClient::onConnect   (void (*cb)())                            { _on_connect    = cb; }
-void DXPClient::onDisconnect(void (*cb)())                            { _on_disconnect = cb; }
-void DXPClient::onReconnect (void (*cb)())                            { _on_reconnect  = cb; }
-void DXPClient::onMessage   (void (*cb)(const uint8_t*, size_t len))  { _on_message    = cb; }
+void USMPClient::onConnect   (void (*cb)())                            { _on_connect    = cb; }
+void USMPClient::onDisconnect(void (*cb)())                            { _on_disconnect = cb; }
+void USMPClient::onReconnect (void (*cb)())                            { _on_reconnect  = cb; }
+void USMPClient::onMessage   (void (*cb)(const uint8_t*, size_t len))  { _on_message    = cb; }
 
 // ── manual control ────────────────────────────────────────────────────────────
 
-bool DXPClient::reconnect()
+bool USMPClient::reconnect()
 {
     bool ok = _do_reconnect();
     if (ok) {
@@ -211,8 +211,8 @@ bool DXPClient::reconnect()
     return ok;
 }
 
-void DXPClient::close()
+void USMPClient::close()
 {
-    dxp_close(&_ctx);
+    usmp_close(&_ctx);
     _initialized = false;
 }

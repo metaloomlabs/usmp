@@ -1,11 +1,11 @@
-#include "DXPTransport.h"
+#include "USMPTransport.h"
 #include <string.h>
 
 // ── Transport hook implementations ────────────────────────────────────────────
 
-static int arduino_tcp_send(dxp_transport_t *t, const uint8_t *data, size_t len)
+static int arduino_tcp_send(usmp_transport_t *t, const uint8_t *data, size_t len)
 {
-    DXPArduinoTcpCtx *ctx = (DXPArduinoTcpCtx *)t->ctx;
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
     size_t sent = 0;
     while (sent < len) {
         size_t n = ctx->client.write(data + sent, len - sent);
@@ -15,20 +15,20 @@ static int arduino_tcp_send(dxp_transport_t *t, const uint8_t *data, size_t len)
     return 0;
 }
 
-static int arduino_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
+static int arduino_tcp_recv(usmp_transport_t *t, uint8_t *buf, size_t max_len)
 {
-    DXPArduinoTcpCtx *ctx = (DXPArduinoTcpCtx *)t->ctx;
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
     const uint32_t TIMEOUT_MS = 5000;
 
     // Step 1: read header exactly
-    if (max_len < DXP_HEADER_SIZE) return -1;
+    if (max_len < USMP_HEADER_SIZE) return -1;
     size_t   received = 0;
     uint32_t start    = millis();
-    while (received < DXP_HEADER_SIZE) {
+    while (received < USMP_HEADER_SIZE) {
         if (!ctx->client.connected())        return -1;
         if (millis() - start > TIMEOUT_MS)   return -1;
         if (ctx->client.available()) {
-            int n = ctx->client.read(buf + received, DXP_HEADER_SIZE - received);
+            int n = ctx->client.read(buf + received, USMP_HEADER_SIZE - received);
             if (n > 0) received += n;
         }
         delay(1);
@@ -36,17 +36,17 @@ static int arduino_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
 
     // Step 2: parse payload length
     uint16_t payload_len = buf[8] | (buf[9] << 8);
-    if (payload_len > DXP_MAX_PAYLOAD)                   return -1;
-    if (DXP_HEADER_SIZE + payload_len > max_len)         return -1;
+    if (payload_len > USMP_MAX_PAYLOAD)                   return -1;
+    if (USMP_HEADER_SIZE + payload_len > max_len)         return -1;
 
     // Step 3: read payload exactly
     start = millis();
-    while (received < DXP_HEADER_SIZE + payload_len) {
+    while (received < USMP_HEADER_SIZE + payload_len) {
         if (!ctx->client.connected())        return -1;
         if (millis() - start > TIMEOUT_MS)   return -1;
         if (ctx->client.available()) {
             int n = ctx->client.read(buf + received,
-                                     DXP_HEADER_SIZE + payload_len - received);
+                                     USMP_HEADER_SIZE + payload_len - received);
             if (n > 0) received += n;
         }
         delay(1);
@@ -55,31 +55,31 @@ static int arduino_tcp_recv(dxp_transport_t *t, uint8_t *buf, size_t max_len)
     return (int)received;
 }
 
-static void arduino_tcp_close(dxp_transport_t *t)
+static void arduino_tcp_close(usmp_transport_t *t)
 {
-    DXPArduinoTcpCtx *ctx = (DXPArduinoTcpCtx *)t->ctx;
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
     if (ctx) ctx->client.stop();
     // ctx intentionally NOT deleted — host/port retained for reconnect
 }
 
-static int arduino_tcp_reconnect(dxp_transport_t *t)
+static int arduino_tcp_reconnect(usmp_transport_t *t)
 {
-    DXPArduinoTcpCtx *ctx = (DXPArduinoTcpCtx *)t->ctx;
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
     if (!ctx) return -1;
     ctx->client.stop();
     return ctx->client.connect(ctx->host, ctx->port) ? 0 : -1;
 }
 
-static int arduino_tcp_available(dxp_transport_t *t)
+static int arduino_tcp_available(usmp_transport_t *t)
 {
-    DXPArduinoTcpCtx *ctx = (DXPArduinoTcpCtx *)t->ctx;
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
     if (!ctx || !ctx->client.connected()) return 0;
     return ctx->client.available();
 }
 
-// ── DXPTCPTransport methods ───────────────────────────────────────────────────
+// ── USMPTCPTransport methods ───────────────────────────────────────────────────
 
-bool DXPTCPTransport::connectWiFi() const
+bool USMPTCPTransport::connectWiFi() const
 {
     if (!_ssid) return true; // WiFi managed externally — nothing to do
     WiFi.begin(_ssid, _password);
@@ -91,9 +91,9 @@ bool DXPTCPTransport::connectWiFi() const
     return true;
 }
 
-bool DXPTCPTransport::init(dxp_transport_t *t) const
+bool USMPTCPTransport::init(usmp_transport_t *t) const
 {
-    DXPArduinoTcpCtx *ctx = new DXPArduinoTcpCtx();
+    USMPArduinoTcpCtx *ctx = new USMPArduinoTcpCtx();
     if (!ctx) return false;
 
     strncpy(ctx->host, _host, sizeof(ctx->host) - 1);

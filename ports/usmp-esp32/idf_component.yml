@@ -1,0 +1,5 @@
+version: "0.1.0"
+description: "USMP — Device Exchange Protocol. ESP32 port."
+url: "https://github.com/winterx64/usmp"
+dependencies:
+  idf: ">=5.0.0"

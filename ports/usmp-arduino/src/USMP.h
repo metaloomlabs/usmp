@@ -1,15 +1,15 @@
 #pragma once
 #include <Arduino.h>
-#include "DXPTransport.h"
+#include "USMPTransport.h"
 
 extern "C" {
-#include "dxp_api.h"
+#include "usmp_api.h"
 }
 
-class DXPClient {
+class USMPClient {
 public:
-    explicit DXPClient(const char *psk);
-    bool begin(DXPTCPTransport transport);
+    explicit USMPClient(const char *psk);
+    bool begin(USMPTCPTransport transport);
     bool send(const char *str);
     bool send(const String &str);
     bool send(const uint8_t *data, size_t len);
@@ -29,8 +29,8 @@ public:
     void close();
 private:
     const char         *_psk;
-    dxp_t               _ctx;
-    dxp_transport_t     _transport;
+    usmp_t               _ctx;
+    usmp_transport_t     _transport;
     bool                _initialized;
     uint32_t            _backoff_ms;
     uint32_t            _last_attempt_ms;
@@ -38,7 +38,7 @@ private:
     void (*_on_disconnect)();
     void (*_on_reconnect)();
     void (*_on_message)(const uint8_t *data, size_t len);
-    uint8_t _rx_buf[DXP_MAX_DATA_LEN];
+    uint8_t _rx_buf[USMP_MAX_DATA_LEN];
     void _apply_psk();
     bool _do_reconnect();
 };

@@ -1,4 +1,4 @@
-#include "dxp_port.h"
+#include "usmp_port.h"
 #include <Arduino.h>
 
 #ifdef ESP32
@@ -8,7 +8,7 @@
 
 extern "C" {
 
-int dxp_port_get_device_id(uint8_t *out, size_t len)
+int usmp_port_get_device_id(uint8_t *out, size_t len)
 {
     if (!out || len < 6) return -1;
 #ifdef ESP32
@@ -21,7 +21,7 @@ int dxp_port_get_device_id(uint8_t *out, size_t len)
 #endif
 }
 
-int dxp_port_random(uint8_t *out, size_t len)
+int usmp_port_random(uint8_t *out, size_t len)
 {
     if (!out) return -1;
 #ifdef ESP32
@@ -35,17 +35,17 @@ int dxp_port_random(uint8_t *out, size_t len)
     return 0;
 }
 
-void dxp_port_delay_ms(uint32_t ms)
+void usmp_port_delay_ms(uint32_t ms)
 {
     delay(ms);
 }
 
-uint32_t dxp_port_millis(void)
+uint32_t usmp_port_millis(void)
 {
     return millis();
 }
 
-void dxp_port_log(char level, const char *tag, const char *msg)
+void usmp_port_log(char level, const char *tag, const char *msg)
 {
     Serial.printf("[%c][%s] %s\n", level, tag, msg);
 }

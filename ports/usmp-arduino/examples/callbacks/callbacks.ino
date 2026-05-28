@@ -1,30 +1,30 @@
-#include <DXP.h>
+#include <USMP.h>
 
-#define PSK        "dxp-dev-psk-change-me-before-prod"
+#define PSK        "usmp-dev-psk-change-me-before-prod"
 #define SERVER_IP  "192.168.137.1"
 #define WIFI_SSID  "YourNetwork"
 #define WIFI_PASS  "YourPassword"
 
-DXPClient dxp(PSK);
+USMPClient usmp(PSK);
 
 // ── Callbacks ─────────────────────────────────────────────────────────────────
 
 void onConnect() {
-    Serial.println("[DXP] Connected — session: " + dxp.sessionId());
-    dxp.send("hello from arduino");
+    Serial.println("[USMP] Connected — session: " + usmp.sessionId());
+    usmp.send("hello from arduino");
 }
 
 void onDisconnect() {
-    Serial.println("[DXP] Disconnected — maintain() will reconnect");
+    Serial.println("[USMP] Disconnected — maintain() will reconnect");
 }
 
 void onReconnect() {
-    Serial.println("[DXP] Reconnected — new session: " + dxp.sessionId());
-    dxp.send("reconnected");
+    Serial.println("[USMP] Reconnected — new session: " + usmp.sessionId());
+    usmp.send("reconnected");
 }
 
 void onMessage(const uint8_t *data, size_t len) {
-    Serial.printf("[DXP] RX (%d bytes): %.*s\n", len, len, data);
+    Serial.printf("[USMP] RX (%d bytes): %.*s\n", len, len, data);
 }
 
 // ── Setup ─────────────────────────────────────────────────────────────────────
@@ -32,18 +32,18 @@ void onMessage(const uint8_t *data, size_t len) {
 void setup() {
     Serial.begin(115200);
 
-    dxp.keepalive(15000);        // PING every 15s
-    dxp.onConnect(onConnect);
-    dxp.onDisconnect(onDisconnect);
-    dxp.onReconnect(onReconnect);
-    dxp.onMessage(onMessage);
+    usmp.keepalive(15000);        // PING every 15s
+    usmp.onConnect(onConnect);
+    usmp.onDisconnect(onDisconnect);
+    usmp.onReconnect(onReconnect);
+    usmp.onMessage(onMessage);
 
-    dxp.begin(DXP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS));
+    usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS));
     // Callbacks fire automatically — no need to check return value here
 }
 
 // ── Loop ──────────────────────────────────────────────────────────────────────
 
 void loop() {
-    dxp.maintain(); // drives everything
+    usmp.maintain(); // drives everything
 }
