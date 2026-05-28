@@ -1,6 +1,6 @@
 # tests/test_integration.py
 """
-Integration tests — real DXPServer + DXPClient over loopback TCP.
+Integration tests — real USMPServer + USMPClient over loopback TCP.
 Full handshake, encrypted send/recv, ping/pong, timeout watchdog,
 wrong PSK rejection, BYE handling.
 """
@@ -12,7 +12,7 @@ import usmp
 from usmp import USMPServer, USMPClient, USMPSession
 from usmp.errors import ConnectionClosedError
 
-PSK = b"dxp-test-psk-integration"
+PSK = b"usmp-test-psk-integration"
 WRONG_PSK = b"wrong-psk"
 HOST = "127.0.0.1"
 
@@ -230,7 +230,7 @@ async def test_large_payload():
     async def client_coro():
         client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
-        payload = bytes(range(256)) * 1  # 256 bytes — well within DXP_MAX_DATA_LEN
+        payload = bytes(range(256)) * 1  # 256 bytes — well within USMP_MAX_DATA_LEN
         await client.send(payload)
         reply = await client.recv()
         await client.disconnect()

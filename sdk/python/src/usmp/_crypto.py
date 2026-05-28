@@ -1,4 +1,4 @@
-# src/dxp/_crypto.py
+# src/usmp/_crypto.py
 
 import struct
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
@@ -32,13 +32,13 @@ def derive_session_key(
     session_key = HKDF-SHA256(
         ikm  = X25519(priv, peer_pub),
         salt = nonce,
-        info = "dxp-v1" || pub_C || pub_S,
+        info = "usmp-v1" || pub_C || pub_S,
         len  = 32
     )
     """
     peer_key = X25519PublicKey.from_public_bytes(peer_pub)
     shared_secret = priv_key.exchange(peer_key)
-    info = b"dxp-v1" + pub_c + pub_s
+    info = b"usmp-v1" + pub_c + pub_s
 
     return HKDF(
         algorithm=hashes.SHA256(),

@@ -1,4 +1,4 @@
-# src/dxp/_client.py
+# src/usmp/_client.py
 
 import asyncio
 import os

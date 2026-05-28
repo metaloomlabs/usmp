@@ -1,4 +1,4 @@
-# src/dxp/_session.py
+# src/usmp/_session.py
 
 import time
 from .types import PacketType, SessionInfo, USMP_MAGIC, USMP_VERSION

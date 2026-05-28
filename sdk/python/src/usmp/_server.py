@@ -1,4 +1,4 @@
-# src/dxp/_server.py
+# src/usmp/_server.py
 
 import asyncio
 import logging

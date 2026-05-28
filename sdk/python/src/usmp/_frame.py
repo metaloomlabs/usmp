@@ -1,4 +1,4 @@
-# src/dxp/_frame.py
+# src/usmp/_frame.py
 
 import struct
 from .types import (
@@ -131,7 +131,7 @@ async def write_frame(
     payload: bytes,
     seq: int = 0,
 ) -> None:
-    """Write a DXP frame to an asyncio StreamWriter."""
+    """Write a USMP frame to an asyncio StreamWriter."""
     data = encode_frame(type_, payload, seq)
     writer.write(data)
     await writer.drain()

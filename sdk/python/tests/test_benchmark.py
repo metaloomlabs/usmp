@@ -195,7 +195,7 @@ async def test_bench_handshake():
         t = await _run_handshake_once()
         times.append(t)
 
-    passed = print_benchmark("Full DXP handshake (loopback TCP)", times, target_ms=50.0)
+    passed = print_benchmark("Full USMP handshake (loopback TCP)", times, target_ms=50.0)
     assert passed, f"Handshake p95 exceeded 50ms target"
 
 

@@ -1,4 +1,4 @@
-# src/dxp/errors.py
+# src/usmp/errors.py
 
 
 class USMPError(Exception):

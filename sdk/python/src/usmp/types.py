@@ -1,4 +1,4 @@
-# src/dxp/types.py
+# src/usmp/types.py
 
 from dataclasses import dataclass
 from enum import IntEnum
@@ -59,7 +59,7 @@ class USMPFrame:
 
     def __str__(self) -> str:
         return (
-            f"DXPFrame("
+            f"USMPFrame("
             f"type={self.type_name()}, "
             f"seq={self.seq}, "
             f"version={self.version}, "

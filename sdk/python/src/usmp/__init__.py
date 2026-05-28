@@ -1,4 +1,4 @@
-# src/dxp/__init__.py
+# src/usmp/__init__.py
 
 from .types import USMPFrame, SessionInfo, PacketType, ErrorCode
 from .errors import (

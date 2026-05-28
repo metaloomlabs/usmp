@@ -28,7 +28,7 @@ async def server_handshake(
     psk: bytes,
 ) -> SessionInfo:
     """
-    Run the server side of the DXP handshake.
+    Run the server side of the USMP handshake.
     Returns SessionInfo on success, raises HandshakeError on failure.
     """
 
@@ -95,7 +95,7 @@ async def client_handshake(
     device_id: bytes,
 ) -> SessionInfo:
     """
-    Run the client side of the DXP handshake.
+    Run the client side of the USMP handshake.
     """
 
     # ── Generate client keypair ───────────────────────────────────────────────
