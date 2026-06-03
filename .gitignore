@@ -1,1 +1,8 @@
+# c core and firmware
 build
+
+# python sdk
+.pytest_cache
+.venv
+dist
+__pycache__
