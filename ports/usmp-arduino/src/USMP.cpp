@@ -86,7 +86,12 @@ bool USMPClient::send(const String &str)
 bool USMPClient::send(const uint8_t *data, size_t len)
 {
     if (!_ctx.established) return false;
-    return usmp_send(&_ctx, data, (uint16_t)len) == 0;
+    if (usmp_send(&_ctx, data, (uint16_t)len) != 0) {
+        _ctx.established = false;
+        if (_on_disconnect) _on_disconnect();
+        return false;
+    }
+    return true;
 }
 
 // ── receive ───────────────────────────────────────────────────────────────────
