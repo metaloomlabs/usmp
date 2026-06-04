@@ -45,6 +45,33 @@ Include the single public header:
 #include "usmp_transport.h"
 ```
 
+## Arduino Library (ESP32)
+
+### Requirements
+
+- Arduino IDE v2.0 or later (or PlatformIO)
+- ESP32 Arduino Core v2.0 or later installed in your IDE
+
+### Installation
+
+=== "Import ZIP Library"
+    The repository includes a pre-packaged `usmp-arduino.zip` in the root directory.
+    1. Open your Arduino IDE.
+    2. Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
+    3. Choose `usmp-arduino.zip` from your local clone.
+
+=== "Manual Installation"
+    1. Clone the repository.
+    2. Copy the `ports/usmp-arduino/` directory into your Arduino libraries folder (usually `Documents/Arduino/libraries/`).
+    3. Rename the copied folder to `USMP`.
+    4. Restart your Arduino IDE.
+
+### Include the Library
+
+```cpp
+#include <USMP.h>
+```
+
 ## Python SDK
 
 ### Requirements
@@ -77,11 +104,17 @@ uv add --editable sdk/python
 
 The PSK must match on both sides. The default is for development only:
 
-=== "ESP32"
+=== "ESP32 (ESP-IDF)"
     ```c
     // Define before including usmp.h
     #define USMP_PSK "your-secret-psk-here"
     #include "usmp.h"
+    ```
+
+=== "Arduino"
+    ```cpp
+    // Passed directly into the client constructor
+    USMPClient usmp("your-secret-psk-here");
     ```
 
 === "Python"
@@ -101,9 +134,15 @@ The PSK must match on both sides. The default is for development only:
 
 Default port is `9000`. Change it:
 
-=== "ESP32"
+=== "ESP32 (ESP-IDF)"
     ```c
     usmp_transport_tcp_init(&transport, "192.168.1.100", 8888);
+    ```
+
+=== "Arduino"
+    ```cpp
+    // Pass port as the second parameter to USMP::TCP (default is 9000)
+    usmp.begin(USMP::TCP("192.168.1.100", 8888).wifi("SSID", "PASS"));
     ```
 
 === "Python"

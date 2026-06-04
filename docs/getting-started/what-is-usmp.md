@@ -1,6 +1,6 @@
 # What is USMP?
 
-USMP (Device Exchange Protocol) is a lightweight binary protocol for **secure, authenticated communication between embedded devices and a gateway**.
+USMP (Unified Secure Multi-transport Protocol) is a lightweight binary protocol for **secure, authenticated communication between embedded devices and a gateway**.
 
 It is designed for the gap that exists in the IoT ecosystem today:
 

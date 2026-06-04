@@ -26,20 +26,32 @@ firmware/
 
 ```python title="examples/python_server/esp32_server.py"
 import asyncio
-from usmp import USMPServer, USMPSession
+from usmp import USMPServer, USMPSession, ConnectionClosedError
 
-PSK    = b"usmp-dev-psk-change-me-before-prod"
-HOST   = "192.168.137.1"   # hotspot gateway IP
-PORT   = 9000
+PSK = b"usmp-dev-psk-change-me-before-prod"
+HOST = "0.0.0.0"
+PORT = 9000
 
 server = USMPServer(host=HOST, port=PORT, psk=PSK)
+
 
 @server.on_session
 async def handle(session: USMPSession):
     print(f"[SESSION] device={session.device_id} session={session.session_id}")
-    while True:
-        data = await session.recv()
-        print(f"[RX] {data!r}")
+    try:
+        while True:
+            data = await session.recv()
+            text = data.decode().strip()
+            try:
+                value = int(text)
+                result = value * 2
+                print(f"[RX] {value} → sending back {result}")
+                await session.send(str(result).encode())
+            except ValueError:
+                print(f"[SKIP] non-numeric: {text!r}")
+    except ConnectionClosedError:
+        print(f"[CLOSED] {session.device_id}")
+
 
 asyncio.run(server.serve())
 ```
@@ -59,26 +71,77 @@ static const char *TAG = "APP";
 
 void app_main(void)
 {
-    wifi_init();
-
-    usmp_transport_t transport = {0};
-    for (int i = 1; i <= 10; i++) {
-        if (usmp_transport_tcp_init(&transport, "192.168.137.1", 9000) == 0)
-            break;
-        vTaskDelay(pdMS_TO_TICKS(2000));
+    ESP_LOGI(TAG, "Initializing Wi-Fi");
+    if (!wifi_init())
+    {
+        ESP_LOGE(TAG, "Wi-Fi init failed");
+        return;
     }
+
+    const char *server_ip = "192.168.137.1";
+    const int port = USMP_DEFAULT_PORT;
 
     usmp_t ctx = {0};
-    if (usmp_connect(&ctx, &transport) != 0) return;
+    usmp_transport_t transport = {0};
 
-    usmp_send(&ctx, (uint8_t *)"hello encrypted world", 21);
-
-    while (usmp_is_connected(&ctx)) {
-        vTaskDelay(pdMS_TO_TICKS(5000));
-        usmp_send(&ctx, (uint8_t *)"ping", 4);
+    // ── Initial connect with retries ──────────────────────────────────────────
+    bool connected = false;
+    for (int attempt = 1; attempt <= USMP_CONNECT_RETRIES; ++attempt)
+    {
+        if (usmp_transport_tcp_init(&transport, server_ip, port) == 0)
+        {
+            ESP_LOGI(TAG, "TCP connected (attempt %d)", attempt);
+            connected = true;
+            break;
+        }
+        ESP_LOGW(TAG, "Attempt %d failed, retrying...", attempt);
+        vTaskDelay(pdMS_TO_TICKS(USMP_CONNECT_RETRY_MS));
     }
 
-    usmp_close(&ctx);
+    if (!connected)
+    {
+        ESP_LOGE(TAG, "Unable to connect to %s:%d", server_ip, port);
+        return;
+    }
+
+    if (usmp_connect(&ctx, &transport) != 0)
+    {
+        ESP_LOGE(TAG, "USMP connect failed");
+        return;
+    }
+
+    ctx.keepalive_ms = 15000; // PING every 15s if idle
+
+    const char *msg = "hello encrypted world";
+    if (usmp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
+        ESP_LOGI(TAG, "Message sent");
+
+    // ── Main loop — keepalive + reconnect ─────────────────────────────────────
+    while (true)
+    {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+
+        if (usmp_keepalive_tick(&ctx) == 0)
+            continue;
+
+        // ── Connection lost — reconnect ───────────────────────────────────────
+        ESP_LOGW(TAG, "Connection lost, reconnecting...");
+
+        int backoff_ms = 2000;
+        while (usmp_reconnect(&ctx) != 0)
+        {
+            ESP_LOGW(TAG, "Reconnect failed, retrying in %dms...", backoff_ms);
+            vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+            if (backoff_ms < 30000)
+                backoff_ms *= 2; // exponential backoff, cap at 30s
+        }
+
+        ESP_LOGI(TAG, "Reconnected");
+
+        // Re-send hello after new session
+        if (usmp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0)
+            ESP_LOGI(TAG, "Message sent");
+    }
 }
 ```
 
@@ -87,18 +150,18 @@ void app_main(void)
 **Python server:**
 
 ```
-[USMP] Listening on 192.168.137.1:9000
+[USMP] Listening on 0.0.0.0:9000
 [USMP] TCP connected: ('192.168.137.x', xxxxx)
 [USMP] Session established: device=aa:bb:cc:dd:ee:ff session=12345678
 [SESSION] device=aa:bb:cc:dd:ee:ff session=12345678
-[RX] b'hello encrypted world'
-[RX] b'ping'
-[RX] b'ping'
+[SKIP] non-numeric: 'hello encrypted world'
 ```
 
 **ESP32 serial:**
 
 ```
+I (xxx) APP: Initializing Wi-Fi
+I (xxx) APP: TCP connected (attempt 1)
 I (xxx) USMP_HS: HELLO sent
 I (xxx) USMP_HS: CHALLENGE received
 I (xxx) USMP_HS: X25519 shared secret computed

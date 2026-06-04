@@ -1,4 +1,4 @@
-# USMP — Device Exchange Protocol
+# USMP — Unified Secure Multi-transport Protocol
 
 > Secure, lightweight, transport-agnostic communication for embedded devices.
 
@@ -10,17 +10,19 @@ usmp_connect(&ctx, &transport);
 usmp_send(&ctx, data, len);
 ```
 
+---
+
 ## Why USMP?
 
 Most IoT protocols make you choose between **simple** and **secure**:
 
-| Protocol | Simple | Secure    | Embedded-friendly |
-|----------|--------|--------   |-------------------|
-| Raw TCP  | ✓      | ✗         | ✓                 |
-| MQTT     | ✓      | Needs TLS | Partial           |
-| TLS      | ✗      | ✓         | Heavy             |
-| CoAP     | ✓      | Needs DTLS| ✓                 |
-| **USMP**  | **✓**  | **✓**     | **✓**             |
+| Protocol | Simple | Secure | Embedded-friendly |
+|---|---|---|---|
+| Raw TCP | Yes | No | Yes |
+| MQTT | Yes | Needs TLS | Partial |
+| TLS | No | Yes | Heavy |
+| CoAP | Yes | Needs DTLS | Yes |
+| **USMP** | **Yes** | **Yes** | **Yes** |
 
 USMP is **secure by default**. There is no insecure mode. Every session is:
 
@@ -28,6 +30,8 @@ USMP is **secure by default**. There is no insecure mode. Every session is:
 - **Encrypted** — AES-256-GCM, mandatory
 - **Forward secret** — X25519 ephemeral keys, new per session
 - **Replay protected** — nonces + monotonic sequence numbers
+
+---
 
 ## How it works
 
@@ -44,43 +48,47 @@ ESP32                          Gateway
 
 The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5ms**.
 
+---
+
 ## Features
 
-- 🔐 **Mutual authentication** — PSK-based HMAC, both sides verified
-- 🔑 **Forward secrecy** — X25519 ephemeral key exchange per session
-- 🔒 **AES-256-GCM encryption** — mandatory, authenticated
-- 🔄 **Replay protection** — per-session nonces + sequence numbers
-- 🔌 **Transport agnostic** — TCP now, UART and UDP coming
-- 📦 **Simple API** — connect, send, recv, close
-- 🌐 **Cross-platform** — ESP32 today, STM32 and Arduino coming
-- 🐍 **Python SDK** — asyncio server and client
+- **Mutual authentication** — PSK-based HMAC, both sides verified
+- **Forward secrecy** — X25519 ephemeral key exchange per session
+- **AES-256-GCM encryption** — mandatory, authenticated
+- **Replay protection** — per-session nonces + sequence numbers
+- **Transport agnostic** — TCP now, UART and UDP coming
+- **Simple API** — connect, send, recv, close
+- **Cross-platform** — ESP32, Arduino (ESP32 cores), STM32 coming
+- **Python SDK** — asyncio server and client
 
 ---
 
 ## Status
 
-🚧 **Active Development — v0.1.0**
+**Active Development — v0.2.0**
 
 | Component | Status |
-|-----------|--------|
-| Protocol spec | ✅ Complete |
-| Frame layer | ✅ Working |
-| Handshake | ✅ Working |
-| AES-256-GCM encryption | ✅ Working |
-| Mutual authentication | ✅ Working |
-| ESP32 port | ✅ Working |
-| Python SDK | ✅ Working |
-| Transport abstraction | ✅ Working |
-| UART transport | 🚧 Coming |
-| CLI tool | 🚧 Coming |
-| mDNS discovery | 🚧 Coming |
-| Cloud bridge | 📋 Planned |
+|---|---|
+| Protocol spec | Complete |
+| Frame layer | Working |
+| Handshake | Working |
+| AES-256-GCM encryption | Working |
+| Mutual authentication | Working |
+| ESP32 port | Working |
+| Arduino port | Working |
+| Python SDK | Working |
+| Transport abstraction | Working |
+| UART transport | In Progress |
+| CLI tool | In Progress |
+| mDNS discovery | In Progress |
+| Cloud bridge | Planned |
 
 ---
 
 ## Quick links
 
 - [Quick Start (ESP32)](getting-started/quickstart-esp32.md)
+- [Quick Start (Arduino)](getting-started/quickstart-arduino.md)
 - [Quick Start (Python)](getting-started/quickstart-python.md)
 - [Protocol Specification](spec.md)
 - [Security Model](security/model.md)
