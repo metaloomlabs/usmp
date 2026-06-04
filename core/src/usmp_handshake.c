@@ -26,10 +26,10 @@ static int derive_session_key(
     if (!md)
         return -1;
 
-    uint8_t info[6 + PUB_KEY_LEN + PUB_KEY_LEN];
-    memcpy(info, "usmp-v1", 6);
-    memcpy(info + 6, pub_c, PUB_KEY_LEN);
-    memcpy(info + 6 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
+    uint8_t info[7 + PUB_KEY_LEN + PUB_KEY_LEN];
+    memcpy(info, "usmp-v1", 7);
+    memcpy(info + 7, pub_c, PUB_KEY_LEN);
+    memcpy(info + 7 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
 
     return mbedtls_hkdf(md,
                         nonce, nonce_len,
@@ -108,7 +108,7 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session)
     }
     // ── Seed RNG ──────────────────────────────────────────────────────────────
     if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                              (const uint8_t *)"usmp", 3) != 0)
+                              (const uint8_t *)"usmp", 4) != 0)
     {
         USMP_LOGE(TAG, "RNG seed failed");
         goto cleanup;
