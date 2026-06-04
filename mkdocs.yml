@@ -1,4 +1,4 @@
-site_name: USMP — Device Exchange Protocol
+site_name: USMP - Unified Secure Multi-transport Protocol
 site_description: Secure, lightweight communication protocol for embedded devices
 site_author: winterx64
 site_url: https://winterx64.github.io/usmp
@@ -67,34 +67,36 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Getting Started:
-    - What is USMP?: getting-started/what-is-usmp.md
-    - Quick Start (ESP32): getting-started/quickstart-esp32.md
-    - Quick Start (Python): getting-started/quickstart-python.md
-    - Installation: getting-started/installation.md
+      - What is USMP?: getting-started/what-is-usmp.md
+      - Quick Start (ESP32): getting-started/quickstart-esp32.md
+      - Quick Start (Arduino): getting-started/quickstart-arduino.md
+      - Quick Start (Python): getting-started/quickstart-python.md
+      - Installation: getting-started/installation.md
   - Protocol:
-    - Overview: protocol/overview.md
-    - Frame Format: protocol/frame-format.md
-    - Handshake: protocol/handshake.md
-    - Encryption: protocol/encryption.md
-    - Sequence Numbers: protocol/sequence-numbers.md
-    - Error Handling: protocol/error-handling.md
+      - Overview: protocol/overview.md
+      - Frame Format: protocol/frame-format.md
+      - Handshake: protocol/handshake.md
+      - Encryption: protocol/encryption.md
+      - Sequence Numbers: protocol/sequence-numbers.md
+      - Error Handling: protocol/error-handling.md
   - Ports:
-    - ESP32: ports/esp32.md
-    - Porting Guide: ports/porting-guide.md
+      - ESP32: ports/esp32.md
+      - Arduino: ports/arduino.md
+      - Porting Guide: ports/porting-guide.md
   - SDK:
-    - Python SDK: sdk/python.md
-    - USMPServer: sdk/server.md
-    - USMPClient: sdk/client.md
-    - USMPSession: sdk/session.md
+      - Python SDK: sdk/python.md
+      - USMPServer: sdk/server.md
+      - USMPClient: sdk/client.md
+      - USMPSession: sdk/session.md
   - Tools:
-    - CLI (coming soon): tools/cli.md
+      - CLI (coming soon): tools/cli.md
   - Security:
-    - Security Model: security/model.md
-    - PSK Management: security/psk.md
-    - Threat Model: security/threat-model.md
+      - Security Model: security/model.md
+      - PSK Management: security/psk.md
+      - Threat Model: security/threat-model.md
   - Examples:
-    - ESP32 + Python Server: examples/esp32-python.md
-    - D2D (coming soon): examples/d2d.md
+      - ESP32 + Python Server: examples/esp32-python.md
+      - D2D (coming soon): examples/d2d.md
   - Spec: spec.md
 
 extra:

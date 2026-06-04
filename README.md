@@ -1,4 +1,4 @@
-# USMP — Device Exchange Protocol | Specification v0.1
+# USMP — Unified Secure Multi-transport Protocol | Specification v0.2.0
 
 ## 1. Overview
 
@@ -372,4 +372,5 @@ expected ciphertext+tag : to be computed by reference implementation
 
 | Version | Date       | Changes                    |
 |---------|------------|----------------------------|
+| 0.2.0   | 2026-06-04 | Unified Secure Multi-transport Protocol v0.2.0 |
 | 0.1     | 2026-04-13 | Initial specification      |
