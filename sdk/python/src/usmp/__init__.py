@@ -12,6 +12,7 @@ from .errors import (
     AuthError,
     CryptoError,
     SequenceError,
+    TimeoutError,
     ConnectionClosedError,
 )
 from ._frame import encode_frame, decode_frame, read_frame, write_frame
@@ -36,6 +37,7 @@ __all__ = [
     "AuthError",
     "CryptoError",
     "SequenceError",
+    "TimeoutError",
     "ConnectionClosedError",
     # Frame
     "encode_frame",

@@ -14,8 +14,15 @@ async def handle(session: USMPSession):
     print(f"[SESSION] device={session.device_id} session={session.session_id}")
     try:
         while True:
-            data = await session.recv()  # transparently handles PING/PONG
-            print(f"[RX] {data}")
+            data = await session.recv()
+            text = data.decode().strip()
+            try:
+                value = int(text)
+                result = value * 2
+                print(f"[RX] {value} → sending back {result}")
+                await session.send(str(result).encode())
+            except ValueError:
+                print(f"[SKIP] non-numeric: {text!r}")
     except ConnectionClosedError:
         print(f"[CLOSED] {session.device_id}")
 
