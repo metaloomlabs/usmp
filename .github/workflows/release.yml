@@ -1,0 +1,147 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      force_arduino:
+        description: "Force build/release of Arduino ZIP"
+        type: boolean
+        required: false
+        default: false
+      force_python:
+        description: "Force test/build of Python SDK"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      arduino_changed: ${{ steps.filter.outputs.arduino }}
+      python_changed: ${{ steps.filter.outputs.python }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history and tags
+
+      - name: Check for changes since last tag
+        id: filter
+        run: |
+          git fetch --prune --unshallow || true
+          git fetch --tags || true
+          
+          # Find the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+          
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous tag found. Defaulting to building everything."
+            echo "arduino=true" >> $GITHUB_OUTPUT
+            echo "python=true" >> $GITHUB_OUTPUT
+          else
+            echo "Comparing HEAD against previous tag: $PREV_TAG"
+            
+            # Check for changes in ports/usmp-arduino or core
+            if git diff --name-only "$PREV_TAG" HEAD | grep -qE "^ports/usmp-arduino/|^core/"; then
+              echo "Changes detected in Arduino files."
+              echo "arduino=true" >> $GITHUB_OUTPUT
+            else
+              echo "No changes detected in Arduino files."
+              echo "arduino=false" >> $GITHUB_OUTPUT
+            fi
+            
+            # Check for changes in sdk/python
+            if git diff --name-only "$PREV_TAG" HEAD | grep -qE "^sdk/python/"; then
+              echo "Changes detected in Python SDK files."
+              echo "python=true" >> $GITHUB_OUTPUT
+            else
+              echo "No changes detected in Python SDK files."
+              echo "python=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+  release-arduino:
+    needs: check-changes
+    if: |
+      needs.check-changes.outputs.arduino_changed == 'true' ||
+      github.event.inputs.force_arduino == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install zip utility
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      - name: Make build script executable
+        run: chmod +x scripts/build-arduino-zip.sh
+
+      - name: Build Arduino ZIP
+        run: ./scripts/build-arduino-zip.sh
+
+      - name: Upload ZIP as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usmp-arduino
+          path: usmp-arduino.zip
+
+      - name: Upload ZIP to Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: usmp-arduino.zip
+
+  release-python:
+    needs: check-changes
+    if: |
+      needs.check-changes.outputs.python_changed == 'true' ||
+      github.event.inputs.force_python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv-action@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Install dependencies and run tests
+        run: |
+          cd sdk/python
+          uv run pytest tests/ -v
+
+      - name: Build Python distribution package
+        run: |
+          cd sdk/python
+          uv build
+
+      - name: Upload Python distribution package as Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: usmp-python-dist
+          path: sdk/python/dist/*
+
+      # - name: Publish Python package to PyPI
+      #   if: github.event_name == 'release'
+      #   env:
+      #     PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+      #   run: |
+      #     cd sdk/python
+      #     if [ -n "$PYPI_TOKEN" ]; then
+      #       uv publish --token "$PYPI_TOKEN"
+      #     else
+      #       echo "PYPI_API_TOKEN secret not set, skipping publish."
+      #     fi
