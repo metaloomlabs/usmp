@@ -5,7 +5,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="./"
+OUT="usmp-arduino"
 ZIP="$REPO/usmp-arduino.zip"
 
 echo "[USMP] Cleaning..."
@@ -47,7 +47,7 @@ done
 # ── Zip ───────────────────────────────────────────────────────────────────────
 echo "[USMP] Zipping..."
 cd "$REPO"
-zip -r "$ZIP" USMP
+zip -r "$ZIP" "$OUT"
 rm -rf "$OUT"
 
 echo "[USMP] Done: $ZIP"

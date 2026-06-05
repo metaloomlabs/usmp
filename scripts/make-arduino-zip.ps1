@@ -3,7 +3,7 @@
 Set-StrictMode -Off
 $ErrorActionPreference = "Stop"
 
-$OUT  = "USMP"
+$OUT  = "usmp-arduino"
 $ZIP  = "usmp-arduino.zip"
 $REPO = "./"
 
