@@ -11,6 +11,7 @@ USMPServer(
     psk:  bytes = b"",
     handshake_timeout: float = 10.0,
     session_timeout:   float = 60.0,
+    on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
 )
 ```
 
@@ -21,6 +22,7 @@ USMPServer(
 | `psk` | Pre-shared key — must match the device |
 | `handshake_timeout` | Seconds before a slow handshake is dropped |
 | `session_timeout` | Seconds before an idle session is dropped |
+| `on_timeout` | Optional async callback `fn(device_id, session_id)` called when a session times out |
 
 ## on_session decorator
 

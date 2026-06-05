@@ -145,16 +145,31 @@ static void my_close(usmp_transport_t *t)
     // Close the connection and free resources
 }
 
+static int my_reconnect(usmp_transport_t *t)
+{
+    // Re-dial the transport connection
+    // Return 0 on success, -1 on failure
+}
+
+static int my_available(usmp_transport_t *t)
+{
+    // Return the number of bytes waiting to be read from transport,
+    // or 0 if none. Return NULL/omit if not supported.
+    return 0;
+}
+
 // Factory function
 int usmp_transport_my_init(usmp_transport_t *t, /* your params */)
 {
     // Initialize your transport
     // Set up t->ctx with transport-specific state
 
-    t->send  = my_send;
-    t->recv  = my_recv;
-    t->close = my_close;
-    t->ctx   = /* your state */;
+    t->send      = my_send;
+    t->recv      = my_recv;
+    t->close     = my_close;
+    t->reconnect = my_reconnect;
+    t->available = my_available;
+    t->ctx       = /* your state */;
     return 0;
 }
 ```

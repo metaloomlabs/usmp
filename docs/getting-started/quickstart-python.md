@@ -12,13 +12,13 @@ Set up a USMP gateway in Python that accepts connections from ESP32 devices.
 ## Step 1 — Install the SDK
 
 ```bash
-pip install usmp-python
+pip install usmp
 ```
 
 Or with uv:
 
 ```bash
-uv add usmp-python
+uv add usmp
 ```
 
 ---

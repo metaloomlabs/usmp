@@ -81,13 +81,13 @@ Include the single public header:
 ### Install via pip
 
 ```bash
-pip install usmp-python
+pip install usmp
 ```
 
 ### Install via uv
 
 ```bash
-uv add usmp-python
+uv add usmp
 ```
 
 ### Install from source

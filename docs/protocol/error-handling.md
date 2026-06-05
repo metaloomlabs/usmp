@@ -55,10 +55,12 @@ from usmp.errors import (
     CRCError,           # CRC mismatch
     MagicError,         # bad magic bytes
     VersionError,       # unsupported version
+    PayloadError,       # payload exceeds max size
     HandshakeError,     # handshake failed
     AuthError,          # HMAC verification failed
     CryptoError,        # AES-GCM decryption failed
     SequenceError,      # sequence number mismatch
+    TimeoutError,       # handshake/session timeout
     ConnectionClosedError,  # remote closed connection
 )
 ```

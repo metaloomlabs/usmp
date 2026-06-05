@@ -124,7 +124,7 @@ Client                                Server
   │     hmac(32)                        │
   │                                     │
   │◀─── PKT_SESSION_OK ─────────────────│
-  │     session_id(4)                   │
+  │     session_id(4) || hmac_server(32)│
   │                                     │
   │════════ SESSION ESTABLISHED ════════│
 ```
@@ -182,12 +182,15 @@ send PKT_ERROR with ERR_AUTH and close the connection.
 
 ### 5.6 PKT_SESSION_OK (Server → Client)
 
-Payload (4 bytes):
+Payload (36 bytes):
 ```
-Offset  Size  Field       Description
-──────  ────  ──────────  ──────────────────────────
-0       4     session_id  Randomly generated session ID
+Offset  Size  Field        Description
+──────  ────  ───────────  ──────────────────────────
+0       4     session_id   Randomly generated session ID
+4       32    hmac_server  HMAC-SHA256(PSK, nonce || session_id)
 ```
+
+The client MUST verify this HMAC. If verification fails, the client MUST close the connection immediately (preventing connection to a rogue server).
 
 
 ## 6. Encryption

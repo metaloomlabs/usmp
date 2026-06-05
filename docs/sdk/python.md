@@ -6,7 +6,7 @@ for building gateways and test tools.
 ## Installation
 
 ```bash
-pip install usmp-python
+pip install usmp
 ```
 
 ## Architecture

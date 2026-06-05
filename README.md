@@ -192,7 +192,7 @@ Device                          Server
 session_key = HKDF-SHA256(
     ikm  = X25519(priv_C, pub_S),
     salt = nonce,
-    info = "dxp-v1" || pub_C || pub_S
+    info = "usmp-v1" || pub_C || pub_S
 )
 ```
 
@@ -260,7 +260,7 @@ bool usmp_is_connected(const usmp_t *ctx);
 ### Data
 
 ```c
-// Send encrypted data (max DXP_MAX_DATA_LEN = 464 bytes)
+// Send encrypted data (max USMP_MAX_DATA_LEN = 464 bytes)
 int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
 
 // Receive and decrypt data
@@ -450,7 +450,7 @@ v1.0.0 📋  Cloud bridge
 
 ## Security
 
-**Development PSK:** The default PSK `dxp-dev-psk-change-me-before-prod` is for development only. Always use a strong, secret PSK in production.
+**Development PSK:** The default PSK `usmp-dev-psk-change-me-before-prod` is for development only. Always use a strong, secret PSK in production.
 
 **Threat model:** USMP protects against passive eavesdropping, active MITM, replay attacks, and rogue server/device attacks. It does not protect against physical compromise of the device or PSK exposure.
 
