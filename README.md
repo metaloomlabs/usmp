@@ -1,376 +1,472 @@
-# USMP — Unified Secure Multi-transport Protocol | Specification v0.2.0
+# USMP | Unified Secure Multi-transport Protocol
 
-## 1. Overview
+> Secure, encrypted device communication for ESP32, Arduino, and IoT. E2E encrypted sessions that run anywhere.
 
-USMP is a lightweight, binary, application-layer protocol for secure authenticated
-communication between constrained embedded devices and a host gateway.
+[![Python SDK](https://img.shields.io/pypi/v/usmp?label=usmp&color=blue)](https://pypi.org/project/usmp)
+[![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)](#testing)
+[![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.3%2B-blue)](#esp32-esp-idf)
+[![Arduino](https://img.shields.io/badge/Arduino-ESP32-teal)](#arduino)
+[![License](https://img.shields.io/badge/license-MIT-green)](#license)
 
-### Design principles
-- Binary encoding, no JSON or XML
-- Mandatory encryption — no plaintext after handshake
-- Mutual authentication — both sides verify each other
-- Forward secrecy — ephemeral X25519 keys per session
-- Transport agnostic — runs over any reliable byte stream
-- Minimal — small enough to audit in a day
+## What is USMP?
 
+USMP fills the gap between **raw TCP (no security)** and **full TLS (too heavy for microcontrollers)**.
 
-## 2. Conventions
+It gives any constrained device a fully encrypted, mutually authenticated session with a gateway — with three function calls:
 
-- All multi-byte integers are **little-endian**
-- All lengths are in **bytes**
-- `u8`, `u16`, `u32` denote unsigned integers of 1, 2, 4 bytes
-- `bytes[N]` denotes a fixed-length byte array of N bytes
-- `bytes[*]` denotes a variable-length byte array
-
-
-## 3. Frame Format
-
-Every USMP message is a frame with the following structure:
-
-```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────────────────────────
-0       2     magic    Frame start marker. Always 0xABCD (LE)
-2       1     version  Protocol version. Currently 0x01
-3       1     type     Packet type (see Section 4)
-4       4     seq      Sequence number (u32 LE, starts at 0)
-8       2     length   Byte length of payload field (u16 LE)
-10      2     crc      CRC-16/IBM over bytes [0..9] + payload
-12      N     payload  Frame payload (N = length)
+```c
+usmp_transport_tcp_init(&transport, "192.168.1.1", 9000);
+usmp_connect(&ctx, &transport);
+usmp_send(&ctx, data, len);
 ```
 
-**Total header size: 12 bytes**
-**Maximum payload size: 480 bytes** (keeps total frame under 512 bytes)
+**No insecure mode. Every session has:**
 
-### 3.1 Magic
+- Mutual authentication — both sides verify each other via HMAC-SHA256 + PSK
+- Forward secrecy — X25519 ephemeral key exchange per session
+- Encryption — AES-256-GCM, mandatory
+- Replay protection — monotonic sequence numbers per session
 
-The magic bytes `0xABCD` serve as a frame start marker and basic corruption
-guard. A receiver that does not see `0xABCD` at offset 0 MUST discard the frame
-and close the connection.
+## Features
 
-### 3.2 Version
+- **Transport agnostic** — same protocol over TCP, UART (v0.4.0), BLE (planned)
+- **Platform agnostic** — pure C core with 5 platform hooks
+- **Reconnect + keepalive** — automatic PING/PONG, explicit reconnect API
+- **Python SDK** — asyncio `USMPServer`, `USMPClient`, `USMPSession`
+- **ESP32 ready** — ESP-IDF v5+ component, tested on real hardware
+- **Arduino ready** — installable `.zip` library, single `#include <USMP.h>`
+- **61 tests** — unit, crypto, handshake, integration, API surface
 
-Currently `0x01`. A receiver that receives an unsupported version MUST send
-a `PKT_ERROR` frame with code `ERR_VERSION` and close the connection.
+## Supported Platforms
 
-### 3.3 Sequence Number
+| Platform | Status |
+|---|---|
+| ESP32 (ESP-IDF v5+) | ✅ Production ready |
+| ESP32 (Arduino) | ✅ Production ready |
+| Python 3.11+ | ✅ Production ready |
+| STM32 | 🔜 Planned |
+| Linux | 🔜 Planned |
 
-- Starts at `0` for the first post-handshake frame
-- Increments by 1 for each frame sent in a given direction
-- TX and RX sequence numbers are independent (per-direction)
-- Handshake frames (types 0x01–0x04) always carry `seq = 0`
-- A receiver that receives an out-of-order sequence number MUST close
-  the connection
+## Quick Start
 
-### 3.4 CRC-16
+### Python Server
 
-CRC-16/IBM (polynomial 0xA001, initial value 0xFFFF) computed over:
-
-- Header bytes at offsets [0..9] (10 bytes, excludes the crc field itself)
-- Payload bytes
-
-The CRC field is at offset 10 and is NOT included in the CRC computation.
-A receiver MUST verify the CRC and discard frames with a bad CRC.
-
-### 3.5 Payload Encryption
-
-- Handshake frames (types 0x01–0x04): payload is **plaintext**
-- Post-handshake frames (types 0x05+): payload is **AES-256-GCM ciphertext**
-
-For encrypted frames, the payload field contains:
-
-```
-[ ciphertext (length - 16 bytes) ][ GCM authentication tag (16 bytes) ]
+```bash
+pip install usmp
 ```
 
-## 4. Packet Types
+```python
+import asyncio
+from usmp import USMPServer, USMPSession, ConnectionClosedError
 
-```
-Value  Name             Direction   Encrypted
-─────  ───────────────  ──────────  ─────────
-0x01   PKT_HELLO        C → S       No
-0x02   PKT_CHALLENGE    S → C       No
-0x03   PKT_HELLO_ACK    C → S       No
-0x04   PKT_SESSION_OK   S → C       No
-0x05   PKT_DATA         Both        Yes
-0x06   PKT_PING         Both        Yes
-0x07   PKT_PONG         Both        Yes
-0x08   PKT_BYE          Both        Yes
-0xFF   PKT_ERROR        Both        No
-```
+PSK = b"your-psk-here"
 
-C = Client (ESP32), S = Server (gateway)
+server = USMPServer(host="0.0.0.0", port=9000, psk=PSK)
 
+@server.on_session
+async def handle(session: USMPSession):
+    print(f"Device connected: {session.device_id}")
+    try:
+        while True:
+            data = await session.recv()
+            print(f"RX: {data}")
+            await session.send(b"ACK")
+    except ConnectionClosedError:
+        print(f"Device disconnected: {session.device_id}")
 
-## 5. Handshake
-
-The handshake establishes a mutually authenticated encrypted session.
-It MUST complete before any PKT_DATA frames are exchanged.
-
-### 5.1 Sequence
-
-```
-Client                                Server
-  │                                     │
-  │──── PKT_HELLO ─────────────────────▶│
-  │     device_id(6) || pub_C(32)       │
-  │                                     │
-  │◀─── PKT_CHALLENGE ──────────────────│
-  │     nonce(32) || pub_S(32)          │
-  │                                     │
-  │  [Both derive session key]          │
-  │                                     │
-  │──── PKT_HELLO_ACK ─────────────────▶│
-  │     hmac(32)                        │
-  │                                     │
-  │◀─── PKT_SESSION_OK ─────────────────│
-  │     session_id(4)                   │
-  │                                     │
-  │════════ SESSION ESTABLISHED ════════│
+asyncio.run(server.serve())
 ```
 
-### 5.2 PKT_HELLO (Client → Server)
+### ESP32 — ESP-IDF
 
-Payload (38 bytes):
+```c
+#include "usmp.h"
+#include "usmp_transport.h"
+
+void app_main(void) {
+    wifi_init();
+
+    usmp_t ctx = {0};
+    usmp_transport_t transport = {0};
+
+    usmp_transport_tcp_init(&transport, "192.168.1.1", 9000);
+    usmp_connect(&ctx, &transport);
+
+    ctx.keepalive_ms = 15000;
+
+    usmp_send(&ctx, (const uint8_t *)"hello", 5);
+
+    while (true) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        if (usmp_keepalive_tick(&ctx) < 0)
+            usmp_reconnect(&ctx);
+    }
+}
 ```
-Offset  Size  Field      Description
-──────  ────  ─────────  ──────────────────────────────────
-0       6     device_id  Client MAC address (WiFi STA)
-6       32    pub_C      Client X25519 ephemeral public key
+
+### ESP32 — Arduino
+
+```cpp
+#include <USMP.h>
+
+#define PSK       "your-psk-here"
+#define SERVER_IP "192.168.1.1"
+#define WIFI_SSID "YourNetwork"
+#define WIFI_PASS "YourPassword"
+
+USMPClient usmp(PSK);
+
+void setup() {
+    Serial.begin(115200);
+
+    if (!usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
+        Serial.println("Connect failed");
+        return;
+    }
+
+    Serial.println("Session: " + usmp.sessionId());
+    usmp.send("hello from arduino");
+}
+
+void loop() {
+    usmp.maintain(); // keepalive + reconnect
+
+    if (usmp.available())
+        Serial.println("RX: " + usmp.read());
+}
 ```
 
-### 5.3 PKT_CHALLENGE (Server → Client)
+## Protocol
 
-Payload (64 bytes):
+### Frame Format
+
+```py
+ 0               1               2               3
+ 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Magic (0xABCD)            | Version       | Type          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (32-bit)                   |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Payload Length            |     CRC-16/IBM                |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Payload (max 480 bytes, encrypted with AES-256-GCM)       |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────────────────────
-0       32    nonce    Cryptographically random 32-byte nonce
-32      32    pub_S    Server X25519 ephemeral public key
+
+### Packet Types
+
+| Value | Name | Direction |
+|---|---|---|
+| `0x01` | HELLO | Device → Server |
+| `0x02` | CHALLENGE | Server → Device |
+| `0x03` | HELLO_ACK | Device → Server |
+| `0x04` | SESSION_OK | Server → Device |
+| `0x05` | DATA | Both |
+| `0x06` | PING | Both |
+| `0x07` | PONG | Both |
+| `0x08` | BYE | Both |
+| `0xFF` | ERROR | Both |
+
+### Handshake
+
+```cpp
+Device                          Server
+  |                               |
+  |─── HELLO (device_id, pub_C) ─→|
+  |                               |
+  |←── CHALLENGE (nonce, pub_S) ──|
+  |                               |  ← X25519 shared secret computed
+  |                               |  ← HKDF session key derived
+  |                               |
+  |─── HELLO_ACK (HMAC_client) ──→|  ← Client proves PSK knowledge
+  |                               |
+  |←── SESSION_OK (id, HMAC_srv) ─|  ← Server proves PSK knowledge
+  |                               |
+  |   [Encrypted session begins]  |
 ```
 
-### 5.4 Session Key Derivation
+**Session key derivation:**
 
-Both sides independently derive the session key after receiving the peer
-public key:
-
-```
-shared        = X25519(priv_local, pub_peer)
-
-session_key   = HKDF-SHA256(
-    ikm   = shared,
-    salt  = nonce,
-    info  = "usmp-v1" || pub_C(32) || pub_S(32),
-    len   = 32
+```c
+session_key = HKDF-SHA256(
+    ikm  = X25519(priv_C, pub_S),
+    salt = nonce,
+    info = "dxp-v1" || pub_C || pub_S
 )
 ```
 
-Mixing both public keys into the HKDF `info` field binds the session key
-to this specific key exchange, preventing unknown key-share attacks.
+## Installation
 
-### 5.5 PKT_HELLO_ACK (Client → Server)
+### Python SDK
 
-Payload (32 bytes):
-```
-Offset  Size  Field  Description
-──────  ────  ─────  ──────────────────────────────────────────────
-0       32    hmac   HMAC-SHA256(PSK, nonce || device_id)
+```bash
+pip install usmp
+# or
+uv add usmp
 ```
 
-The server MUST verify this HMAC. If verification fails, the server MUST
-send PKT_ERROR with ERR_AUTH and close the connection.
+### ESP32 — ESP-IDF
 
-### 5.6 PKT_SESSION_OK (Server → Client)
+Add to your `idf_component.yml`:
 
-Payload (4 bytes):
-```
-Offset  Size  Field       Description
-──────  ────  ──────────  ──────────────────────────
-0       4     session_id  Randomly generated session ID
+```yaml
+dependencies:
+  metaloom/usmp: ">=0.2.0"
 ```
 
+Or clone and add as a local component:
 
-## 6. Encryption
-
-All post-handshake frames use AES-256-GCM.
-
-### 6.1 Nonce Construction
-
-The 12-byte GCM nonce is constructed as:
-
-```
-nonce = seq(4 LE) || session_id(4) || 0x00000000(4)
+```bash
+cd your_project/components
+git clone https://github.com/metaloom/usmp
 ```
 
-The sequence number ensures nonce uniqueness within a session.
-The session_id ensures nonce uniqueness across sessions.
+### Arduino
 
-### 6.2 Additional Authenticated Data (AAD)
+1. Download `usmp-arduino.zip` from [Releases](https://github.com/metaloom/usmp/releases)
+2. Arduino IDE → Sketch → Include Library → Add .ZIP Library
+3. Select the downloaded zip
 
-The AAD covers the frame header to detect tampering:
+Or build from source:
 
+```powershell
+.\scripts\build-arduino-zip.ps1
 ```
-aad = magic(2 LE) || version(1) || type(1) || seq(4 LE) || length(2 LE)
+
+---
+
+## C API Reference
+
+### Connection
+
+```c
+// Initialize TCP transport (allocates context internally)
+int usmp_transport_tcp_init(usmp_transport_t *t, const char *ip, int port);
+
+// Connect and perform handshake
+int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
+
+// Explicit reconnect — full new handshake, resets sequence numbers
+int usmp_reconnect(usmp_t *ctx);
+
+// Close session
+void usmp_close(usmp_t *ctx);
+
+// Check connection state
+bool usmp_is_connected(const usmp_t *ctx);
 ```
 
-**Note:** The `crc` field and the payload are NOT included in the AAD.
-Total AAD size: 10 bytes.
+### Data
 
-### 6.3 Encryption
+```c
+// Send encrypted data (max DXP_MAX_DATA_LEN = 464 bytes)
+int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
 
+// Receive and decrypt data
+int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
 ```
-(ciphertext, tag) = AES-256-GCM-Encrypt(
-    key   = session_key,
-    nonce = nonce,
-    aad   = aad,
-    plain = plaintext
+
+### Keepalive
+
+```c
+// Send PING frame
+int usmp_ping(usmp_t *ctx);
+
+// Call in main loop — sends PING if keepalive_ms elapsed since last TX
+// Returns -1 if connection dead (time to call usmp_reconnect)
+int usmp_keepalive_tick(usmp_t *ctx);
+```
+
+### Platform hooks (implement for your target)
+
+```c
+int      usmp_port_get_device_id(uint8_t *out, size_t len);
+int      usmp_port_random(uint8_t *out, size_t len);
+void     usmp_port_delay_ms(uint32_t ms);
+uint32_t usmp_port_millis(void);
+void     usmp_port_log(char level, const char *tag, const char *msg);
+```
+
+## Python SDK Reference
+
+### USMPServer
+
+```python
+server = USMPServer(
+    host="0.0.0.0",
+    port=9000,
+    psk=b"your-psk",
+    handshake_timeout=10.0,    # seconds
+    session_timeout=60.0,      # seconds — watchdog fires if no data/PING
+    on_timeout=my_callback,    # async fn(device_id, session_id) — optional
 )
 
-frame.payload = ciphertext || tag
-frame.length  = len(plaintext) + 16
+@server.on_session
+async def handler(session: USMPSession):
+    data = await session.recv()   # transparently handles PING/PONG
+    await session.send(b"reply")
+
+asyncio.run(server.serve())
 ```
 
-### 6.4 Decryption
+### USMPClient
 
-```
-plaintext = AES-256-GCM-Decrypt(
-    key        = session_key,
-    nonce      = nonce,
-    aad        = aad,
-    ciphertext = frame.payload[0 : frame.length - 16],
-    tag        = frame.payload[frame.length - 16 : frame.length]
+```python
+client = USMPClient(
+    host="192.168.1.1",
+    port=9000,
+    psk=b"your-psk",
+    device_id=bytes(6),    # optional — auto-generated if not provided
 )
+
+await client.connect()
+await client.send(b"hello")
+data = await client.recv()
+await client.ping()
+await client.disconnect()
 ```
 
-If authentication fails, the receiver MUST close the connection immediately.
+### USMPSession
 
+```python
+# Available inside @server.on_session handler
+session.device_id    # "aa:bb:cc:dd:ee:ff"
+session.session_id   # "a1b2c3d4"
 
-## 7. Error Handling
-
-### 7.1 PKT_ERROR
-
-Payload (3 bytes):
-```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────
-0       1     code     Error code (see 7.2)
-1       2     detail   Optional detail (u16)
+await session.send(b"data")
+data = await session.recv()   # blocks until DATA frame (skips PING/PONG)
+await session.ping()
+await session.bye()
 ```
 
-### 7.2 Error Codes
+### Arduino API
 
-```
-Code  Name              Description
-────  ────────────────  ──────────────────────────────────────
-0x01  ERR_VERSION       Unsupported protocol version
-0x02  ERR_AUTH          HMAC verification failed
-0x03  ERR_SEQ           Sequence number out of order
-0x04  ERR_CRYPTO        Decryption or tag verification failed
-0x05  ERR_BAD_FRAME     Malformed frame (bad magic, CRC, etc.)
-0x06  ERR_TIMEOUT       Handshake or keepalive timeout
-0x07  ERR_INTERNAL      Internal implementation error
-```
+```cpp
+USMPClient usmp(PSK);
 
+// Connect
+usmp.begin(USMP::TCP("ip", port).wifi("ssid", "pass"));
 
-## 8. Session Lifecycle
+// Send
+usmp.send("string");
+usmp.send(buf, len);
 
-```
-DISCONNECTED
-    │
-    │ TCP connect
-    ▼
-HANDSHAKING
-    │
-    │ PKT_SESSION_OK received
-    ▼
-ESTABLISHED ◀────────────────────┐
-    │                            │
-    │ PKT_DATA / PKT_PING        │ PKT_PONG
-    ▼                            │
-  sending/receiving ─────────────┘
-    │
-    │ PKT_BYE or TCP close or timeout
-    ▼
-DISCONNECTED
+// Receive
+if (usmp.available())
+    String msg = usmp.read();
+
+// State
+usmp.alive()       // bool
+usmp.deviceId()    // String "aa:bb:cc:dd:ee:ff"
+usmp.sessionId()   // String "a1b2c3d4"
+
+// Keepalive config
+usmp.keepalive(15000);  // PING every 15s
+
+// Main loop driver — handles PING + reconnect + onMessage callback
+usmp.maintain();
+
+// Callbacks
+usmp.onConnect(fn);
+usmp.onDisconnect(fn);
+usmp.onReconnect(fn);
+usmp.onMessage(fn);  // fn(const uint8_t *data, size_t len)
 ```
 
-### 8.1 Keepalive
+## Testing
 
-- Client SHOULD send PKT_PING every 30 seconds if no data has been sent
-- Server MUST respond with PKT_PONG within 10 seconds
-- If no PKT_PONG is received, the client MUST close and reconnect
-- PKT_PING and PKT_PONG payloads are empty (length = 0 before encryption)
-
-### 8.2 Graceful Disconnect
-
-Either side MAY send PKT_BYE before closing the TCP connection.
-PKT_BYE payload is empty. The receiver SHOULD close the connection
-after receiving PKT_BYE.
-
-
-## 9. Security Considerations
-
-### 9.1 PSK Management
-The pre-shared key MUST be at least 16 bytes of cryptographically random data.
-It MUST NOT be hardcoded in production firmware. Use ESP32 NVS with encryption,
-or provision via a secure channel.
-
-### 9.2 Replay Attacks
-Replay attacks are prevented by:
-- Fresh random nonce per session (prevents session replay)
-- Monotonic per-direction sequence numbers (prevents frame replay)
-
-### 9.3 Forward Secrecy
-Ephemeral X25519 keypairs are generated fresh for every session and
-discarded after key derivation. Compromise of the PSK does not expose
-past session traffic.
-
-### 9.4 Nonce Reuse
-A session MUST be terminated before the sequence number wraps around
-(at 2^32 frames). In practice this limit will never be reached on
-constrained devices.
-
-
-## 10. Test Vectors
-
-### 10.1 CRC-16
-
-```
-input:  00 00 00 00 00 00 00 00 00 00  (10 zero bytes)
-output: 0x1C54 (LE: 54 1C)
-
-input:  CD AB 01 05 00 00 00 00 15 00  (DATA frame header, seq=0, len=21)
-output: to be computed by reference implementation
+```bash
+cd sdk/python
+uv run pytest tests/ -v
 ```
 
-### 10.2 HKDF
-
-```
-shared_secret : (32 bytes of 0x01)
-nonce         : (32 bytes of 0x02)
-pub_C         : (32 bytes of 0x03)
-pub_S         : (32 bytes of 0x04)
-info          : "usmp-v1" || pub_C || pub_S
-
-expected_key  : to be computed by reference implementation
-```
-
-### 10.3 AES-256-GCM
-
-```
-key        : (32 bytes of 0x05)
-seq        : 0x00000000
-session_id : AA BB CC DD
-nonce      : 00 00 00 00 AA BB CC DD 00 00 00 00
-aad        : CD AB 01 05 00 00 00 00 15 00
-plaintext  : "hello encrypted world" (21 bytes)
+```c
+61 passed in 3.3s
+├── 16 API surface tests
+├── 8  benchmark tests
+├── 8  crypto tests
+├── 7  frame tests
+├── 12 handshake tests
+├── 8  integration tests (real loopback TCP)
+└── 3  session tests
 ```
 
-expected ciphertext+tag : to be computed by reference implementation
+## Repository Structure
 
-## 11. Version History
+```txt
+usmp/
+  core/                    ← Pure C, zero platform dependencies
+    include/               ← Public headers
+    src/                   ← Implementation
 
-| Version | Date       | Changes                    |
-|---------|------------|----------------------------|
-| 0.2.0   | 2026-06-04 | Unified Secure Multi-transport Protocol v0.2.0 |
-| 0.1     | 2026-04-13 | Initial specification      |
+  ports/
+    usmp-esp32/            ← ESP-IDF v5+ port
+    usmp-arduino/          ← Arduino library
+
+  sdk/
+    python/                ← Python asyncio SDK
+      src/usmp/
+      tests/
+
+  scripts/
+    build-arduino-zip.ps1  ← Build Arduino .zip (Windows)
+    build-arduino-zip.sh   ← Build Arduino .zip (macOS/Linux)
+    publish-pypi.ps1
+    publish-pypi.sh
+    test-sdk.ps1
+    test-sdk.sh
+
+  firmware/                ← ESP32 reference firmware (ESP-IDF)
+  examples/                ← Usage examples
+  docs/                    ← MkDocs Material documentation
+```
+
+## Roadmap
+
+```python
+v0.2.0 ✅  Core protocol + Reconnect + Keepalive + Arduino port
+v0.3.0 🔨  Publish
+             - Python SDK on PyPI
+             - ESP-IDF component registry
+             - PlatformIO library ✅
+v0.4.0 📋  UART transport
+             - COBS framing
+             - ACK/retry layer
+v0.5.0 📋  Discovery + CLI
+             - mDNS + UDP broadcast scan
+             - usmp scan / connect / logs / send / monitor
+v0.6.0 📋  OTA firmware update
+             - Ed25519 signed firmware
+             - Chunked transfer + atomic swap
+v0.7.0 📋  Multi-device hardening
+             - Per-device PSK
+             - NVS key storage
+             - Device-to-device (usmp_listen on ESP32)
+v1.0.0 📋  Cloud bridge
+             - Gateway → MQTT / WebSocket
+             - Remote CLI via cloud
+```
+
+## Security
+
+**Development PSK:** The default PSK `dxp-dev-psk-change-me-before-prod` is for development only. Always use a strong, secret PSK in production.
+
+**Threat model:** USMP protects against passive eavesdropping, active MITM, replay attacks, and rogue server/device attacks. It does not protect against physical compromise of the device or PSK exposure.
+
+## Contributing
+
+1. Fork the repo
+2. Create a feature branch
+3. Run tests: `uv run pytest tests/ -v`
+4. Build Arduino zip: `.\scripts\build-arduino-zip.ps1`
+5. Build ESP-IDF: `idf.py build`
+6. Submit a PR
+
+## License
+
+MIT — see [LICENSE](LICENSE)
+
+## Author
+
+**winterx64** — [github.com/winterx64](https://github.com/winterx64)
