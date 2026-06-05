@@ -1,7 +1,0 @@
-{
-    "idf.currentSetup": "C:\\Espressif\\frameworks\\esp-idf-v5.3.1",
-    "idf.portWin": "COM5",
-    "C_Cpp.default.compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
-    "C_Cpp.intelliSenseEngine": "default",
-    "cmake.sourceDirectory": "C:/Users/main/codinways/opsid.io/usmp/firmware"
-}
