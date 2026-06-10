@@ -1,6 +1,6 @@
 {
   "name": "USMP",
-  "version": "0.2.0",
+  "version": "0.2.5",
   "description": "Secure, lightweight, encrypted device communication protocol. X25519 + AES-256-GCM + HMAC-SHA256.",
   "keywords": ["iot", "security", "encryption", "esp32", "protocol"],
   "repository": {

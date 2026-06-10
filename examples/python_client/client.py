@@ -4,16 +4,19 @@ import logging
 from usmp import USMPClient, ConnectionClosedError
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "127.0.0.1"
 PORT = 9000
 
+
 async def main():
     # Use a specific device ID (6 bytes)
     device_id = b"\x01\x02\x03\x04\x05\x06"
-    
+
     logging.info(f"Initializing USMP Client for device {device_id.hex(':')}")
     client = USMPClient(host=HOST, port=PORT, psk=PSK, device_id=device_id)
 
@@ -51,6 +54,7 @@ async def main():
         logging.error("Connection closed by the server prematurely.")
     except Exception as e:
         logging.error(f"An error occurred: {e}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

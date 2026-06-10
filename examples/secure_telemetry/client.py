@@ -8,12 +8,13 @@ from usmp import USMPClient, ConnectionClosedError
 # Configure colorful console logging format
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s \033[1;35m[TELEMETRY_CLIENT]\033[0m %(message)s"
+    format="%(asctime)s \033[1;35m[TELEMETRY_CLIENT]\033[0m %(message)s",
 )
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "127.0.0.1"
 PORT = 9000
+
 
 async def run_sensor_loop(client: USMPClient):
     # Starting simulated values
@@ -31,10 +32,7 @@ async def run_sensor_loop(client: USMPClient):
         payload = {
             "type": "telemetry",
             "status": "HEALTHY",
-            "metrics": {
-                "temperature": temperature,
-                "humidity": humidity
-            }
+            "metrics": {"temperature": temperature, "humidity": humidity},
         }
 
         logging.info(f"TX: Temp={temperature:.2f} °C, Humidity={humidity:.2f} %")
@@ -45,7 +43,7 @@ async def run_sensor_loop(client: USMPClient):
             response_data = await client.recv()
             response = json.loads(response_data.decode("utf-8"))
             logging.info(f"RX ACK: {response}")
-            
+
             # Dynamically update interval from server command if provided
             if "interval_sec" in response:
                 interval = float(response["interval_sec"])
@@ -58,6 +56,7 @@ async def run_sensor_loop(client: USMPClient):
         # Sleep before next telemetry reading
         await asyncio.sleep(interval)
 
+
 async def main():
     device_id = bytes([random.randint(0, 255) for _ in range(6)])
     logging.info(f"Initializing client with random Device ID: {device_id.hex(':')}")
@@ -65,9 +64,13 @@ async def main():
     while True:
         client = USMPClient(host=HOST, port=PORT, psk=PSK, device_id=device_id)
         try:
-            logging.info(f"Attempting to connect to telemetry server at {HOST}:{PORT}...")
+            logging.info(
+                f"Attempting to connect to telemetry server at {HOST}:{PORT}..."
+            )
             await client.connect()
-            logging.info(f"\033[1;32m[CONNECTED]\033[0m Session active: {client.session_id}")
+            logging.info(
+                f"\033[1;32m[CONNECTED]\033[0m Session active: {client.session_id}"
+            )
 
             # Run the telemetry loop
             await run_sensor_loop(client)
@@ -87,6 +90,7 @@ async def main():
                 await client.disconnect()
             except Exception:
                 pass
+
 
 if __name__ == "__main__":
     try:
