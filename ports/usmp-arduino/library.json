@@ -5,12 +5,12 @@
   "keywords": ["iot", "security", "encryption", "esp32", "protocol"],
   "repository": {
     "type": "git",
-    "url": "https://github.com/opsid-io/usmp"
+    "url": "https://github.com/metaloomlabs/usmp"
   },
   "authors": [
     {
-      "name": "opsid.io",
-      "url": "https://opsid.io"
+      "name": "winterx64",
+      "url": "https://github.com/winterx64"
     }
   ],
   "license": "MIT",

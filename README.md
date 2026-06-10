@@ -212,19 +212,19 @@ Add to your `idf_component.yml`:
 
 ```yaml
 dependencies:
-  metaloom/usmp: ">=0.2.0"
+  metaloomlabs/usmp: ">=0.2.0"
 ```
 
 Or clone and add as a local component:
 
 ```bash
 cd your_project/components
-git clone https://github.com/metaloom/usmp
+git clone https://github.com/metaloomlabs/usmp.git
 ```
 
 ### Arduino
 
-1. Download `usmp-arduino.zip` from [Releases](https://github.com/metaloom/usmp/releases)
+1. Download `usmp-arduino.zip` from [Releases](https://github.com/metaloomlabs/usmp/releases)
 2. Arduino IDE → Sketch → Include Library → Add .ZIP Library
 3. Select the downloaded zip
 

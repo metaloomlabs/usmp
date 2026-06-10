@@ -92,4 +92,4 @@ The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5m
 - [Quick Start (Python)](getting-started/quickstart-python.md)
 - [Protocol Specification](spec.md)
 - [Security Model](security/model.md)
-- [GitHub](https://github.com/winterx64/usmp)
+- [GitHub](https://github.com/metaloomlabs/usmp)

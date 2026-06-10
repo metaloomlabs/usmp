@@ -12,7 +12,7 @@
 Clone the repository:
 
 ```bash
-git clone https://github.com/winterx64/usmp.git
+git clone https://github.com/metaloomlabs/usmp.git
 ```
 
 Add the ESP32 port as an extra component in your project's `CMakeLists.txt`:
@@ -93,7 +93,7 @@ uv add usmp
 ### Install from source
 
 ```bash
-git clone https://github.com/winterx64/usmp.git
+git clone https://github.com/metaloomlabs/usmp.git
 cd usmp
 uv add --editable sdk/python
 ```

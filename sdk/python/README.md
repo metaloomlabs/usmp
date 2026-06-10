@@ -101,4 +101,4 @@ Requires Python 3.11+.
 
 ## ESP32 / Arduino library
 
-The Arduino library and ESP-IDF component are available at [github.com/MetaLoomLabs/usmp](https://github.com/MetaLoomLabs/usmp).
+The Arduino library and ESP-IDF component are available at [github.com/metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).

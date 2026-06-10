@@ -1,10 +1,10 @@
 site_name: USMP - Unified Secure Multi-transport Protocol
 site_description: Secure, lightweight communication protocol for embedded devices
 site_author: winterx64
-site_url: https://winterx64.github.io/usmp
+site_url: https://metaloomlabs.github.io/usmp
 
-repo_name: winterx64/usmp
-repo_url: https://github.com/winterx64/usmp
+repo_name: metaloomlabs/usmp
+repo_url: https://github.com/metaloomlabs/usmp
 edit_uri: edit/main/docs/
 
 theme:
@@ -102,6 +102,6 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/winterx64/usmp
+      link: https://github.com/metaloomlabs/usmp
 
 copyright: Copyright &copy; 2026 winterx64
