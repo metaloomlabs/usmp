@@ -59,9 +59,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish Python package to PyPI
-        if: ${{ secrets.PYPI_TOKEN != '' || secrets.PYPI_API_TOKEN != '' }}
         env:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
+        if: ${{ env.PYPI_TOKEN != '' }}
         run: |
           cd sdk/python
           uv publish --token "$PYPI_TOKEN"
