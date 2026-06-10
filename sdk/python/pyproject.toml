@@ -18,8 +18,8 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MetaLoomLabs/usmp"
-Repository = "https://github.com/MetaLoomLabs/usmp"
+Homepage = "https://github.com/metaloomlabs/usmp"
+Repository = "https://github.com/metaloomlabs/usmp"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]
