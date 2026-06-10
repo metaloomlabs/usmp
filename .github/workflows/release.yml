@@ -51,7 +51,7 @@ jobs:
         with:
           files: |
             usmp-arduino.zip
-            sdk/python/dist/*
+            dist/*
           draft: false
           prerelease: false
           generate_release_notes: true
@@ -63,5 +63,4 @@ jobs:
           PYPI_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
         if: ${{ env.PYPI_TOKEN != '' }}
         run: |
-          cd sdk/python
-          uv publish --token "$PYPI_TOKEN"
+          uv publish --token "$PYPI_TOKEN" dist/*
