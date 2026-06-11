@@ -9,6 +9,7 @@ extern "C" {
 class USMPClient {
 public:
     explicit USMPClient(const char *psk);
+    ~USMPClient();
     bool begin(USMPTCPTransport transport);
     bool send(const char *str);
     bool send(const String &str);

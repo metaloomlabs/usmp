@@ -62,6 +62,16 @@ static void arduino_tcp_close(usmp_transport_t *t)
     // ctx intentionally NOT deleted — host/port retained for reconnect
 }
 
+static void arduino_tcp_destroy(usmp_transport_t *t)
+{
+    USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
+    if (ctx) {
+        ctx->client.stop();
+        delete ctx;
+        t->ctx = NULL;
+    }
+}
+
 static int arduino_tcp_reconnect(usmp_transport_t *t)
 {
     USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
@@ -110,6 +120,7 @@ bool USMPTCPTransport::init(usmp_transport_t *t) const
     t->close     = arduino_tcp_close;
     t->reconnect = arduino_tcp_reconnect;
     t->available = arduino_tcp_available;
+    t->destroy   = arduino_tcp_destroy;
     t->ctx       = ctx;
     return true;
 }

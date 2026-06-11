@@ -114,6 +114,20 @@ static void usmp_tcp_close(usmp_transport_t *t)
     // ctx intentionally NOT freed — ip/port retained for reconnect
 }
 
+static void usmp_tcp_destroy(usmp_transport_t *t)
+{
+    if (t && t->ctx)
+    {
+        usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
+        if (tcp->sock >= 0)
+        {
+            close(tcp->sock);
+        }
+        free(tcp);
+        t->ctx = NULL;
+    }
+}
+
 static int usmp_tcp_reconnect(usmp_transport_t *t)
 {
     usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
@@ -165,6 +179,7 @@ int usmp_transport_tcp_init(usmp_transport_t *t, const char *server_ip, int port
     t->close = usmp_tcp_close;
     t->reconnect = usmp_tcp_reconnect;
     t->available = usmp_tcp_available;
+    t->destroy = usmp_tcp_destroy;
     t->ctx = tcp;
 
     return 0;

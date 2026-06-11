@@ -14,6 +14,7 @@ extern "C"
         void (*close)(struct usmp_transport_s *t);
         int (*reconnect)(struct usmp_transport_s *t);
         int (*available)(struct usmp_transport_s *t); // ← new: bytes waiting, 0=none, NULL=unsupported
+        void (*destroy)(struct usmp_transport_s *t);
         void *ctx;
     } usmp_transport_t;
 

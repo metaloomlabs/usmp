@@ -17,6 +17,11 @@ USMPClient::USMPClient(const char *psk)
     memset(_rx_buf, 0, sizeof(_rx_buf));
 }
 
+USMPClient::~USMPClient()
+{
+    close();
+}
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 void USMPClient::_apply_psk()
@@ -219,5 +224,8 @@ bool USMPClient::reconnect()
 void USMPClient::close()
 {
     usmp_close(&_ctx);
+    if (_transport.destroy) {
+        _transport.destroy(&_transport);
+    }
     _initialized = false;
 }
