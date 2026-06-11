@@ -36,7 +36,7 @@ class USMPServer:
         self,
         host: str = "0.0.0.0",
         port: int = 9000,
-        psk: bytes = b"",
+        psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes] = b"",
         handshake_timeout: float = 10.0,
         session_timeout: float = 60.0,
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
@@ -122,22 +122,10 @@ class USMPServer:
             logger.warning("Handshake timeout (%s)", addr)
         except USMPError as e:
             logger.warning("Protocol error (%s): %s", addr, e)
-        except Exception as e:
-            logger.error("Unexpected error (%s): %s", addr, e)
-        except HandshakeError as e:
-            logger.warning("Handshake failed (%s): %s", addr, e)
-        except asyncio.TimeoutError:
-            logger.warning("Handshake timeout (%s)", addr)
-        except USMPError as e:
-            logger.warning("Protocol error (%s): %s", addr, e)
-        except (OSError, ConnectionResetError, EOFError) as e:
-            logger.warning("Connection lost (%s): %s", addr, e)
-        except Exception as e:
-            logger.error("Unexpected error (%s): %s", addr, e)
-        except (OSError, ConnectionResetError, EOFError) as e:
-            logger.warning("Connection lost (%s): %s", addr, e)
         except asyncio.IncompleteReadError:
             logger.warning("Connection closed mid-frame (%s)", addr)
+        except (OSError, ConnectionResetError, EOFError) as e:
+            logger.warning("Connection lost (%s): %s", addr, e)
         except Exception as e:
             logger.error("Unexpected error (%s): %s", addr, e)
 

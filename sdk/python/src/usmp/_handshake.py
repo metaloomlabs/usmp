@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import hashlib
 import os
+from typing import Callable
 from .types import (
     PacketType,
     SessionInfo,
@@ -25,7 +26,7 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
 async def server_handshake(
     reader,
     writer,
-    psk: bytes,
+    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes],
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
@@ -46,6 +47,15 @@ async def server_handshake(
 
     device_id = frame.payload[:USMP_DEVICE_ID_LEN]
     pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
+
+    if isinstance(psk, dict):
+        resolved_psk = psk.get(device_id) or psk.get(b"")
+        if resolved_psk is None:
+            raise HandshakeError("Device ID not registered")
+    elif callable(psk):
+        resolved_psk = psk(device_id)
+    else:
+        resolved_psk = psk
 
     # ── Generate server keypair ───────────────────────────────────────────────
     priv_s, pub_s = generate_keypair()
@@ -70,7 +80,7 @@ async def server_handshake(
         raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
     # ── Verify client HMAC ────────────────────────────────────────────────────
-    expected_client = _compute_hmac(psk, nonce, device_id)
+    expected_client = _compute_hmac(resolved_psk, nonce, device_id)
     received_client = frame.payload[:USMP_HMAC_LEN]
 
     if not hmac.compare_digest(expected_client, received_client):
@@ -78,7 +88,7 @@ async def server_handshake(
 
     # ── Step 4: Send SESSION_OK [session_id(4) || hmac_server(32)] ───────────
     session_id = os.urandom(USMP_SESSION_ID_LEN)
-    hmac_server = _compute_hmac(psk, nonce, session_id)
+    hmac_server = _compute_hmac(resolved_psk, nonce, session_id)
     await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
     return SessionInfo(
