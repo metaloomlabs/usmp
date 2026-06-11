@@ -1,7 +1,7 @@
 [project]
 name = "usmp"
 version = "0.2.6"
-description = "USMP — Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
+description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 authors = [
     { name = "winterx64", email = "itswinterx64@gmail.com" }

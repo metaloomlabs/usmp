@@ -6,13 +6,13 @@
 [![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)](#testing)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.3%2B-blue)](#esp32-esp-idf)
 [![Arduino](https://img.shields.io/badge/Arduino-ESP32-teal)](#arduino)
-[![License](https://img.shields.io/badge/license-MIT-green)](#license)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](#license)
 
 ## What is USMP?
 
 USMP fills the gap between **raw TCP (no security)** and **full TLS (too heavy for microcontrollers)**.
 
-It gives any constrained device a fully encrypted, mutually authenticated session with a gateway — with three function calls:
+It gives any constrained device a fully encrypted, mutually authenticated session with a gateway - with three function calls:
 
 ```c
 usmp_transport_tcp_init(&transport, "192.168.1.1", 9000);
@@ -22,20 +22,20 @@ usmp_send(&ctx, data, len);
 
 **No insecure mode. Every session has:**
 
-- Mutual authentication — both sides verify each other via HMAC-SHA256 + PSK
-- Forward secrecy — X25519 ephemeral key exchange per session
-- Encryption — AES-256-GCM, mandatory
-- Replay protection — monotonic sequence numbers per session
+- Mutual authentication - both sides verify each other via HMAC-SHA256 + PSK
+- Forward secrecy - X25519 ephemeral key exchange per session
+- Encryption - AES-256-GCM, mandatory
+- Replay protection - monotonic sequence numbers per session
 
 ## Features
 
-- **Transport agnostic** — same protocol over TCP, UART (v0.4.0), BLE (planned)
-- **Platform agnostic** — pure C core with 5 platform hooks
-- **Reconnect + keepalive** — automatic PING/PONG, explicit reconnect API
-- **Python SDK** — asyncio `USMPServer`, `USMPClient`, `USMPSession`
-- **ESP32 ready** — ESP-IDF v5+ component, tested on real hardware
-- **Arduino ready** — installable `.zip` library, single `#include <USMP.h>`
-- **61 tests** — unit, crypto, handshake, integration, API surface
+- **Transport agnostic** - same protocol over TCP, UART (v0.4.0), BLE (planned)
+- **Platform agnostic** - pure C core with 5 platform hooks
+- **Reconnect + keepalive** - automatic PING/PONG, explicit reconnect API
+- **Python SDK** - asyncio `USMPServer`, `USMPClient`, `USMPSession`
+- **ESP32 ready** - ESP-IDF v5+ component, tested on real hardware
+- **Arduino ready** - installable `.zip` library, single `#include <USMP.h>`
+- **61 tests** - unit, crypto, handshake, integration, API surface
 
 ## Supported Platforms
 
@@ -77,7 +77,7 @@ async def handle(session: USMPSession):
 asyncio.run(server.serve())
 ```
 
-### ESP32 — ESP-IDF
+### ESP32 - ESP-IDF
 
 ```c
 #include "usmp.h"
@@ -104,7 +104,7 @@ void app_main(void) {
 }
 ```
 
-### ESP32 — Arduino
+### ESP32 - Arduino
 
 ```cpp
 #include <USMP.h>
@@ -206,7 +206,7 @@ pip install usmp
 uv add usmp
 ```
 
-### ESP32 — ESP-IDF
+### ESP32 - ESP-IDF
 
 Add to your `idf_component.yml`:
 
@@ -247,7 +247,7 @@ int usmp_transport_tcp_init(usmp_transport_t *t, const char *ip, int port);
 // Connect and perform handshake
 int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
 
-// Explicit reconnect — full new handshake, resets sequence numbers
+// Explicit reconnect - full new handshake, resets sequence numbers
 int usmp_reconnect(usmp_t *ctx);
 
 // Close session
@@ -273,7 +273,7 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
 // Send PING frame
 int usmp_ping(usmp_t *ctx);
 
-// Call in main loop — sends PING if keepalive_ms elapsed since last TX
+// Call in main loop - sends PING if keepalive_ms elapsed since last TX
 // Returns -1 if connection dead (time to call usmp_reconnect)
 int usmp_keepalive_tick(usmp_t *ctx);
 ```
@@ -298,8 +298,8 @@ server = USMPServer(
     port=9000,
     psk=b"your-psk",
     handshake_timeout=10.0,    # seconds
-    session_timeout=60.0,      # seconds — watchdog fires if no data/PING
-    on_timeout=my_callback,    # async fn(device_id, session_id) — optional
+    session_timeout=60.0,      # seconds - watchdog fires if no data/PING
+    on_timeout=my_callback,    # async fn(device_id, session_id) - optional
 )
 
 @server.on_session
@@ -317,7 +317,7 @@ client = USMPClient(
     host="192.168.1.1",
     port=9000,
     psk=b"your-psk",
-    device_id=bytes(6),    # optional — auto-generated if not provided
+    device_id=bytes(6),    # optional - auto-generated if not provided
 )
 
 await client.connect()
@@ -364,7 +364,7 @@ usmp.sessionId()   // String "a1b2c3d4"
 // Keepalive config
 usmp.keepalive(15000);  // PING every 15s
 
-// Main loop driver — handles PING + reconnect + onMessage callback
+// Main loop driver - handles PING + reconnect + onMessage callback
 usmp.maintain();
 
 // Callbacks
@@ -465,8 +465,16 @@ v1.0.0 📋  Cloud bridge
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+Apache License 2.0 - see [LICENSE](LICENSE)
 
 ## Author
 
-**winterx64** — [github.com/winterx64](https://github.com/winterx64)
+**winterx64** - [github.com/winterx64](https://github.com/winterx64)
+
+---
+
+<p align="center">
+  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
+  Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>
+</p>
+

@@ -1,8 +1,8 @@
-# USMP — Unified Secure Multi-transport Protocol
+# USMP - Unified Secure Multi-transport Protocol
 
 Secure, encrypted communication for ESP32, Arduino, and IoT devices.
 
-USMP sits between raw TCP (no security) and full TLS (too heavy for microcontrollers) — giving any constrained device a fully encrypted, mutually authenticated session in three function calls.
+USMP sits between raw TCP (no security) and full TLS (too heavy for microcontrollers) - giving any constrained device a fully encrypted, mutually authenticated session in three function calls.
 
 ```python
 pip install usmp
@@ -10,10 +10,10 @@ pip install usmp
 
 ## What it gives you
 
-- **Mutual authentication** — both device and server verify each other via HMAC-SHA256 + PSK
-- **Forward secrecy** — X25519 ephemeral key exchange, new keys every session
-- **Encryption** — AES-256-GCM, mandatory, no plaintext mode
-- **Replay protection** — monotonic sequence numbers
+- **Mutual authentication** - both device and server verify each other via HMAC-SHA256 + PSK
+- **Forward secrecy** - X25519 ephemeral key exchange, new keys every session
+- **Encryption** - AES-256-GCM, mandatory, no plaintext mode
+- **Replay protection** - monotonic sequence numbers
 
 ## Quickstart
 
@@ -102,3 +102,11 @@ Requires Python 3.11+.
 ## ESP32 / Arduino library
 
 The Arduino library and ESP-IDF component are available at [github.com/metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
+
+---
+
+<p align="center">
+  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
+  Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>
+</p>
+

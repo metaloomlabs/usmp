@@ -1,0 +1,5 @@
+CompileFlags:
+  Add:
+    - -Icore/include
+    - -Iports/usmp-arduino/src
+    - -Iports/usmp-esp32/transport
