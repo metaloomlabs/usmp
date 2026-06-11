@@ -51,7 +51,8 @@ jobs:
         with:
           files: |
             usmp-arduino.zip
-            dist/*
+            dist/*.whl
+            dist/*.tar.gz
           draft: false
           prerelease: false
           generate_release_notes: true
