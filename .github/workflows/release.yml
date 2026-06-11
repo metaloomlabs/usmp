@@ -36,7 +36,7 @@ jobs:
       - name: Build Python packages (sdist & wheel)
         run: |
           cd sdk/python
-          uv build
+          uv build --out-dir ../../dist
 
       - name: Install zip utility
         run: sudo apt-get update && sudo apt-get install -y zip
@@ -60,7 +60,7 @@ jobs:
 
       - name: Publish Python package to PyPI
         env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN || secrets.PYPI_API_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
         if: ${{ env.PYPI_TOKEN != '' }}
         run: |
           uv publish --token "$PYPI_TOKEN" dist/*
