@@ -14,7 +14,7 @@ extern "C"
 // ── Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 0
 #define USMP_VERSION_MINOR 2
-#define USMP_VERSION_PATCH 0
+#define USMP_VERSION_PATCH 6
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 #ifndef USMP_PSK
