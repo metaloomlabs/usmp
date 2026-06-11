@@ -14,6 +14,9 @@ int usmp_port_get_device_id(uint8_t *out, size_t len)
 #ifdef ESP32
     return esp_read_mac(out, ESP_MAC_WIFI_STA) == ESP_OK ? 0 : -1;
 #else
+#  ifndef USMP_INSECURE_FALLBACK
+#    error "Generic Arduino platforms do not have a secure hardware unique ID source. Define USMP_INSECURE_FALLBACK to bypass this check for testing/development."
+#  endif
     // Generic fallback: derive from analog noise — not cryptographically unique
     for (int i = 0; i < 6; i++)
         out[i] = (uint8_t)(analogRead(A0) ^ analogRead(A1) ^ (uint8_t)i);
@@ -28,6 +31,9 @@ int usmp_port_random(uint8_t *out, size_t len)
     for (size_t i = 0; i < len; i++)
         out[i] = (uint8_t)(esp_random() & 0xFF);
 #else
+#  ifndef USMP_INSECURE_FALLBACK
+#    error "Generic Arduino platforms do not have a secure hardware random source. Define USMP_INSECURE_FALLBACK to bypass this check for testing/development."
+#  endif
     // Generic fallback: analog noise — acceptable only for dev
     for (size_t i = 0; i < len; i++)
         out[i] = (uint8_t)(analogRead(A0) ^ (uint8_t)micros());
