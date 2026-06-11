@@ -15,9 +15,16 @@ int usmp_connect(usmp_t *ctx, usmp_transport_t *transport)
         return -1;
 
     char _msg[128];
+    const uint8_t *psk = ctx->psk;
+    size_t psk_len = ctx->psk_len;
+    uint32_t keepalive_ms = ctx->keepalive_ms;
+
     memset(ctx, 0, sizeof(usmp_t));
 
     ctx->transport = *transport;
+    ctx->psk = psk;
+    ctx->psk_len = psk_len;
+    ctx->keepalive_ms = keepalive_ms;
 
     usmp_t hs = {0};
     hs.psk = ctx->psk;
