@@ -18,13 +18,13 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host "[USMP] Building distribution..."
-uv build
+uv build --out-dir "$REPO\dist"
 
 Write-Host "[USMP] Publishing to PyPI..."
 if ($env:PYPI_TOKEN) {
-    uv publish --token $env:PYPI_TOKEN
+    uv publish --token $env:PYPI_TOKEN "$REPO\dist\*"
 } else {
-    uv publish   # will prompt for credentials
+    uv publish "$REPO\dist\*"   # will prompt for credentials
 }
 
 Write-Host "[USMP] Published successfully"

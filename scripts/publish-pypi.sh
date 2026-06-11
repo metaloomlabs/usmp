@@ -14,13 +14,13 @@ echo "[USMP] Running tests before publish..."
 uv run pytest tests/ -q
 
 echo "[USMP] Building distribution..."
-uv build
+uv build --out-dir "$REPO/dist"
 
 echo "[USMP] Publishing to PyPI..."
 if [ -n "${PYPI_TOKEN:-}" ]; then
-    uv publish --token "$PYPI_TOKEN"
+    uv publish --token "$PYPI_TOKEN" "$REPO/dist/"*
 else
-    uv publish   # will prompt for credentials
+    uv publish "$REPO/dist/"*   # will prompt for credentials
 fi
 
 echo "[USMP] Published successfully"
