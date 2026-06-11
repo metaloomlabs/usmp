@@ -52,21 +52,6 @@ class USMPSession:
         frame = await read_frame(self._reader)
         self._last_recv = time.monotonic()
 
-        if frame.type == PacketType.BYE:
-            raise ConnectionClosedError("Remote sent BYE")
-
-        if frame.type == PacketType.PING:
-            self._info.rx_seq += 1  # ← add this
-            await self._send_pong()
-            return await self.recv()
-
-        if frame.type == PacketType.PONG:
-            self._info.rx_seq += 1
-            return await self.recv()
-
-        if frame.type != PacketType.DATA:
-            raise ValueError(f"Unexpected frame type: {frame.type_name()}")
-
         if frame.seq != self._info.rx_seq:
             raise SequenceError(
                 f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
@@ -83,6 +68,20 @@ class USMPSession:
             ciphertext_and_tag=frame.payload,
         )
         self._info.rx_seq += 1
+
+        if frame.type == PacketType.BYE:
+            raise ConnectionClosedError("Remote sent BYE")
+
+        if frame.type == PacketType.PING:
+            await self._send_pong()
+            return await self.recv()
+
+        if frame.type == PacketType.PONG:
+            return await self.recv()
+
+        if frame.type != PacketType.DATA:
+            raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+
         return plaintext
 
     async def ping(self) -> None:

@@ -139,32 +139,26 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len)
         return -1;
     }
 
-    // ── Transparent PONG handling ─────────────────────────────────────────────
-    // Server responds to our PING with PONG — consume it and wait for real data
-    if (pkt.type == USMP_TYPE_PONG)
-    {
-        if (pkt.seq != ctx->rx_seq)
-        {
-            snprintf(_msg, sizeof(_msg), "PONG seq mismatch: expected %lu got %lu",
-                     (unsigned long)ctx->rx_seq, (unsigned long)pkt.seq);
-            USMP_LOGW(TAG, _msg);
-        }
-        ctx->rx_seq++;
-        USMP_LOGI(TAG, "PONG received");
-        return usmp_recv(ctx, out, max_len); // tail-recurse for next frame
-    }
-
-    if (pkt.type != USMP_TYPE_DATA)
-    {
-        snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
-        USMP_LOGE(TAG, _msg);
-        return -1;
-    }
-
     if (pkt.seq != ctx->rx_seq)
     {
         snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu",
                  (unsigned long)ctx->rx_seq, (unsigned long)pkt.seq);
+        USMP_LOGE(TAG, _msg);
+        return -1;
+    }
+
+    uint8_t dummy_out[1];
+    uint8_t *dec_dest = out;
+    uint16_t dec_max = max_len;
+
+    if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING || pkt.type == USMP_TYPE_BYE)
+    {
+        dec_dest = dummy_out;
+        dec_max = sizeof(dummy_out);
+    }
+    else if (pkt.type != USMP_TYPE_DATA)
+    {
+        snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
         USMP_LOGE(TAG, _msg);
         return -1;
     }
@@ -177,13 +171,37 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len)
                         ctx->session_id,
                         aad, sizeof(aad),
                         pkt.payload, pkt.length,
-                        out, &out_len) != 0)
+                        dec_dest, &out_len) != 0)
     {
         USMP_LOGE(TAG, "Decryption failed");
         return -1;
     }
 
     ctx->rx_seq++;
+
+    if (pkt.type == USMP_TYPE_PONG)
+    {
+        USMP_LOGI(TAG, "PONG received");
+        return usmp_recv(ctx, out, max_len); // tail-recurse for next frame
+    }
+    else if (pkt.type == USMP_TYPE_PING)
+    {
+        USMP_LOGI(TAG, "PING received — responding with PONG");
+        if (send_control(ctx, USMP_TYPE_PONG) != 0)
+        {
+            USMP_LOGE(TAG, "Failed to send PONG");
+            ctx->established = false;
+            return -1;
+        }
+        return usmp_recv(ctx, out, max_len); // tail-recurse for next frame
+    }
+    else if (pkt.type == USMP_TYPE_BYE)
+    {
+        USMP_LOGI(TAG, "BYE received — session closed by peer");
+        ctx->established = false;
+        return -1;
+    }
+
     snprintf(_msg, sizeof(_msg), "RX seq=%lu len=%d",
              (unsigned long)pkt.seq, (int)out_len);
     USMP_LOGI(TAG, _msg);
