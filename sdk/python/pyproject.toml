@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "winterx64", email = "itswinterx64@gmail.com" }
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     "cryptography>=42.0.0",
 ]

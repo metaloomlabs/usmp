@@ -9,5 +9,5 @@ netsh advfirewall set publicprofile state on
 ```
 
 ```shell
-New-NetFirewallRule -DisplayName "USMP Server" -Direction Inbound -Protocol TCP -LocalPort 9000 -Action Allow
-```
+netsh advfirewall firewall add rule name="USMP Server" dir=in action=allow protocol=TCP localport=9000 profile=any```
+
