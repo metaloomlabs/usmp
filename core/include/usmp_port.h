@@ -1,13 +1,13 @@
 #pragma once
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// ── Platform hooks ────────────────────────────────────────────────────────────
+// Platform hooks ────────────────────────────────────────────────────────────
 // Implement these in usmp_port_<platform>.c for your target board.
 // ESP32 implementation: port/usmp_port_esp32.c
 // Arduino:              port/usmp_port_arduino.cpp
@@ -70,7 +70,7 @@ uint32_t usmp_port_millis(void);
  */
 void usmp_port_log(char level, const char *tag, const char *msg);
 
-// ── Convenience macros ────────────────────────────────────────────────────────
+// Convenience macros ────────────────────────────────────────────────────────
 #define USMP_LOGI(tag, msg) usmp_port_log('I', tag, msg)
 #define USMP_LOGW(tag, msg) usmp_port_log('W', tag, msg)
 #define USMP_LOGE(tag, msg) usmp_port_log('E', tag, msg)
