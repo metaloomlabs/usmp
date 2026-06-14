@@ -1,5 +1,30 @@
-version: "0.1.0"
-description: "USMP — Device Exchange Protocol. ESP32 port."
+version: "0.2.5"
+description: >
+  USMP — Unified Secure Multi-transport Protocol. Mutually authenticated,
+  AES-256-GCM encrypted sessions for ESP32 over TCP. No TLS stack required.
 url: "https://github.com/metaloomlabs/usmp"
+repository: "https://github.com/metaloomlabs/usmp"
+issues: "https://github.com/metaloomlabs/usmp/issues"
+documentation: "https://github.com/metaloomlabs/usmp"
+license: "MIT"
+
+targets:
+  - esp32
+  - esp32s2
+  - esp32s3
+  - esp32c3
+  - esp32c6
+  - esp32h2
+
+tags:
+  - security
+  - protocol
+  - encryption
+  - iot
+  - networking
+  - tcp
+  - aes-gcm
+
 dependencies:
-  idf: ">=5.0.0"
+  idf:
+    version: ">=5.0.0"

@@ -46,6 +46,11 @@ jobs:
           chmod +x scripts/build-arduino-zip.sh
           ./scripts/build-arduino-zip.sh
 
+      - name: Bundle core into ESP32 component
+        run: |
+          chmod +x scripts/build-esp32-component.sh
+          ./scripts/build-esp32-component.sh --in-place
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -65,3 +70,13 @@ jobs:
         if: ${{ env.PYPI_TOKEN != '' }}
         run: |
           uv publish --token "$PYPI_TOKEN" dist/*
+
+      - name: Publish ESP32 component to ESP Component Registry
+        env:
+          IDF_COMPONENT_API_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+        if: ${{ env.IDF_COMPONENT_API_TOKEN != '' }}
+        uses: espressif/upload-components-ci-action@v2
+        with:
+          components: "usmp: ports/usmp-esp32"
+          namespace: "metaloomlabs"
+          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
