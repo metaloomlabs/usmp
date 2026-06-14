@@ -9,7 +9,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-
 // ── TCP context
 // ─────────────────────────────────────────────────────────────── Allocated
 // once in usmp_transport_tcp_init, lives for the lifetime of the transport. Not

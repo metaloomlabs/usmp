@@ -8,7 +8,6 @@
 #include <stdio.h>
 #include <string.h>
 
-
 int usmp_port_get_device_id(uint8_t *out, size_t len) {
   if (!out || len < 6)
     return -1;
