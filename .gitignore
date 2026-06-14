@@ -41,6 +41,7 @@ build/
 **/build/
 **/sdkconfig.old
 **/dependencies.lock
+usmp-esp32-component/
 
 # PlatformIO
 .pio/
