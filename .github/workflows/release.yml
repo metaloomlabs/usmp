@@ -78,5 +78,5 @@ jobs:
         uses: espressif/upload-components-ci-action@v2
         with:
           components: "usmp: ports/usmp-esp32"
-          namespace: "metaloomlabs"
+          namespace: "metaloomhq"
           api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
