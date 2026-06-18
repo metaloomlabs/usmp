@@ -2,7 +2,6 @@ import pytest
 from usmp._crypto import (
     generate_keypair,
     derive_session_key,
-    build_gcm_nonce,
     build_aad,
     encrypt,
     decrypt,
@@ -40,11 +39,33 @@ def test_session_key_changes_with_nonce():
 
 
 def test_gcm_nonce_construction():
-    nonce = build_gcm_nonce(seq=1, session_id=b"\xaa\xbb\xcc\xdd")
-    assert len(nonce) == 12
-    assert nonce[:4] == b"\x01\x00\x00\x00"  # seq=1 LE
-    assert nonce[4:8] == b"\xaa\xbb\xcc\xdd"  # session_id
-    assert nonce[8:] == b"\x00\x00\x00\x00"  # zeros
+    # Encrypt twice, nonces must be different (randomness verification)
+    key = b"\x05" * 32
+    plaintext = b"hello"
+
+    ct1 = encrypt(
+        key=key,
+        seq=0,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        plaintext=plaintext,
+    )
+
+    ct2 = encrypt(
+        key=key,
+        seq=0,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        plaintext=plaintext,
+    )
+
+    nonce1 = ct1[:12]
+    nonce2 = ct2[:12]
+    assert len(nonce1) == 12
+    assert len(nonce2) == 12
+    assert nonce1 != nonce2
 
 
 def test_aad_construction():
@@ -60,13 +81,11 @@ def test_aad_construction():
 
 def test_encrypt_decrypt_roundtrip():
     key = b"\x05" * 32
-    session_id = b"\xaa\xbb\xcc\xdd"
     plaintext = b"hello encrypted world"
 
     ct = encrypt(
         key=key,
         seq=0,
-        session_id=session_id,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
@@ -76,12 +95,11 @@ def test_encrypt_decrypt_roundtrip():
     pt = decrypt(
         key=key,
         seq=0,
-        session_id=session_id,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
         length=len(ct),
-        ciphertext_and_tag=ct,
+        nonce_ct_tag=ct,
     )
 
     assert pt == plaintext
@@ -89,58 +107,52 @@ def test_encrypt_decrypt_roundtrip():
 
 def test_decrypt_fails_on_tampered_ciphertext():
     key = b"\x05" * 32
-    session_id = b"\xaa\xbb\xcc\xdd"
 
     ct = bytearray(
         encrypt(
             key=key,
             seq=0,
-            session_id=session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             plaintext=b"secret",
         )
     )
-    ct[0] ^= 0xFF  # tamper
+    ct[15] ^= 0xFF  # tamper (ct[15] is part of payload/tag)
 
     with pytest.raises(CryptoError):
         decrypt(
             key=key,
             seq=0,
-            session_id=session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             length=len(ct),
-            ciphertext_and_tag=bytes(ct),
+            nonce_ct_tag=bytes(ct),
         )
 
 
 def test_decrypt_fails_on_wrong_seq():
     key = b"\x05" * 32
-    session_id = b"\xaa\xbb\xcc\xdd"
     plaintext = b"secret"
 
     ct = encrypt(
         key=key,
         seq=0,
-        session_id=session_id,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
         plaintext=plaintext,
     )
 
-    # Decrypt with wrong seq — nonce mismatch → auth failure
+    # Decrypt with wrong seq — AAD mismatch → auth failure
     with pytest.raises(CryptoError):
         decrypt(
             key=key,
             seq=1,
-            session_id=session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             length=len(ct),
-            ciphertext_and_tag=ct,
+            nonce_ct_tag=ct,
         )

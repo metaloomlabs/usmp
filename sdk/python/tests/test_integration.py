@@ -355,7 +355,7 @@ async def test_control_frame_integrity_enforced():
         from usmp._frame import write_frame
         from usmp.types import PacketType
         
-        bad_tag_payload = b"\x00" * 16
+        bad_tag_payload = b"\x00" * 28
         await write_frame(client._session._writer, PacketType.PING, bad_tag_payload, seq=client._session._info.tx_seq)
         
         await asyncio.sleep(0.2)

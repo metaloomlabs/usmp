@@ -1,10 +1,11 @@
-# src/usmp/_client.py
-
 import asyncio
+import logging
 import os
 from ._handshake import client_handshake
 from ._session import USMPSession
 from .types import USMP_DEVICE_ID_LEN
+
+logger = logging.getLogger("usmp.client")
 
 
 class USMPClient:
@@ -38,7 +39,7 @@ class USMPClient:
         reader, writer = await asyncio.open_connection(self._host, self._port)
         info = await client_handshake(reader, writer, self._psk, self._device_id)
         self._session = USMPSession(reader, writer, info)
-        print(
+        logger.info(
             f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}"
         )
 

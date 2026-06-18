@@ -1,5 +1,4 @@
-# src/usmp/_frame.py
-
+import asyncio
 import struct
 from .types import (
     USMPFrame,
@@ -105,7 +104,7 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
     )
 
 
-async def read_frame(reader, verify_crc: bool = True) -> USMPFrame:
+async def read_frame(reader: asyncio.StreamReader, verify_crc: bool = True) -> USMPFrame:
     """
     Read exactly one USMP frame from an asyncio StreamReader.
     Reads header first, then exact payload bytes — handles TCP stream fragmentation.
@@ -126,7 +125,7 @@ async def read_frame(reader, verify_crc: bool = True) -> USMPFrame:
 
 
 async def write_frame(
-    writer,
+    writer: asyncio.StreamWriter,
     type_: PacketType,
     payload: bytes,
     seq: int = 0,

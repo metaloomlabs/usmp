@@ -36,7 +36,7 @@ USMP_NONCE_LEN = 32  # handshake nonce length
 USMP_DEVICE_ID_LEN = 6  # MAC address length
 USMP_PUB_KEY_LEN = 32  # X25519 public key length
 USMP_HMAC_LEN = 32  # HMAC-SHA256 output length
-USMP_SESSION_ID_LEN = 4  # session ID length
+USMP_SESSION_ID_LEN = 16  # session ID length
 USMP_SESSION_KEY_LEN = 32  # AES-256 key length
 USMP_GCM_NONCE_LEN = 12  # AES-GCM nonce length
 
@@ -77,6 +77,14 @@ class SessionInfo:
     session_key: bytes
     tx_seq: int = 0
     rx_seq: int = 0
+
+    def __post_init__(self):
+        if len(self.device_id) != USMP_DEVICE_ID_LEN:
+            raise ValueError(f"Invalid device_id length: {len(self.device_id)}")
+        if len(self.session_id) != USMP_SESSION_ID_LEN:
+            raise ValueError(f"Invalid session_id length: {len(self.session_id)}")
+        if len(self.session_key) != USMP_SESSION_KEY_LEN:
+            raise ValueError(f"Invalid session_key length: {len(self.session_key)}")
 
     @property
     def device_id_str(self) -> str:

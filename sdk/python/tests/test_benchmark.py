@@ -106,7 +106,6 @@ def test_bench_session_key_derivation():
 
 def test_bench_aes_gcm_encrypt():
     key = b"\x05" * 32
-    session_id = b"\xaa\xbb\xcc\xdd"
     plaintext = b"hello encrypted world"
     times = []
 
@@ -115,7 +114,6 @@ def test_bench_aes_gcm_encrypt():
         encrypt(
             key=key,
             seq=0,
-            session_id=session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
@@ -129,12 +127,10 @@ def test_bench_aes_gcm_encrypt():
 
 def test_bench_aes_gcm_decrypt():
     key = b"\x05" * 32
-    session_id = b"\xaa\xbb\xcc\xdd"
     plaintext = b"hello encrypted world"
     ct = encrypt(
         key=key,
         seq=0,
-        session_id=session_id,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
@@ -147,17 +143,17 @@ def test_bench_aes_gcm_decrypt():
         decrypt(
             key=key,
             seq=0,
-            session_id=session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             length=len(ct),
-            ciphertext_and_tag=ct,
+            nonce_ct_tag=ct,
         )
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("AES-256-GCM decrypt (21 bytes)", times, target_ms=2.0)
     assert passed, f"AES-GCM decrypt p95 exceeded 2ms target"
+
 
 
 # ── Handshake benchmark ───────────────────────────────────────────────────────

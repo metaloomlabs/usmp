@@ -1,10 +1,11 @@
 # src/usmp/_session.py
 
+import asyncio
 import time
 from .types import PacketType, SessionInfo, USMP_MAGIC, USMP_VERSION
 from ._frame import read_frame, write_frame
 from ._crypto import encrypt, decrypt
-from .errors import SequenceError, ConnectionClosedError
+from .errors import SequenceError, ConnectionClosedError, TimeoutError as USMPTimeoutError
 
 
 class USMPSession:
@@ -15,13 +16,15 @@ class USMPSession:
 
     def __init__(
         self,
-        reader,
-        writer,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
         info: SessionInfo,
+        recv_timeout: float | None = None,
     ):
         self._reader = reader
         self._writer = writer
         self._info = info
+        self._recv_timeout = recv_timeout
         self._last_recv: float = time.monotonic()  # updated on every inbound frame
 
     @property
@@ -38,7 +41,6 @@ class USMPSession:
         ciphertext = encrypt(
             key=self._info.session_key,
             seq=seq,
-            session_id=self._info.session_id,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
@@ -47,42 +49,55 @@ class USMPSession:
         await write_frame(self._writer, PacketType.DATA, ciphertext, seq=seq)
         self._info.tx_seq += 1
 
-    async def recv(self) -> bytes:
+    async def recv(self, timeout: float | None = None) -> bytes:
         """Receive and decrypt a DATA frame. Transparently handles inbound PING/PONG."""
-        frame = await read_frame(self._reader)
-        self._last_recv = time.monotonic()
+        effective_timeout = timeout if timeout is not None else self._recv_timeout
 
-        if frame.seq != self._info.rx_seq:
-            raise SequenceError(
-                f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
-            )
+        async def _recv_internal() -> bytes:
+            for _ in range(8):
+                frame = await read_frame(self._reader)
+                self._last_recv = time.monotonic()
 
-        plaintext = decrypt(
-            key=self._info.session_key,
-            seq=frame.seq,
-            session_id=self._info.session_id,
-            type_=int(frame.type),
-            version=frame.version,
-            magic=frame.magic,
-            length=frame.length,
-            ciphertext_and_tag=frame.payload,
-        )
-        self._info.rx_seq += 1
+                if frame.seq != self._info.rx_seq:
+                    raise SequenceError(
+                        f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
+                    )
 
-        if frame.type == PacketType.BYE:
-            raise ConnectionClosedError("Remote sent BYE")
+                plaintext = decrypt(
+                    key=self._info.session_key,
+                    seq=frame.seq,
+                    type_=int(frame.type),
+                    version=frame.version,
+                    magic=frame.magic,
+                    length=frame.length,
+                    nonce_ct_tag=frame.payload,
+                )
+                self._info.rx_seq += 1
 
-        if frame.type == PacketType.PING:
-            await self._send_pong()
-            return await self.recv()
+                if frame.type == PacketType.BYE:
+                    raise ConnectionClosedError("Remote sent BYE")
 
-        if frame.type == PacketType.PONG:
-            return await self.recv()
+                if frame.type == PacketType.PING:
+                    await self._send_pong()
+                    continue
 
-        if frame.type != PacketType.DATA:
-            raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+                if frame.type == PacketType.PONG:
+                    continue
 
-        return plaintext
+                if frame.type != PacketType.DATA:
+                    raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+
+                return plaintext
+
+            raise ConnectionClosedError("Too many control frames received consecutively")
+
+        if effective_timeout is not None:
+            try:
+                return await asyncio.wait_for(_recv_internal(), timeout=effective_timeout)
+            except asyncio.TimeoutError as e:
+                raise USMPTimeoutError("Receive timed out") from e
+        else:
+            return await _recv_internal()
 
     async def ping(self) -> None:
         """Send a PING frame."""
@@ -90,7 +105,6 @@ class USMPSession:
         ciphertext = encrypt(
             key=self._info.session_key,
             seq=seq,
-            session_id=self._info.session_id,
             type_=int(PacketType.PING),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
@@ -105,7 +119,6 @@ class USMPSession:
         ciphertext = encrypt(
             key=self._info.session_key,
             seq=seq,
-            session_id=self._info.session_id,
             type_=int(PacketType.BYE),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
@@ -120,7 +133,6 @@ class USMPSession:
         ciphertext = encrypt(
             key=self._info.session_key,
             seq=seq,
-            session_id=self._info.session_id,
             type_=int(PacketType.PONG),
             version=USMP_VERSION,
             magic=USMP_MAGIC,

@@ -2,6 +2,7 @@ import asyncio
 import hmac
 import hashlib
 import os
+import time
 from typing import Callable
 from .types import (
     PacketType,
@@ -16,6 +17,10 @@ from ._frame import read_frame, write_frame
 from ._crypto import generate_keypair, derive_session_key
 from .errors import HandshakeError, AuthError
 
+# Global tracking of failed handshake attempts per IP
+# ip -> (fail_count, lockout_until)
+_failed_handshakes: dict[str, tuple[int, float]] = {}
+
 
 def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
     """HMAC-SHA256(psk, part1 || part2 || ...)"""
@@ -24,83 +29,110 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
 
 
 async def server_handshake(
-    reader,
-    writer,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
     psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes],
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
     Returns SessionInfo on success, raises HandshakeError on failure.
     """
+    addr = writer.get_extra_info("peername")
+    ip = addr[0] if addr else None
 
-    # ── Step 1: Receive HELLO [device_id(6) || pub_C(32)] ────────────────────
+    if ip:
+        now = time.monotonic()
+        fails, lockout_until = _failed_handshakes.get(ip, (0, 0.0))
+        if lockout_until > now:
+            remaining = lockout_until - now
+            raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
+
     try:
-        frame = await read_frame(reader, verify_crc=False)
-    except asyncio.IncompleteReadError as e:
-        raise HandshakeError("Connection closed before HELLO") from e
+        # ── Step 1: Receive HELLO [device_id(6) || pub_C(32)] ────────────────────
+        try:
+            frame = await read_frame(reader, verify_crc=False)
+        except asyncio.IncompleteReadError as e:
+            raise HandshakeError("Connection closed before HELLO") from e
 
-    if frame.type != PacketType.HELLO:
-        raise HandshakeError(f"Expected HELLO, got {frame.type_name()}")
+        if frame.type != PacketType.HELLO:
+            raise HandshakeError(f"Expected HELLO, got {frame.type_name()}")
 
-    if frame.length != USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN:
-        raise HandshakeError(f"Bad HELLO length: {frame.length}")
+        if frame.length != USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN:
+            raise HandshakeError(f"Bad HELLO length: {frame.length}")
 
-    device_id = frame.payload[:USMP_DEVICE_ID_LEN]
-    pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
+        device_id = frame.payload[:USMP_DEVICE_ID_LEN]
+        pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
 
-    if isinstance(psk, dict):
-        resolved_psk = psk.get(device_id) or psk.get(b"")
-        if resolved_psk is None:
-            raise HandshakeError("Device ID not registered")
-    elif callable(psk):
-        resolved_psk = psk(device_id)
-    else:
-        resolved_psk = psk
+        if isinstance(psk, dict):
+            resolved_psk = psk.get(device_id) or psk.get(b"")
+            if resolved_psk is None:
+                raise HandshakeError("Device ID not registered")
+        elif callable(psk):
+            resolved_psk = psk(device_id)
+        else:
+            resolved_psk = psk
 
-    # ── Generate server keypair ───────────────────────────────────────────────
-    priv_s, pub_s = generate_keypair()
+        # ── Generate server keypair ───────────────────────────────────────────────
+        priv_s, pub_s = generate_keypair()
 
-    # ── Step 2: Send CHALLENGE [nonce(32) || pub_S(32)] ──────────────────────
-    nonce = os.urandom(USMP_NONCE_LEN)
-    await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
+        # ── Step 2: Send CHALLENGE [nonce(32) || pub_S(32)] ──────────────────────
+        nonce = os.urandom(USMP_NONCE_LEN)
+        await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
 
-    # ── Derive session key ────────────────────────────────────────────────────
-    session_key = derive_session_key(priv_s, pub_c, nonce, pub_c, pub_s)
+        # ── Derive session key ────────────────────────────────────────────────────
+        session_key = derive_session_key(priv_s, pub_c, nonce, pub_c, pub_s)
 
-    # ── Step 3: Receive HELLO_ACK [hmac_client(32)] ──────────────────────────
-    try:
-        frame = await read_frame(reader, verify_crc=False)
-    except asyncio.IncompleteReadError as e:
-        raise HandshakeError("Connection closed before HELLO_ACK") from e
+        # ── Step 3: Receive HELLO_ACK [hmac_client(32)] ──────────────────────────
+        try:
+            frame = await read_frame(reader, verify_crc=False)
+        except asyncio.IncompleteReadError as e:
+            raise HandshakeError("Connection closed before HELLO_ACK") from e
 
-    if frame.type != PacketType.HELLO_ACK:
-        raise HandshakeError(f"Expected HELLO_ACK, got {frame.type_name()}")
+        if frame.type != PacketType.HELLO_ACK:
+            raise HandshakeError(f"Expected HELLO_ACK, got {frame.type_name()}")
 
-    if frame.length != USMP_HMAC_LEN:
-        raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
+        if frame.length != USMP_HMAC_LEN:
+            raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
-    # ── Verify client HMAC ────────────────────────────────────────────────────
-    expected_client = _compute_hmac(resolved_psk, nonce, device_id)
-    received_client = frame.payload[:USMP_HMAC_LEN]
+        # ── Verify client HMAC ────────────────────────────────────────────────────
+        expected_client = _compute_hmac(resolved_psk, nonce, device_id)
+        received_client = frame.payload[:USMP_HMAC_LEN]
 
-    if not hmac.compare_digest(expected_client, received_client):
-        raise AuthError("Client HMAC verification failed")
+        if not hmac.compare_digest(expected_client, received_client):
+            raise AuthError("Client HMAC verification failed")
 
-    # ── Step 4: Send SESSION_OK [session_id(4) || hmac_server(32)] ───────────
-    session_id = os.urandom(USMP_SESSION_ID_LEN)
-    hmac_server = _compute_hmac(resolved_psk, nonce, session_id)
-    await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
+        # ── Step 4: Send SESSION_OK [session_id(16) || hmac_server(32)] ───────────
+        session_id = os.urandom(USMP_SESSION_ID_LEN)
+        hmac_server = _compute_hmac(resolved_psk, nonce, session_id)
+        await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
-    return SessionInfo(
-        device_id=device_id,
-        session_id=session_id,
-        session_key=session_key,
-    )
+        if ip in _failed_handshakes:
+            del _failed_handshakes[ip]
+
+        return SessionInfo(
+            device_id=device_id,
+            session_id=session_id,
+            session_key=session_key,
+        )
+
+    except Exception:
+        if ip:
+            now = time.monotonic()
+            fails, lockout_until = _failed_handshakes.get(ip, (0, 0.0))
+            fails += 1
+            if fails >= 5:
+                # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
+                backoff = min(60.0, 2.0 ** (fails - 5))
+                lockout_until = now + backoff
+            else:
+                lockout_until = 0.0
+            _failed_handshakes[ip] = (fails, lockout_until)
+        raise
 
 
 async def client_handshake(
-    reader,
-    writer,
+    reader: asyncio.StreamReader,
+    writer: asyncio.StreamWriter,
     psk: bytes,
     device_id: bytes,
 ) -> SessionInfo:

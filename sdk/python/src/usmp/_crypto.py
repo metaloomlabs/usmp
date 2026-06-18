@@ -38,19 +38,17 @@ def derive_session_key(
     """
     peer_key = X25519PublicKey.from_public_bytes(peer_pub)
     shared_secret = priv_key.exchange(peer_key)
-    info = b"usmp-v1" + pub_c + pub_s
-
-    return HKDF(
-        algorithm=hashes.SHA256(),
-        length=USMP_SESSION_KEY_LEN,
-        salt=nonce,
-        info=info,
-    ).derive(shared_secret)
-
-
-def build_gcm_nonce(seq: int, session_id: bytes) -> bytes:
-    """Build a 12-byte GCM nonce: seq(4 LE) || session_id(4) || 0x00000000(4)."""
-    return struct.pack("<I", seq) + session_id[:4] + b"\x00" * 4
+    try:
+        info = b"usmp-v1" + pub_c + pub_s
+        return HKDF(
+            algorithm=hashes.SHA256(),
+            length=USMP_SESSION_KEY_LEN,
+            salt=nonce,
+            info=info,
+        ).derive(shared_secret)
+    finally:
+        if "shared_secret" in locals():
+            del shared_secret
 
 
 def build_aad(
@@ -77,7 +75,6 @@ def build_aad(
 def encrypt(
     key: bytes,
     seq: int,
-    session_id: bytes,
     type_: int,
     version: int,
     magic: int,
@@ -85,37 +82,46 @@ def encrypt(
 ) -> bytes:
     """
     Encrypt plaintext with AES-256-GCM.
-    Returns ciphertext + tag (len(plaintext) + 16 bytes).
+    Generates a random 12-byte nonce and prepends it to the output.
+    Returns nonce(12) || ciphertext || tag(16).
     """
-    nonce = build_gcm_nonce(seq, session_id)
-    # AAD uses the post-encryption length (plaintext + tag)
-    enc_length = len(plaintext) + USMP_TAG_LEN
+    import os
+    nonce = os.urandom(12)
+    # AAD uses the post-encryption payload length (nonce + plaintext + tag)
+    enc_length = 12 + len(plaintext) + USMP_TAG_LEN
     aad = build_aad(magic, version, type_, seq, enc_length)
 
     aesgcm = AESGCM(key)
     # cryptography library appends tag to ciphertext automatically
-    return aesgcm.encrypt(nonce, plaintext, aad)
+    ciphertext_and_tag = aesgcm.encrypt(nonce, plaintext, aad)
+    return nonce + ciphertext_and_tag
 
 
 def decrypt(
     key: bytes,
     seq: int,
-    session_id: bytes,
     type_: int,
     version: int,
     magic: int,
     length: int,
-    ciphertext_and_tag: bytes,
+    nonce_ct_tag: bytes,
 ) -> bytes:
     """
-    Decrypt and verify AES-256-GCM ciphertext+tag.
+    Decrypt and verify AES-256-GCM nonce_ct_tag.
     Raises CryptoError if authentication fails.
     """
-    nonce = build_gcm_nonce(seq, session_id)
+    from cryptography.exceptions import InvalidTag
+    if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
+        raise CryptoError("Payload too short")
+
+    nonce = nonce_ct_tag[:12]
+    ct_tag = nonce_ct_tag[12:]
     aad = build_aad(magic, version, type_, seq, length)
 
     aesgcm = AESGCM(key)
     try:
-        return aesgcm.decrypt(nonce, ciphertext_and_tag, aad)
+        return aesgcm.decrypt(nonce, ct_tag, aad)
+    except InvalidTag as e:
+        raise CryptoError(f"Decryption failed: {e}") from e
     except Exception as e:
         raise CryptoError(f"Decryption failed: {e}") from e
