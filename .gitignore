@@ -63,3 +63,6 @@ site/
 # ------------------------------------------------------------------------------
 .env
 .env.*
+
+# Local development & audit reports
+current-state/
