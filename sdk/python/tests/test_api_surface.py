@@ -4,9 +4,7 @@ API surface tests — verify all public exports exist and have expected
 attributes/methods. These run without a network connection.
 """
 
-import inspect
 import usmp
-
 
 # ── Module exports ────────────────────────────────────────────────────────────
 

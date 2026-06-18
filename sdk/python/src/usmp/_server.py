@@ -3,7 +3,8 @@
 import asyncio
 import logging
 import time
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
+
 from ._handshake import server_handshake
 from ._session import USMPSession
 from .errors import HandshakeError, USMPError

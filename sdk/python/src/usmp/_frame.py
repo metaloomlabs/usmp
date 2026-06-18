@@ -1,14 +1,15 @@
 import asyncio
 import struct
+
+from .errors import CRCError, FrameError, MagicError, PayloadError, VersionError
 from .types import (
-    USMPFrame,
-    PacketType,
-    USMP_MAGIC,
-    USMP_VERSION,
     USMP_HEADER_SIZE,
+    USMP_MAGIC,
     USMP_MAX_PAYLOAD,
+    USMP_VERSION,
+    PacketType,
+    USMPFrame,
 )
-from .errors import MagicError, VersionError, PayloadError, CRCError, FrameError
 
 
 def crc16(data: bytes) -> int:

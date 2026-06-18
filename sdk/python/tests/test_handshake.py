@@ -1,17 +1,17 @@
 import asyncio
-import pytest
-from usmp._handshake import server_handshake, client_handshake
-from usmp.errors import AuthError, HandshakeError
 import os
-from usmp._frame import read_frame, write_frame
+
 from usmp._crypto import generate_keypair
+from usmp._frame import read_frame, write_frame
+from usmp._handshake import client_handshake, server_handshake
+from usmp.errors import AuthError, HandshakeError
 from usmp.types import (
-    PacketType,
-    USMP_NONCE_LEN,
     USMP_DEVICE_ID_LEN,
+    USMP_HMAC_LEN,
+    USMP_NONCE_LEN,
     USMP_PUB_KEY_LEN,
     USMP_SESSION_ID_LEN,
-    USMP_HMAC_LEN,
+    PacketType,
 )
 
 PSK = b"test-psk-1234"
@@ -132,8 +132,8 @@ async def test_wrong_psk_server_rejected():
         try:
             # Complete handshake normally up to SESSION_OK
             frame = await read_frame(reader, verify_crc=False)
-            device_id = frame.payload[:USMP_DEVICE_ID_LEN]
-            pub_c = frame.payload[USMP_PUB_KEY_LEN:]
+            frame.payload[:USMP_DEVICE_ID_LEN]
+            frame.payload[USMP_PUB_KEY_LEN:]
 
             priv_s, pub_s = generate_keypair()
             nonce = os.urandom(USMP_NONCE_LEN)

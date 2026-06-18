@@ -1,6 +1,7 @@
 import pytest
-from usmp import encode_frame, decode_frame, PacketType
-from usmp.errors import MagicError, CRCError, PayloadError
+
+from usmp import PacketType, decode_frame, encode_frame
+from usmp.errors import CRCError, MagicError, PayloadError
 
 
 def test_encode_decode_roundtrip():

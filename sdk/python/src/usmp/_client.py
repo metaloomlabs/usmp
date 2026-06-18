@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+
 from ._handshake import client_handshake
 from ._session import USMPSession
 from .types import USMP_DEVICE_ID_LEN

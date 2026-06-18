@@ -1,14 +1,14 @@
 # tests/test_benchmark.py
 
 import asyncio
-import time
 import statistics
-import pytest
-from usmp._handshake import server_handshake, client_handshake
+import time
+
+from usmp._crypto import decrypt, derive_session_key, encrypt, generate_keypair
+from usmp._frame import decode_frame, encode_frame
+from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
-from usmp._crypto import generate_keypair, derive_session_key, encrypt, decrypt
-from usmp._frame import encode_frame, decode_frame
-from usmp.types import PacketType, USMP_MAGIC, USMP_VERSION
+from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
 
 PSK = b"test-psk-1234"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
@@ -55,7 +55,7 @@ def test_bench_frame_encode():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("Frame encode", times, target_ms=1.0)
-    assert passed, f"Frame encode p95 exceeded 1ms target"
+    assert passed, "Frame encode p95 exceeded 1ms target"
 
 
 def test_bench_frame_decode():
@@ -69,7 +69,7 @@ def test_bench_frame_decode():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("Frame decode", times, target_ms=1.0)
-    assert passed, f"Frame decode p95 exceeded 1ms target"
+    assert passed, "Frame decode p95 exceeded 1ms target"
 
 
 # ── Crypto benchmarks ─────────────────────────────────────────────────────────
@@ -84,7 +84,7 @@ def test_bench_keypair_generation():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("X25519 keypair generation", times, target_ms=5.0)
-    assert passed, f"Keypair generation p95 exceeded 5ms target"
+    assert passed, "Keypair generation p95 exceeded 5ms target"
 
 
 def test_bench_session_key_derivation():
@@ -101,7 +101,7 @@ def test_bench_session_key_derivation():
     passed = print_benchmark(
         "X25519 + HKDF session key derivation", times, target_ms=10.0
     )
-    assert passed, f"Session key derivation p95 exceeded 10ms target"
+    assert passed, "Session key derivation p95 exceeded 10ms target"
 
 
 def test_bench_aes_gcm_encrypt():
@@ -122,7 +122,7 @@ def test_bench_aes_gcm_encrypt():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("AES-256-GCM encrypt (21 bytes)", times, target_ms=2.0)
-    assert passed, f"AES-GCM encrypt p95 exceeded 2ms target"
+    assert passed, "AES-GCM encrypt p95 exceeded 2ms target"
 
 
 def test_bench_aes_gcm_decrypt():
@@ -152,7 +152,7 @@ def test_bench_aes_gcm_decrypt():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("AES-256-GCM decrypt (21 bytes)", times, target_ms=2.0)
-    assert passed, f"AES-GCM decrypt p95 exceeded 2ms target"
+    assert passed, "AES-GCM decrypt p95 exceeded 2ms target"
 
 
 
@@ -192,7 +192,7 @@ async def test_bench_handshake():
         times.append(t)
 
     passed = print_benchmark("Full USMP handshake (loopback TCP)", times, target_ms=50.0)
-    assert passed, f"Handshake p95 exceeded 50ms target"
+    assert passed, "Handshake p95 exceeded 50ms target"
 
 
 # ── Session send/recv benchmark ───────────────────────────────────────────────
@@ -235,4 +235,4 @@ async def test_bench_send_recv():
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark("Send + recv round trip (loopback)", times, target_ms=5.0)
-    assert passed, f"Send/recv p95 exceeded 5ms target"
+    assert passed, "Send/recv p95 exceeded 5ms target"

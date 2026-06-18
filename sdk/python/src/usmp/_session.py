@@ -2,10 +2,12 @@
 
 import asyncio
 import time
-from .types import PacketType, SessionInfo, USMP_MAGIC, USMP_VERSION
+
+from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from ._crypto import encrypt, decrypt
-from .errors import SequenceError, ConnectionClosedError, TimeoutError as USMPTimeoutError
+from .errors import ConnectionClosedError, SequenceError
+from .errors import TimeoutError as USMPTimeoutError
+from .types import USMP_MAGIC, USMP_VERSION, PacketType, SessionInfo
 
 
 class USMPSession:

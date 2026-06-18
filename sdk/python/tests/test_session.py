@@ -1,8 +1,7 @@
 import asyncio
-import pytest
-from usmp._handshake import server_handshake, client_handshake
+
+from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
-from usmp.errors import SequenceError
 
 PSK = b"test-psk-1234"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"

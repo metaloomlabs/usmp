@@ -6,10 +6,11 @@ wrong PSK rejection, BYE handling.
 """
 
 import asyncio
+
 import pytest
 
 import usmp
-from usmp import USMPServer, USMPClient, USMPSession
+from usmp import USMPClient, USMPServer, USMPSession
 from usmp.errors import ConnectionClosedError
 
 PSK = b"usmp-test-psk-integration"
@@ -269,12 +270,12 @@ async def test_multi_psk_dict():
     port = _free_port()
     device_id_1 = bytes([0x11, 0x22, 0x33, 0x44, 0x55, 0x66])
     device_id_2 = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
-    
+
     psk_map = {
         device_id_1: b"psk-device-1",
         device_id_2: b"psk-device-2",
     }
-    
+
     server = USMPServer(host=HOST, port=port, psk=psk_map, session_timeout=5.0)
 
     @server.on_session
@@ -296,7 +297,7 @@ async def test_multi_psk_dict():
         await client2.send(b"c2")
         r2 = await client2.recv()
         await client2.disconnect()
-        
+
         return r1, r2
 
     r1, r2 = await _run(server, client_coro())
@@ -308,12 +309,12 @@ async def test_multi_psk_dict():
 async def test_multi_psk_callable():
     port = _free_port()
     device_id_fixed = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
-    
+
     def resolve_psk(dev_id: bytes) -> bytes:
         if dev_id == device_id_fixed:
             return b"dynamic-psk-123"
         return b"default-psk"
-        
+
     server = USMPServer(host=HOST, port=port, psk=resolve_psk, session_timeout=5.0)
 
     @server.on_session
@@ -350,14 +351,19 @@ async def test_control_frame_integrity_enforced():
     async def client_coro():
         client = USMPClient(host=HOST, port=port, psk=PSK)
         await client.connect()
-        
+
         # Manually write a PING frame with a bad GCM tag payload (all zeros)
         from usmp._frame import write_frame
         from usmp.types import PacketType
-        
+
         bad_tag_payload = b"\x00" * 28
-        await write_frame(client._session._writer, PacketType.PING, bad_tag_payload, seq=client._session._info.tx_seq)
-        
+        await write_frame(
+            client._session._writer,
+            PacketType.PING,
+            bad_tag_payload,
+            seq=client._session._info.tx_seq,
+        )
+
         await asyncio.sleep(0.2)
         await client.disconnect()
 
