@@ -132,9 +132,10 @@ String USMPClient::deviceId() {
 }
 
 String USMPClient::sessionId() {
-  char buf[9];
-  snprintf(buf, sizeof(buf), "%02x%02x%02x%02x", _ctx.session_id[0],
-           _ctx.session_id[1], _ctx.session_id[2], _ctx.session_id[3]);
+  char buf[33];
+  for (int i = 0; i < 16; i++) {
+    snprintf(buf + (i * 2), 3, "%02x", _ctx.session_id[i]);
+  }
   return String(buf);
 }
 

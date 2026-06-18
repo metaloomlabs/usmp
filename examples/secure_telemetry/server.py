@@ -10,6 +10,9 @@ logging.basicConfig(
     format="%(asctime)s \033[1;36m[TELEMETRY_SERVER]\033[0m %(message)s",
 )
 
+# WARNING: Do NOT use hardcoded PSK constants in production environments.
+# In production, provision and load the PSK from a secure storage mechanism
+# (e.g. environment variables, secure database, or key vaults).
 PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "0.0.0.0"
 PORT = 9000

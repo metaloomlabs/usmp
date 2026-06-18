@@ -12,31 +12,53 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 0
-#define USMP_VERSION_MINOR 2
-#define USMP_VERSION_PATCH 6
+#define USMP_VERSION_MINOR 3
+#define USMP_VERSION_PATCH 0
 
 // Configuration ─────────────────────────────────────────────────────────────
-#ifndef USMP_PSK
-#define USMP_PSK "usmp-dev-psk-change-me-before-prod"
+
+/*
+ * USMP_PSK compile-time default has been REMOVED for security reasons.
+ *
+ * Set the PSK at runtime via the USMPClient constructor:
+ *
+ *   USMPClient usmp("my-provisioned-psk");
+ *
+ * Do NOT hardcode PSKs in your sketch source code — they will be
+ * visible in compiled firmware and can be extracted by an attacker.
+ * Load your PSK from secure storage, NVS, EEPROM, or a secure element.
+ */
+#ifdef USMP_PSK
+#  error "USMP_PSK compile-time PSK is no longer supported. " \
+         "Pass the PSK to USMPClient() at runtime instead."
 #endif
 
 #ifndef USMP_DEFAULT_PORT
 #define USMP_DEFAULT_PORT 9000
 #endif
 
+/*
+ * USMP_CONNECT_RETRIES / USMP_CONNECT_RETRY_MS
+ * Not yet used internally. Available for caller retry loops.
+ */
 #ifndef USMP_CONNECT_RETRIES
-#define USMP_CONNECT_RETRIES 10
+#define USMP_CONNECT_RETRIES 10  // Not yet implemented internally
 #endif
 
 #ifndef USMP_CONNECT_RETRY_MS
-#define USMP_CONNECT_RETRY_MS 2000
+#define USMP_CONNECT_RETRY_MS 2000  // Not yet implemented internally
 #endif
 
 // Constants ─────────────────────────────────────────────────────────────────
-#define USMP_DEVICE_ID_LEN 6
-#define USMP_SESSION_ID_LEN 4
+#define USMP_DEVICE_ID_LEN   6
+#define USMP_SESSION_ID_LEN  16   // Upgraded from 4 → 16 bytes (128-bit)
 #define USMP_SESSION_KEY_LEN 32
-#define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN)
+
+/*
+ * USMP_MAX_DATA_LEN: maximum application payload per send() call (452 bytes).
+ * Frame payload budget (480 bytes) minus AES-GCM nonce (12) and tag (16).
+ */
+#define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN - 12)
 
 // Session context ───────────────────────────────────────────────────────────
 typedef struct {
@@ -49,9 +71,7 @@ typedef struct {
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
-
-  // Runtime PSK — overrides USMP_PSK macro when set ────────────────────
-  const uint8_t *psk; // NULL = use USMP_PSK compile-time default
+  const uint8_t *psk;
   size_t psk_len;
 } usmp_t;
 
@@ -59,13 +79,13 @@ typedef struct {
 
 /**
  * Connect using a transport and perform USMP handshake.
+ * ctx->psk and ctx->psk_len must be set before calling.
  */
 int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
 
 /**
- * Explicit reconnect — re-dials transport and performs a full new handshake.
- * Resets tx_seq and rx_seq. Caller must handle session change.
- * Returns 0 on success, -1 on failure.
+ * Reconnect — re-dials transport and performs full handshake.
+ * Resets tx_seq and rx_seq.
  */
 int usmp_reconnect(usmp_t *ctx);
 
@@ -84,30 +104,22 @@ static inline bool usmp_is_connected(const usmp_t *ctx) {
 // Data API ──────────────────────────────────────────────────────────────────
 
 /**
- * Send encrypted data. Max len: USMP_MAX_DATA_LEN bytes.
- * Returns 0 on success, -1 on failure.
+ * Send encrypted data. Max len: USMP_MAX_DATA_LEN (452) bytes.
  */
 int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
 
 /**
- * Receive and decrypt data. Transparently handles inbound PONG frames.
+ * Receive and decrypt data. Handles inbound PING/PONG transparently.
  * Returns byte count on success, -1 on failure.
  */
 int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
 
 // Keepalive API ─────────────────────────────────────────────────────────────
 
-/**
- * Send an encrypted PING frame. Updates last_tx_ms.
- * Returns 0 on success, -1 on failure (dead socket).
- */
+/** Send an encrypted PING frame. */
 int usmp_ping(usmp_t *ctx);
 
-/**
- * Call in main loop. Sends PING if keepalive_ms has elapsed since last tx.
- * No-op if ctx->keepalive_ms == 0.
- * Returns 0 ok, -1 if PING failed (time to call usmp_reconnect).
- */
+/** Send PING if keepalive_ms has elapsed since last tx. No-op if keepalive_ms==0. */
 int usmp_keepalive_tick(usmp_t *ctx);
 
 #ifdef __cplusplus

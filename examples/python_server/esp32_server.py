@@ -2,6 +2,9 @@
 import asyncio
 from usmp import USMPServer, USMPSession, ConnectionClosedError
 
+# WARNING: Do NOT use hardcoded PSK constants in production environments.
+# In production, provision and load the PSK from a secure storage mechanism
+# (e.g. environment variables, secure database, or key vaults).
 PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "0.0.0.0"
 PORT = 9000
@@ -11,18 +14,15 @@ server = USMPServer(host=HOST, port=PORT, psk=PSK)
 
 @server.on_session
 async def handle(session: USMPSession):
-    print(f"[SESSION] device={session.device_id} session={session.session_id}")
+    peername = session._writer.get_extra_info("peername")
+    peer_ip = peername[0] if peername else "unknown"
+    print(f"[SESSION] device={session.device_id} session={session.session_id} ip={peer_ip}")
     try:
         while True:
             data = await session.recv()
             text = data.decode().strip()
-            try:
-                value = int(text)
-                result = value * 2
-                print(f"[RX] {value} → sending back {result}")
-                await session.send(str(result).encode())
-            except ValueError:
-                print(f"[SKIP] non-numeric: {text!r}")
+            print(f"[RX] {text} → sending back hello from server")
+            await session.send(b"hello from server")
     except ConnectionClosedError:
         print(f"[CLOSED] {session.device_id}")
 

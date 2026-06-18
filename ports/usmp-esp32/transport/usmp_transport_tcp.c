@@ -7,6 +7,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <unistd.h>
 
 // ── TCP context
@@ -135,10 +136,21 @@ static int usmp_tcp_available(usmp_transport_t *t) {
   usmp_tcp_ctx_t *tcp = (usmp_tcp_ctx_t *)t->ctx;
   if (!tcp || tcp->sock < 0)
     return 0;
-  int count = 0;
-  if (ioctl(tcp->sock, FIONREAD, &count) < 0)
+
+  fd_set rfds;
+  FD_ZERO(&rfds);
+  FD_SET(tcp->sock, &rfds);
+
+  struct timeval tv = {
+      .tv_sec = 0,
+      .tv_usec = 0
+  };
+
+  int ret = select(tcp->sock + 1, &rfds, NULL, NULL, &tv);
+  if (ret < 0) {
     return 0;
-  return count;
+  }
+  return (ret > 0 && FD_ISSET(tcp->sock, &rfds)) ? 1 : 0;
 }
 
 // ── Factory

@@ -23,6 +23,15 @@ void app_main(void)
     usmp_t ctx = {0};
     usmp_transport_t transport = {0};
 
+    /*
+     * Set PSK at runtime — compile-time USMP_PSK is no longer supported.
+     * Replace this with a call to your secure storage / NVS provisioning
+     * system in production firmware.
+     */
+    static const uint8_t s_psk[] = "usmp-dev-psk-change-me-before-prod";
+    ctx.psk     = s_psk;
+    ctx.psk_len = sizeof(s_psk) - 1; // exclude null terminator
+
     // ── Initial connect with retries ──────────────────────────────────────────
     bool connected = false;
     for (int attempt = 1; attempt <= USMP_CONNECT_RETRIES; ++attempt)

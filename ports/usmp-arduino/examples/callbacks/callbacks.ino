@@ -1,5 +1,8 @@
 #include <USMP.h>
 
+// WARNING: Do NOT use hardcoded PSK constants in production environments.
+// In production, provision and load the PSK from a secure storage mechanism
+// (e.g. EEPROM, Flash secure partition, or over a secure provisioning protocol).
 #define PSK "usmp-dev-psk-change-me-before-prod"
 #define SERVER_IP "[IP_ADDRESS]"
 #define WIFI_SSID "YourNetwork"

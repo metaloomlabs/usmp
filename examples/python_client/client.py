@@ -8,6 +8,9 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
+# WARNING: Do NOT use hardcoded PSK constants in production environments.
+# In production, provision and load the PSK from a secure storage mechanism
+# (e.g. environment variables, secure database, or key vaults).
 PSK = b"usmp-dev-psk-change-me-before-prod"
 HOST = "127.0.0.1"
 PORT = 9000
