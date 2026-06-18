@@ -75,6 +75,17 @@ void usmp_port_log(char level, const char *tag, const char *msg);
 #define USMP_LOGW(tag, msg) usmp_port_log('W', tag, msg)
 #define USMP_LOGE(tag, msg) usmp_port_log('E', tag, msg)
 
+/*
+ * USMP_LOGD — debug-level logging (verbose, disabled in production builds).
+ * Implement usmp_port_log with level 'D' in your port if you want debug output,
+ * or define USMP_DISABLE_DEBUG to make this a no-op.
+ */
+#ifdef USMP_DISABLE_DEBUG
+#define USMP_LOGD(tag, msg) ((void)0)
+#else
+#define USMP_LOGD(tag, msg) usmp_port_log('D', tag, msg)
+#endif
+
 #ifdef __cplusplus
 }
 #endif

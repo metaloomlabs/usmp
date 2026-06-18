@@ -1,9 +1,10 @@
 #include "usmp_frame.h"
+#include "mbedtls/constant_time.h"
 #include <string.h>
 
-uint16_t usmp_crc16(const uint8_t *data, uint16_t len) {
-  uint16_t crc = 0xFFFF;
-  for (int i = 0; i < len; i++) {
+/* Helper to process data for CRC-16-ANSI step-by-step */
+static uint16_t usmp_crc16_step(uint16_t crc, const uint8_t *data, uint16_t len) {
+  for (uint16_t i = 0; i < len; i++) {
     crc ^= data[i];
     for (int j = 0; j < 8; j++) {
       if (crc & 1)
@@ -13,6 +14,10 @@ uint16_t usmp_crc16(const uint8_t *data, uint16_t len) {
     }
   }
   return crc;
+}
+
+uint16_t usmp_crc16(const uint8_t *data, uint16_t len) {
+  return usmp_crc16_step(0xFFFF, data, len);
 }
 
 // CRC over header bytes [0..9] + payload (matches Python SDK)
@@ -29,27 +34,8 @@ static uint16_t compute_crc(usmp_packet_t *pkt) {
   header[8] = pkt->length & 0xFF;
   header[9] = (pkt->length >> 8) & 0xFF;
 
-  // Single pass: init CRC, run over header, continue over payload
-  uint16_t crc = 0xFFFF;
-  for (int i = 0; i < 10; i++) {
-    crc ^= header[i];
-    for (int j = 0; j < 8; j++) {
-      if (crc & 1)
-        crc = (crc >> 1) ^ 0xA001;
-      else
-        crc >>= 1;
-    }
-  }
-  for (uint16_t i = 0; i < pkt->length; i++) {
-    crc ^= pkt->payload[i];
-    for (int j = 0; j < 8; j++) {
-      if (crc & 1)
-
-        crc = (crc >> 1) ^ 0xA001;
-      else
-        crc >>= 1;
-    }
-  }
+  uint16_t crc = usmp_crc16_step(0xFFFF, header, 10);
+  crc = usmp_crc16_step(crc, pkt->payload, pkt->length);
   return crc;
 }
 
@@ -79,7 +65,7 @@ int usmp_build_packet(usmp_packet_t *pkt, uint8_t *out, uint16_t *out_len) {
 }
 
 int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt) {
-  if (len < USMP_HEADER_SIZE)
+  if (len < 0 || (size_t)len < USMP_HEADER_SIZE)
     return -1;
 
   pkt->magic = data[0] | (data[1] << 8);
@@ -92,7 +78,7 @@ int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt) {
   if (pkt->magic != USMP_MAGIC)
     return -1;
 
-  if (len < USMP_HEADER_SIZE + pkt->length)
+  if ((size_t)len < (size_t)USMP_HEADER_SIZE + pkt->length)
     return -1;
 
   if (pkt->length > USMP_MAX_PAYLOAD)
@@ -100,9 +86,9 @@ int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt) {
 
   memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
 
-  // Verify CRC
+  // Verify CRC using constant-time comparison (mitigates timing attacks)
   uint16_t expected = compute_crc(pkt);
-  if (pkt->crc != expected)
+  if (mbedtls_ct_memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0)
     return -1;
 
   return 0;

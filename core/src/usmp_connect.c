@@ -4,6 +4,7 @@
 #include "usmp_port.h"
 #include "usmp_session.h"
 #include "usmp_transport.h"
+#include "mbedtls/platform_util.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -12,6 +13,12 @@ static const char *TAG = "USMP";
 int usmp_connect(usmp_t *ctx, usmp_transport_t *transport) {
   if (!ctx || !transport)
     return -1;
+
+  /* Validate required transport function pointers before use */
+  if (!transport->send || !transport->recv) {
+    USMP_LOGE(TAG, "Transport missing send or recv — cannot connect");
+    return -1;
+  }
 
   char _msg[128];
   const uint8_t *psk = ctx->psk;
@@ -43,9 +50,13 @@ int usmp_connect(usmp_t *ctx, usmp_transport_t *transport) {
   ctx->rx_seq = 0;
   ctx->last_tx_ms = usmp_port_millis();
 
-  snprintf(_msg, sizeof(_msg), "Session established — id: %02x%02x%02x%02x",
-           ctx->session_id[0], ctx->session_id[1], ctx->session_id[2],
-           ctx->session_id[3]);
+  snprintf(_msg, sizeof(_msg),
+           "Session established — id: %02x%02x%02x%02x%02x%02x%02x%02x"
+           "%02x%02x%02x%02x%02x%02x%02x%02x",
+           ctx->session_id[0],  ctx->session_id[1],  ctx->session_id[2],  ctx->session_id[3],
+           ctx->session_id[4],  ctx->session_id[5],  ctx->session_id[6],  ctx->session_id[7],
+           ctx->session_id[8],  ctx->session_id[9],  ctx->session_id[10], ctx->session_id[11],
+           ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
   USMP_LOGI(TAG, _msg);
   return 0;
 }
@@ -79,6 +90,9 @@ int usmp_reconnect(usmp_t *ctx) {
     return -1;
   }
 
+  /* Zeroize the old session key before overwriting with the new one */
+  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+
   // device_id comes from hardware — unchanged between sessions
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
   memcpy(ctx->session_key, hs.session_key, USMP_SESSION_KEY_LEN);
@@ -87,10 +101,14 @@ int usmp_reconnect(usmp_t *ctx) {
   ctx->rx_seq = 0;
   ctx->last_tx_ms = usmp_port_millis();
 
-  char _msg[64];
-  snprintf(_msg, sizeof(_msg), "Reconnected — new session: %02x%02x%02x%02x",
-           ctx->session_id[0], ctx->session_id[1], ctx->session_id[2],
-           ctx->session_id[3]);
+  char _msg[128];
+  snprintf(_msg, sizeof(_msg),
+           "Reconnected — new session: %02x%02x%02x%02x%02x%02x%02x%02x"
+           "%02x%02x%02x%02x%02x%02x%02x%02x",
+           ctx->session_id[0],  ctx->session_id[1],  ctx->session_id[2],  ctx->session_id[3],
+           ctx->session_id[4],  ctx->session_id[5],  ctx->session_id[6],  ctx->session_id[7],
+           ctx->session_id[8],  ctx->session_id[9],  ctx->session_id[10], ctx->session_id[11],
+           ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
   USMP_LOGI(TAG, _msg);
   return 0;
 }

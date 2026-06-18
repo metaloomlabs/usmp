@@ -12,31 +12,65 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 0
-#define USMP_VERSION_MINOR 2
-#define USMP_VERSION_PATCH 7
+#define USMP_VERSION_MINOR 3
+#define USMP_VERSION_PATCH 0
 
 // Configuration ─────────────────────────────────────────────────────────────
-#ifndef USMP_PSK
-#define USMP_PSK "usmp-dev-psk-change-me-before-prod"
+
+/*
+ * USMP_PSK compile-time default has been REMOVED for security reasons.
+ *
+ * Compile-time PSKs appear in all compiled binaries and in version control
+ * history, enabling any attacker who obtains the firmware to impersonate
+ * any device or server.
+ *
+ * Instead, set the PSK at runtime:
+ *
+ *   usmp_t ctx = {0};
+ *   ctx.psk     = my_provisioned_psk_bytes;   // loaded from secure storage
+ *   ctx.psk_len = my_psk_len;
+ *   usmp_connect(&ctx, &transport);
+ *
+ * If you previously relied on a compile-time USMP_PSK define, remove it
+ * and provision the PSK via secure storage, an HSM, or secure boot.
+ */
+#ifdef USMP_PSK
+#  error "USMP_PSK compile-time PSK is no longer supported. " \
+         "Set ctx.psk and ctx.psk_len at runtime instead. " \
+         "See core/include/usmp.h for details."
 #endif
 
 #ifndef USMP_DEFAULT_PORT
 #define USMP_DEFAULT_PORT 9000
 #endif
 
+/*
+ * USMP_CONNECT_RETRIES / USMP_CONNECT_RETRY_MS
+ * Defined for user convenience — not yet used internally by the library.
+ * Callers can use these in their own retry loops (see firmware/main/app.c).
+ */
 #ifndef USMP_CONNECT_RETRIES
-#define USMP_CONNECT_RETRIES 10
+#define USMP_CONNECT_RETRIES 10  // Unused internally (caller convenience only)
 #endif
 
 #ifndef USMP_CONNECT_RETRY_MS
-#define USMP_CONNECT_RETRY_MS 2000
+#define USMP_CONNECT_RETRY_MS 2000  // Unused internally (caller convenience only)
 #endif
 
 // Constants ─────────────────────────────────────────────────────────────────
-#define USMP_DEVICE_ID_LEN 6
-#define USMP_SESSION_ID_LEN 4
+#define USMP_DEVICE_ID_LEN   6
+#define USMP_SESSION_ID_LEN  16   // Upgraded from 4 → 16 bytes (128-bit)
 #define USMP_SESSION_KEY_LEN 32
-#define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN)
+
+/*
+ * USMP_MAX_DATA_LEN: maximum application payload per send() call.
+ *
+ * Frame payload budget: USMP_MAX_PAYLOAD (480 bytes)
+ *   - AES-GCM nonce:    12 bytes (prepended, random per message)
+ *   - AES-GCM tag:      16 bytes (appended)
+ *   = max plaintext:   452 bytes
+ */
+#define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN - 12)
 
 // Session context ───────────────────────────────────────────────────────────
 typedef struct {
@@ -49,8 +83,13 @@ typedef struct {
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
-  // Runtime PSK — overrides USMP_PSK macro when set ────────────────────
-  const uint8_t *psk; // NULL = use USMP_PSK compile-time default
+
+  /*
+   * Runtime PSK — must be set before calling usmp_connect().
+   * Points to caller-managed memory; must remain valid for the
+   * lifetime of the session.
+   */
+  const uint8_t *psk;
   size_t psk_len;
 } usmp_t;
 
@@ -58,6 +97,8 @@ typedef struct {
 
 /**
  * Connect using a transport and perform USMP handshake.
+ * ctx->psk and ctx->psk_len must be set before calling.
+ * Returns 0 on success, -1 on failure.
  */
 int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
 
@@ -83,13 +124,14 @@ static inline bool usmp_is_connected(const usmp_t *ctx) {
 // Data API ──────────────────────────────────────────────────────────────────
 
 /**
- * Send encrypted data. Max len: USMP_MAX_DATA_LEN bytes.
+ * Send encrypted data. Max len: USMP_MAX_DATA_LEN (452) bytes.
  * Returns 0 on success, -1 on failure.
  */
 int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
 
 /**
- * Receive and decrypt data. Transparently handles inbound PONG frames.
+ * Receive and decrypt data. Transparently handles inbound PING/PONG frames
+ * (up to 8 consecutive control frames before returning error).
  * Returns byte count on success, -1 on failure.
  */
 int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
