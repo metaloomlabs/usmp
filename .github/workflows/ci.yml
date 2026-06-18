@@ -31,3 +31,13 @@ jobs:
         run: |
           cd sdk/python
           uv run pytest tests/ -v
+
+      - name: Run Ruff Linter
+        run: |
+          cd sdk/python
+          uv run ruff check .
+
+      - name: Run Mypy Type Checker
+        run: |
+          cd sdk/python
+          uv run mypy src/
