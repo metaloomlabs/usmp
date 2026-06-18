@@ -45,25 +45,26 @@ class USMPClient:
         )
 
     async def send(self, data: bytes) -> None:
-        self._ensure_connected()
-        await self._session.send(data)
+        session = self._ensure_connected()
+        await session.send(data)
 
     async def recv(self) -> bytes:
-        self._ensure_connected()
-        return await self._session.recv()
+        session = self._ensure_connected()
+        return await session.recv()
 
     async def ping(self) -> None:
-        self._ensure_connected()
-        await self._session.ping()
+        session = self._ensure_connected()
+        await session.ping()
 
     async def disconnect(self) -> None:
         if self._session:
             await self._session.bye()
             self._session = None
 
-    def _ensure_connected(self) -> None:
+    def _ensure_connected(self) -> USMPSession:
         if self._session is None:
             raise RuntimeError("Not connected. Call connect() first.")
+        return self._session
 
     @property
     def session_id(self) -> str | None:

@@ -93,7 +93,7 @@ class USMPServer:
         addr = writer.get_extra_info("peername")
         logger.info("TCP connected: %s", addr)
 
-        watchdog_task: asyncio.Task | None = None
+        watchdog_task: asyncio.Task[None] | None = None
 
         try:
             info = await asyncio.wait_for(

@@ -78,7 +78,7 @@ class SessionInfo:
     tx_seq: int = 0
     rx_seq: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if len(self.device_id) != USMP_DEVICE_ID_LEN:
             raise ValueError(f"Invalid device_id length: {len(self.device_id)}")
         if len(self.session_id) != USMP_SESSION_ID_LEN:
