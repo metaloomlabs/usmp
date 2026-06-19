@@ -60,6 +60,10 @@ void app_main(void)
 
     // USMP handshake — mutual auth + key exchange
     usmp_t ctx = {0};
+    static const uint8_t s_psk[] = "usmp-dev-psk-change-me-before-prod";
+    ctx.psk     = s_psk;
+    ctx.psk_len = sizeof(s_psk) - 1; // exclude null terminator
+
     if (usmp_connect(&ctx, &transport) != 0) {
         ESP_LOGE(TAG, "USMP connect failed");
         return;
@@ -83,12 +87,14 @@ void app_main(void)
 ```
 
 !!! tip "PSK Configuration"
-    The default PSK is `usmp-dev-psk-change-me-before-prod`.
-    Change it by defining `USMP_PSK` before including `usmp.h`:
+    The PSK must be set at runtime in the `usmp_t` context before calling `usmp_connect()`.
+    
     ```c
-    #define USMP_PSK "your-secret-key-here"
-    #include "usmp.h"
+    static const uint8_t my_psk[] = "your-secret-key-here";
+    ctx.psk     = my_psk;
+    ctx.psk_len = sizeof(my_psk) - 1; // exclude null terminator
     ```
+    Never hardcode production PSKs in your codebase — load them from NVS or secure storage instead.
 
 ## Step 3 — Build and flash
 

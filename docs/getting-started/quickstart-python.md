@@ -62,7 +62,7 @@ Flash your ESP32 with the [ESP32 Quick Start](quickstart-esp32.md) code pointing
 ```txt
 [USMP] Listening on 0.0.0.0:9000
 [USMP] TCP connected: ('192.168.1.x', xxxxx)
-[USMP] Session established: device=aa:bb:cc:dd:ee:ff session=12345678
+[USMP] Session established: device=aa:bb:cc:dd:ee:ff session=1234567890abcdef1234567890abcdef
 Device connected: aa:bb:cc:dd:ee:ff
 Received: b'hello from ESP32'
 ```

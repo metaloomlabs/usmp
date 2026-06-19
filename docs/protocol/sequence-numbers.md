@@ -43,16 +43,9 @@ In all three cases, the correct response is to close the connection and reconnec
 
 ---
 
-## Sequence numbers and the GCM nonce
+## Sequence numbers and replay protection
 
-Sequence numbers serve double duty — they also form part of the GCM nonce:
-
-```
-gcm_nonce = seq(4 bytes) || session_id(4 bytes) || zeros(4 bytes)
-```
-
-This means each frame is encrypted with a unique nonce, even if the plaintext
-is identical. An attacker cannot determine if the same message was sent twice.
+The sequence number is passed in the Additional Authenticated Data (AAD) for AES-GCM encryption. Although it does not form the GCM nonce (which is now generated purely randomly per packet to protect against timing and chosen-ciphertext variants), its inclusion in the AAD ensures that the receiver can detect and reject any replayed, out-of-order, or modified frames.
 
 ---
 

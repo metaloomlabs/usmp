@@ -1,4 +1,4 @@
-# USMP — Unified Secure Multi-transport Protocol | Specification v0.2.0
+# USMP — Unified Secure Multi-transport Protocol | Specification v0.4.2
 
 ## 1. Overview
 
@@ -124,7 +124,7 @@ Client                                Server
   │     hmac(32)                        │
   │                                     │
   │◀─── PKT_SESSION_OK ─────────────────│
-  │     session_id(4) || hmac_server(32)│
+  │     session_id(16) || hmac_server(32)│
   │                                     │
   │════════ SESSION ESTABLISHED ════════│
 ```
@@ -182,12 +182,12 @@ send PKT_ERROR with ERR_AUTH and close the connection.
 
 ### 5.6 PKT_SESSION_OK (Server → Client)
 
-Payload (36 bytes):
+Payload (48 bytes):
 ```
 Offset  Size  Field        Description
 ──────  ────  ───────────  ──────────────────────────
-0       4     session_id   Randomly generated session ID
-4       32    hmac_server  HMAC-SHA256(PSK, nonce || session_id)
+0       16    session_id   Randomly generated 16-byte session ID
+16      32    hmac_server  HMAC-SHA256(PSK, nonce || session_id)
 ```
 
 The client MUST verify this HMAC. If verification fails, the client MUST close the connection immediately (preventing connection to a rogue server).
@@ -199,14 +199,11 @@ All post-handshake frames use AES-256-GCM.
 
 ### 6.1 Nonce Construction
 
-The 12-byte GCM nonce is constructed as:
+The 12-byte GCM nonce is generated fresh as a random 12-byte block via a cryptographically secure random number generator (e.g. `usmp_port_random` on the device, or `os.urandom` on the server). It is never derived from sequence numbers or session IDs, guaranteeing that the same (key, nonce) pair is never reused.
 
-```
-nonce = seq(4 LE) || session_id(4) || 0x00000000(4)
-```
+The generated nonce is prepended directly to the encrypted payload output:
 
-The sequence number ensures nonce uniqueness within a session.
-The session_id ensures nonce uniqueness across sessions.
+    payload = nonce (12 bytes) || ciphertext || GCM authentication tag (16 bytes)
 
 ### 6.2 Additional Authenticated Data (AAD)
 
@@ -224,24 +221,28 @@ Total AAD size: 10 bytes.
 ```
 (ciphertext, tag) = AES-256-GCM-Encrypt(
     key   = session_key,
-    nonce = nonce,
+    nonce = nonce,             // 12 random bytes
     aad   = aad,
     plain = plaintext
 )
 
-frame.payload = ciphertext || tag
-frame.length  = len(plaintext) + 16
+frame.payload = nonce || ciphertext || tag
+frame.length  = 12 + len(plaintext) + 16
 ```
 
 ### 6.4 Decryption
 
 ```
-plaintext = AES-256-GCM-Decrypt(
+nonce      = frame.payload[0 : 12]
+ciphertext = frame.payload[12 : frame.length - 16]
+tag        = frame.payload[frame.length - 16 : frame.length]
+
+plaintext  = AES-256-GCM-Decrypt(
     key        = session_key,
     nonce      = nonce,
     aad        = aad,
-    ciphertext = frame.payload[0 : frame.length - 16],
-    tag        = frame.payload[frame.length - 16 : frame.length]
+    ciphertext = ciphertext,
+    tag        = tag
 )
 ```
 
@@ -363,9 +364,8 @@ expected_key  : to be computed by reference implementation
 ```
 key        : (32 bytes of 0x05)
 seq        : 0x00000000
-session_id : AA BB CC DD
-nonce      : 00 00 00 00 AA BB CC DD 00 00 00 00
-aad        : CD AB 01 05 00 00 00 00 15 00
+nonce      : (12 random bytes, prepended to payload)
+aad        : CD AB 01 05 00 00 00 00 31 00  (DATA frame header, seq=0, len=49 = 12 nonce + 21 plain + 16 tag)
 plaintext  : "hello encrypted world" (21 bytes)
 ```
 
@@ -375,5 +375,6 @@ expected ciphertext+tag : to be computed by reference implementation
 
 | Version | Date       | Changes                    |
 |---------|------------|----------------------------|
+| 0.4.2   | 2026-06-19 | Upgraded session ID to 16 bytes, switched to random 12-byte AES-GCM nonces, deprecated compile-time PSK. |
 | 0.2.0   | 2026-06-04 | Unified Secure Multi-transport Protocol v0.2.0 |
 | 0.1     | 2026-04-13 | Initial specification      |

@@ -21,7 +21,7 @@ Client (ESP32)                         Server (Gateway)
       │     HMAC-SHA256(PSK, nonce||device_id)│
       │                                       │
       │◀─── PKT_SESSION_OK ───────────────────│
-      │     session_id(4) ||                  │
+      │     session_id(16) ||                 │
       │     HMAC-SHA256(PSK, nonce||sess_id)  │
       │                                       │
       │  [Client verifies server HMAC]        │
@@ -105,12 +105,12 @@ with `PKT_ERROR ERR_AUTH`.
 
 The server proves it knows the PSK and issues a session ID.
 
-**Payload (36 bytes):**
+**Payload (48 bytes):**
 
 | Offset | Size | Field | Description |
 |--------|------|-------|-------------|
-| 0 | 4 | session_id | Random session identifier |
-| 4 | 32 | hmac_server | HMAC-SHA256(PSK, nonce \|\| session_id) |
+| 0 | 16 | session_id | Random 16-byte session identifier |
+| 16 | 32 | hmac_server | HMAC-SHA256(PSK, nonce \|\| session_id) |
 
 The client verifies the server HMAC. If it fails, the client closes the connection.
 This prevents a rogue gateway from completing the handshake.

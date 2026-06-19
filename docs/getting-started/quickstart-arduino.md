@@ -98,12 +98,12 @@ python server.py
 [USMP] TCP Connected
 Connected!
 Device ID:  ab:cd:ef:01:02:03
-Session ID: 5f3b7c2a
+Session ID: 5f3b7c2a8e9d0a1b2c3d4e5f6a7b8c9d
 ```
 
 On the Python server console, you should see:
 ```txt
-[USMP] Session established: device=ab:cd:ef:01:02:03 session=5f3b7c2a
+[USMP] Session established: device=ab:cd:ef:01:02:03 session=5f3b7c2a8e9d0a1b2c3d4e5f6a7b8c9d
 Device connected: ab:cd:ef:01:02:03
 Received: b'hello from arduino'
 ```

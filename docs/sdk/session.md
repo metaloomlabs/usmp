@@ -7,7 +7,7 @@ to your session handler.
 
 ```python
 session.device_id   # str — device MAC, e.g. "aa:bb:cc:dd:ee:ff"
-session.session_id  # str — session ID hex, e.g. "a1b2c3d4"
+session.session_id  # str — session ID hex, e.g. "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6"
 ```
 
 ## Methods

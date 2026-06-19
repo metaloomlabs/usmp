@@ -15,27 +15,16 @@ There is no silent corruption.
 
 ---
 
-## Nonce construction
+## Nonce generation
 
-AES-GCM requires a unique 12-byte nonce per encryption. USMP constructs it as:
+AES-GCM requires a unique 12-byte nonce per encryption. USMP generates a **fresh, cryptographically random 12-byte nonce** for every single message via a cryptographically secure random number generator (e.g. `usmp_port_random` on the device, or `os.urandom` in Python).
 
-```
+On the wire, the random nonce is prepended directly to the ciphertext payload block:
 
-nonce = seq(4 bytes LE) || session_id(4 bytes) || 0x00000000(4 bytes)
-
-```
-
-| Component | Purpose |
-|-----------|---------|
-| `seq` | Monotonically increasing — unique within a session |
-| `session_id` | Random per session — unique across sessions |
-| zeros | Padding to 12 bytes |
+    payload = nonce (12 bytes) || ciphertext || GCM authentication tag (16 bytes)
 
 !!! danger "Nonce reuse"
-    Reusing a nonce with AES-GCM and the same key is catastrophic —
-    it breaks both confidentiality and authenticity.
-    USMP's nonce construction makes reuse impossible as long as sequence
-    numbers are monotonic and session IDs are random.
+    Reusing a nonce with AES-GCM and the same key is catastrophic — it breaks both confidentiality and authenticity. By generating a fresh, fully random 12-byte nonce for each frame, USMP guarantees that the (key, nonce) pair is never reused, regardless of session length or key material.
 
 ---
 
@@ -60,13 +49,13 @@ aad = magic(2 LE) || version(1) || type(1) || seq(4 LE) || length(2 LE)
 
 (ciphertext, tag) = AES-256-GCM-Encrypt(
     key   = session_key,       // 32 bytes from HKDF
-    nonce = nonce,             // 12 bytes from seq + session_id
+    nonce = nonce,             // 12 random bytes
     aad   = header_bytes,      // 10 bytes
     plain = application_data   // your payload
 )
 
-frame.payload = ciphertext || tag
-frame.length  = len(plaintext) + 16
+frame.payload = nonce || ciphertext || tag
+frame.length  = 12 + len(plaintext) + 16
 
 ```
 
@@ -76,12 +65,16 @@ frame.length  = len(plaintext) + 16
 
 ```
 
-plaintext = AES-256-GCM-Decrypt(
+nonce      = frame.payload[0 : 12]
+ciphertext = frame.payload[12 : frame.length - 16]
+tag        = frame.payload[frame.length - 16 : frame.length]
+
+plaintext  = AES-256-GCM-Decrypt(
     key        = session_key,
     nonce      = nonce,
     aad        = header_bytes,
-    ciphertext = frame.payload[0 : frame.length - 16],
-    tag        = frame.payload[frame.length - 16 : frame.length]
+    ciphertext = ciphertext,
+    tag        = tag
 )
 
 ```

@@ -106,9 +106,11 @@ The PSK must match on both sides. The default is for development only:
 
 === "ESP32 (ESP-IDF)"
     ```c
-    // Define before including usmp.h
-    #define USMP_PSK "your-secret-psk-here"
-    #include "usmp.h"
+    // Set PSK dynamically at runtime in your application
+    usmp_t ctx = {0};
+    static const uint8_t s_psk[] = "your-secret-psk-here";
+    ctx.psk     = s_psk;
+    ctx.psk_len = sizeof(s_psk) - 1; // exclude null terminator
     ```
 
 === "Arduino"

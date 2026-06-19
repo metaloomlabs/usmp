@@ -17,9 +17,12 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 === "ESP32 (ESP-IDF development)"
     ```c
-    // For development only — never commit to source control
-    #define USMP_PSK "your-generated-psk-here"
-    #include "usmp.h"
+    // For development only — never commit to source control.
+    // Configure dynamically at runtime in the usmp_t context.
+    usmp_t ctx = {0};
+    static const uint8_t s_psk[] = "your-generated-psk-here";
+    ctx.psk     = s_psk;
+    ctx.psk_len = sizeof(s_psk) - 1; // exclude null terminator
     ```
 
 === "ESP32 (ESP-IDF production)"
@@ -36,9 +39,9 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 
 === "Arduino (development)"
     ```cpp
-    // For development only — never commit to source control
-    #define USMP_PSK "your-generated-psk-here"
-    USMPClient usmp(USMP_PSK);
+    // For development only — never commit to source control.
+    // Pass the PSK directly into the client constructor at runtime.
+    USMPClient usmp("your-generated-psk-here");
     ```
 
 === "Arduino (production)"

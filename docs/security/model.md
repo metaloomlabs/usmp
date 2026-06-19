@@ -81,17 +81,13 @@ The 32-byte nonce is generated with a cryptographically secure RNG on the server
 
 ---
 
-## GCM nonce construction
+## GCM nonce generation
 
-The 12-byte GCM nonce for each frame is:
+The 12-byte GCM nonce for each frame is generated as:
 
-```txt
-nonce = seq(4 bytes LE) || session_id(4 bytes) || 0x00000000(4 bytes)
-```
-
-- `seq` increments monotonically — guarantees uniqueness within a session
-- `session_id` is random — guarantees uniqueness across sessions
-- Nonce reuse with AES-GCM is catastrophic — this construction prevents it
+- A fresh, cryptographically random 12-byte block for each message via a secure random number generator (`usmp_port_random` or `os.urandom`).
+- It is prepended directly to the ciphertext payload block (`payload = nonce || ciphertext || tag`).
+- Nonce reuse with AES-GCM is catastrophic — generating a cryptographically random nonce per packet ensures that the (key, nonce) pair is never reused under any circumstances.
 
 ---
 
