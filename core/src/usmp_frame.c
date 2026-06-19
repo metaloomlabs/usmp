@@ -78,6 +78,9 @@ int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt) {
   if (pkt->magic != USMP_MAGIC)
     return -1;
 
+  if (pkt->version != USMP_VERSION)
+    return -1;
+
   if ((size_t)len < (size_t)USMP_HEADER_SIZE + pkt->length)
     return -1;
 

@@ -17,7 +17,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "Tests failed"; exit 1 }
 
 # ── 2. Build wheel ────────────────────────────────────────────────────────────
 Write-Host "[USMP] Building wheel..."
-uv build
+uv build --out-dir dist
 $wheel = Get-ChildItem "$SDKDIR\dist\*.whl" | Sort-Object LastWriteTime | Select-Object -Last 1
 
 # ── 3. Install into clean venv and verify import ──────────────────────────────
@@ -26,7 +26,7 @@ $TMPENV = "$REPO\.tmp-test-env"
 Remove-Item -Recurse -Force $TMPENV -ErrorAction SilentlyContinue
 
 uv venv $TMPENV
-& "$TMPENV\Scripts\pip.exe" install $wheel.FullName --quiet
+uv pip install --python "$TMPENV\Scripts\python.exe" $wheel.FullName --quiet
 
 $result = & "$TMPENV\Scripts\python.exe" -c @"
 import usmp
@@ -40,4 +40,4 @@ print('API surface OK')
 Write-Host $result
 Remove-Item -Recurse -Force $TMPENV
 
-Write-Host "[USMP] All checks passed — ready to publish"
+Write-Host "[USMP] All checks passed - ready to publish"

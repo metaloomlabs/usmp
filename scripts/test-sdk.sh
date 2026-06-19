@@ -16,7 +16,7 @@ uv run pytest tests/ -v
 
 # ── 2. Build wheel ────────────────────────────────────────────────────────────
 echo "[USMP] Building wheel..."
-uv build
+uv build --out-dir dist
 WHEEL=$(ls -t "$SDKDIR/dist/"*.whl | head -1)
 echo "[USMP] Built: $WHEEL"
 
@@ -26,7 +26,7 @@ TMPENV="$REPO/.tmp-test-env"
 rm -rf "$TMPENV"
 
 uv venv "$TMPENV"
-"$TMPENV/bin/pip" install "$WHEEL" --quiet
+uv pip install --python "$TMPENV/bin/python" "$WHEEL" --quiet
 
 "$TMPENV/bin/python" - <<'EOF'
 import usmp
