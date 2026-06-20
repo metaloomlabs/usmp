@@ -31,6 +31,13 @@ static int tcp_dial(usmp_tcp_ctx_t *tcp) {
   int flag = 1;
   setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
+  // Set receive timeout to 5 seconds to prevent infinite blocking
+  struct timeval tv = {
+      .tv_sec = 5,
+      .tv_usec = 0
+  };
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
       .sin_port = htons(tcp->port),
