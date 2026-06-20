@@ -20,7 +20,7 @@ from .types import (
 
 # Global tracking of failed handshake attempts per IP
 # ip -> (fail_count, lockout_until)
-_failed_handshakes: dict[str, tuple[int, float]] = {}
+_failed_handshakes: dict[str, tuple[int, float, float]] = {}
 
 
 def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
@@ -43,10 +43,12 @@ async def server_handshake(
 
     if ip:
         now = time.monotonic()
-        fails, lockout_until = _failed_handshakes.get(ip, (0, 0.0))
-        if lockout_until > now:
-            remaining = lockout_until - now
-            raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
+        entry = _failed_handshakes.get(ip)
+        if entry:
+            _, lockout_until, _ = entry
+            if lockout_until > now:
+                remaining = lockout_until - now
+                raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
 
     try:
         # ── Step 1: Receive HELLO [device_id(6) || pub_C(32)] ────────────────────
@@ -119,7 +121,12 @@ async def server_handshake(
     except Exception:
         if ip:
             now = time.monotonic()
-            fails, lockout_until = _failed_handshakes.get(ip, (0, 0.0))
+            entry = _failed_handshakes.get(ip)
+            if entry:
+                fails, lockout_until, _ = entry
+            else:
+                fails, lockout_until = 0, 0.0
+
             fails += 1
             if fails >= 5:
                 # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
@@ -127,7 +134,15 @@ async def server_handshake(
                 lockout_until = now + backoff
             else:
                 lockout_until = 0.0
-            _failed_handshakes[ip] = (fails, lockout_until)
+            _failed_handshakes[ip] = (fails, lockout_until, now)
+
+            # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
+            expired_ips = [
+                k for k, v in _failed_handshakes.items()
+                if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
+            ]
+            for expired_ip in expired_ips:
+                del _failed_handshakes[expired_ip]
         raise
 
 
