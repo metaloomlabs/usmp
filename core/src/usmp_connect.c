@@ -36,10 +36,12 @@ int usmp_connect(usmp_t *ctx, usmp_transport_t *transport) {
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
 
+  int ret = 0;
   if (usmp_handshake(&ctx->transport, &hs) != 0) {
     USMP_LOGE(TAG, "Handshake failed");
     ctx->transport.close(&ctx->transport);
-    return -1;
+    ret = -1;
+    goto cleanup;
   }
 
   memcpy(ctx->device_id, hs.device_id, USMP_DEVICE_ID_LEN);
@@ -58,7 +60,11 @@ int usmp_connect(usmp_t *ctx, usmp_transport_t *transport) {
            ctx->session_id[8],  ctx->session_id[9],  ctx->session_id[10], ctx->session_id[11],
            ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
   USMP_LOGI(TAG, _msg);
-  return 0;
+  ret = 0;
+
+cleanup:
+  mbedtls_platform_zeroize(&hs, sizeof(hs));
+  return ret;
 }
 
 int usmp_reconnect(usmp_t *ctx) {
@@ -84,10 +90,12 @@ int usmp_reconnect(usmp_t *ctx) {
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
 
+  int ret = 0;
   if (usmp_handshake(&ctx->transport, &hs) != 0) {
     USMP_LOGE(TAG, "Handshake failed after reconnect");
     ctx->transport.close(&ctx->transport);
-    return -1;
+    ret = -1;
+    goto cleanup;
   }
 
   /* Zeroize the old session key before overwriting with the new one */
@@ -110,7 +118,11 @@ int usmp_reconnect(usmp_t *ctx) {
            ctx->session_id[8],  ctx->session_id[9],  ctx->session_id[10], ctx->session_id[11],
            ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
   USMP_LOGI(TAG, _msg);
-  return 0;
+  ret = 0;
+
+cleanup:
+  mbedtls_platform_zeroize(&hs, sizeof(hs));
+  return ret;
 }
 
 void usmp_close(usmp_t *ctx) {
@@ -119,6 +131,7 @@ void usmp_close(usmp_t *ctx) {
   if (ctx->transport.close)
     ctx->transport.close(&ctx->transport);
   ctx->established = false;
+  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
   USMP_LOGI(TAG, "Session closed");
 }
 

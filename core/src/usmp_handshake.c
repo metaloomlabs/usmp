@@ -101,7 +101,10 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
    * diversity across devices, reducing correlation between RNG streams.
    */
   uint8_t pers[USMP_DEVICE_ID_LEN + 8];
-  usmp_port_get_device_id(pers, USMP_DEVICE_ID_LEN);
+  if (usmp_port_get_device_id(pers, USMP_DEVICE_ID_LEN) != 0) {
+    USMP_LOGE(TAG, "Failed to get device ID for RNG personalization");
+    goto cleanup;
+  }
   memcpy(pers + USMP_DEVICE_ID_LEN, "usmp-v1\x00", 8);
 
   if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
@@ -125,10 +128,17 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     goto cleanup;
   }
 
+  if (pub_buf_len < PUB_KEY_LEN) {
+    USMP_LOGE(TAG, "Generated public key length is too short");
+    goto cleanup;
+  }
   uint8_t *pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
 
   // Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
-  usmp_port_get_device_id(session->device_id, USMP_DEVICE_ID_LEN);
+  if (usmp_port_get_device_id(session->device_id, USMP_DEVICE_ID_LEN) != 0) {
+    USMP_LOGE(TAG, "Failed to get device ID");
+    goto cleanup;
+  }
 
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic  = USMP_MAGIC;
