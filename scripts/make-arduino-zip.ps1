@@ -3,13 +3,25 @@
 Set-StrictMode -Off
 $ErrorActionPreference = "Stop"
 
-$OUT  = "usmp-arduino"
-$ZIP  = "usmp-arduino.zip"
 $REPO = "./"
+
+# Parse version from library.properties
+$properties = Get-Content "$REPO\ports\usmp-arduino\library.properties"
+$VERSION = "unknown"
+foreach ($line in $properties) {
+    if ($line -match "^version=(.+)$") {
+        $VERSION = $Matches[1]
+        break
+    }
+}
+
+$OUT  = "usmp-arduino"
+$ZIP  = "usmp-$VERSION-arduino.zip"
 
 Write-Host "Cleaning..."
 Remove-Item -Recurse -Force $OUT -ErrorAction SilentlyContinue
 Remove-Item -Force $ZIP          -ErrorAction SilentlyContinue
+Remove-Item -Force "usmp-arduino.zip" -ErrorAction SilentlyContinue
 
 Write-Host "Staging files..."
 New-Item -ItemType Directory -Force -Path "$OUT\src" | Out-Null

@@ -55,10 +55,10 @@ Include the single public header:
 ### Installation
 
 === "Import ZIP Library"
-    The repository includes a pre-packaged `usmp-arduino.zip` in the root directory.
+    The repository includes a pre-packaged `usmp-*.zip` (e.g. `usmp-0.4.4-arduino.zip`) in the root directory.
     1. Open your Arduino IDE.
     2. Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
-    3. Choose `usmp-arduino.zip` from your local clone.
+    3. Choose the zip file from your local clone.
 
 === "Manual Installation"
     1. Clone the repository.

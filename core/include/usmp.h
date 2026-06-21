@@ -13,10 +13,10 @@ extern "C" {
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 0
 #define USMP_VERSION_MINOR 4
-#define USMP_VERSION_PATCH 3
+#define USMP_VERSION_PATCH 4
 
 /**
- * Get the library version string at runtime (e.g. "0.4.3").
+ * Get the library version string at runtime (e.g. "0.4.4").
  */
 const char* usmp_get_version(void);
 

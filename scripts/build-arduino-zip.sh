@@ -5,11 +5,12 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+VERSION=$(grep -E "^version=" "$REPO/ports/usmp-arduino/library.properties" | cut -d'=' -f2)
 OUT="usmp-arduino"
-ZIP="$REPO/usmp-arduino.zip"
+ZIP="$REPO/usmp-$VERSION-arduino.zip"
 
 echo "[USMP] Cleaning..."
-rm -rf "$OUT" "$ZIP"
+rm -rf "$OUT" "$ZIP" "$REPO/usmp-arduino.zip"
 
 echo "[USMP] Staging files..."
 mkdir -p "$OUT/src"

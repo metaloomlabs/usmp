@@ -16,9 +16,9 @@ Get a secure USMP session running between your ESP32 (running Arduino) and a Pyt
 USMP is packaged as a standard Arduino library. You can install it in one of two ways:
 
 === "Add ZIP Library (Recommended)"
-    1. Locate the `usmp-arduino.zip` file in the root of the USMP project.
+    1. Locate the `usmp-*.zip` file in the root of the USMP project (e.g. `usmp-0.4.4-arduino.zip`).
     2. In the Arduino IDE, go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
-    3. Select `usmp-arduino.zip`.
+    3. Select the zip file.
 
 === "Manual Copy"
     Copy the `ports/usmp-arduino` folder directly into your local `libraries/` directory:
