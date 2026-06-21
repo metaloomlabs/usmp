@@ -1,4 +1,4 @@
-# make-arduino-zip.ps1
+# build-arduino-zip.ps1
 
 Set-StrictMode -Off
 $ErrorActionPreference = "Stop"
