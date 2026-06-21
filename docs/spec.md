@@ -1,4 +1,4 @@
-# USMP — Unified Secure Multi-transport Protocol | Specification v0.4.2
+# USMP — Unified Secure Multi-transport Protocol | Specification v0.4.3
 
 ## 1. Overview
 
@@ -407,6 +407,7 @@ The connection phase represents the peak memory utilization of the protocol life
 
 | Version | Date       | Changes                    |
 |---------|------------|----------------------------|
+| 0.4.3   | 2026-06-22 | Documented resource constraints & keepalive details; fixed keepalive timeout in usmp_recv. |
 | 0.4.2   | 2026-06-19 | Upgraded session ID to 16 bytes, switched to random 12-byte AES-GCM nonces, deprecated compile-time PSK. |
 | 0.2.0   | 2026-06-04 | Unified Secure Multi-transport Protocol v0.2.0 |
 | 0.1     | 2026-04-13 | Initial specification      |

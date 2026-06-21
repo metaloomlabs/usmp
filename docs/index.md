@@ -65,7 +65,7 @@ The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5m
 
 ## Status
 
-**Active Development — v0.4.2**
+**Active Development — v0.4.3**
 
 | Component | Status |
 |---|---|
