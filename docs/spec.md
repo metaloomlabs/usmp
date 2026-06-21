@@ -305,6 +305,12 @@ DISCONNECTED
 - If no PKT_PONG is received, the client MUST close and reconnect
 - PKT_PING and PKT_PONG payloads are empty (length = 0 before encryption)
 
+#### 8.1.1 Keepalive Timer Behavior & Rationale
+
+To ensure reliable detection of asymmetric connection drops and dead endpoints:
+* **Client Keepalive (TX-driven)**: The client's keepalive timer tracks **transmit inactivity** (time elapsed since the last outgoing packet was sent by the client). Incoming packets received from the server (RX) **do not** reset the client's keepalive timer. This guarantees that the client's uplink transmit path is regularly tested.
+* **Server Watchdog (RX-driven)**: The server's session watchdog tracks **receive inactivity** (time elapsed since the last packet was received from the client). Outgoing packets sent by the server to the client (TX) **do not** reset the watchdog. This ensures the server will successfully detect and timeout a dead client even if the server is continuously broadcasting data to it.
+
 ### 8.2 Graceful Disconnect
 
 Either side MAY send PKT_BYE before closing the TCP connection.
