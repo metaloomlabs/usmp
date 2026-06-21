@@ -58,6 +58,9 @@ void keepalive(uint32_t ms);
 ```
 Sets the keepalive ping interval (default is `30000` ms / 30 seconds).
 
+> [!WARNING]
+> You must call `keepalive()` **after** calling `begin()`. Inside the library's `begin()` implementation, the client context structure is reset via `memset`, which will wipe out and override any keepalive duration configured prior to `begin()`.
+
 #### `alive`
 ```cpp
 bool alive();
