@@ -369,9 +369,35 @@ aad        : CD AB 01 05 00 00 00 00 31 00  (DATA frame header, seq=0, len=49 = 
 plaintext  : "hello encrypted world" (21 bytes)
 ```
 
-expected ciphertext+tag : to be computed by reference implementation
+## 11. Memory & Resource Constraints
 
-## 11. Version History
+USMP is designed for highly constrained embedded devices. The reference C implementation enforces the following memory requirements and limits:
+
+### 11.1 Persistent Session Memory (RAM)
+
+* **Persistent Context Struct (`usmp_t`)**:
+  * **32-bit Architecture (e.g. ESP32)**: **~108 bytes** (depending on compiler packing).
+  * **64-bit Architecture**: **~160–180 bytes**.
+* **Dynamic Heap Allocation**: **0 bytes**. Once a session is established, no persistent heap memory is allocated.
+
+### 11.2 Stack Memory Requirements
+
+During standard session operation, the stack requirements are deterministic and bounded:
+* **`usmp_send()`**: **~1 KB** stack usage (due to local frame buffer allocation).
+* **`usmp_recv()`**: **~1 KB** stack usage.
+
+### 11.3 Handshake Memory Overhead (Peak Allocation)
+
+The connection phase represents the peak memory utilization of the protocol lifecycle:
+* **Stack Memory**: **~1 KB** stack usage inside `usmp_handshake()`.
+* **Transient Heap Allocations**:
+  * **Core Buffers**: **1 KB** (two 512-byte temporary TX/RX buffers are dynamically allocated to prevent stack overflows on systems with small stacks, e.g., Arduino).
+  * **mbedTLS Operations**: **~2 KB to 4 KB** dynamic heap allocation for Curve25519 (ECDH) arithmetic context, entropy pool, and CTR_DRBG seed context.
+  * **Secure Cleanup**: All handshake heap buffers and intermediate cryptographic structures are securely zeroed out (`mbedtls_platform_zeroize`) and freed immediately after the handshake completes.
+
+---
+
+## 12. Version History
 
 | Version | Date       | Changes                    |
 |---------|------------|----------------------------|
