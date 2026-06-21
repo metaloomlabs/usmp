@@ -196,6 +196,9 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
         return -1;
       }
+      if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        return 0;
+      }
       continue;
 
     } else if (pkt.type == USMP_TYPE_PING) {
@@ -208,6 +211,9 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
       if (++ctrl_count >= USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
         return -1;
+      }
+      if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        return 0;
       }
       continue;
 

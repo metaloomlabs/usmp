@@ -100,10 +100,13 @@ bool USMPClient::available() {
 
 String USMPClient::read() {
   int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
-  if (n <= 0) {
+  if (n < 0) {
     _ctx.established = false;
     if (_on_disconnect)
       _on_disconnect();
+    return String();
+  }
+  if (n == 0) {
     return String();
   }
   return String((char *)_rx_buf, n);
