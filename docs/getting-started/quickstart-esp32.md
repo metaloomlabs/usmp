@@ -99,7 +99,8 @@ void app_main(void)
 ## Step 3 — Build and flash
 
 ```bash
-idf.py build flash monitor```
+idf.py build flash monitor
+```
 
 
 ## Step 4 — Run the gateway
