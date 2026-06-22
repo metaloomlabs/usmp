@@ -59,7 +59,7 @@ The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5m
 - **Transport agnostic** — TCP now, UART and UDP coming
 - **Simple API** — connect, send, recv, close
 - **Cross-platform** — ESP32, Arduino (ESP32 cores), STM32 coming
-- **Python SDK** — asyncio server and client
+- **Python SDK** — asyncio server, client, and multi-device manager
 
 ---
 
@@ -78,6 +78,7 @@ The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5m
 | Arduino port | Working |
 | Python SDK | Working |
 | Transport abstraction | Working |
+| Multi-device management | Working |
 | UART transport | In Progress |
 | CLI tool | In Progress |
 | mDNS discovery | In Progress |

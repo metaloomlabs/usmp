@@ -84,10 +84,11 @@ nav:
       - Arduino: ports/arduino.md
       - Porting Guide: ports/porting-guide.md
   - SDK:
-      - Python SDK: sdk/python.md
-      - USMPServer: sdk/server.md
-      - USMPClient: sdk/client.md
-      - USMPSession: sdk/session.md
+      - Python SDK:
+          - Overview: sdk/python.md
+          - USMPServer: sdk/server.md
+          - USMPClient: sdk/client.md
+          - USMPSession: sdk/session.md
   - Tools:
       - CLI (coming soon): tools/cli.md
   - Security:
@@ -97,6 +98,8 @@ nav:
   - Examples:
       - ESP32 + Python Server: examples/esp32-python.md
       - D2D (coming soon): examples/d2d.md
+  - Troubleshooting: troubleshooting.md
+  - Debugging: debugging.md
   - Spec: spec.md
 
 extra:
