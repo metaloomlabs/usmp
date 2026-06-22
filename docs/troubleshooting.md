@@ -46,6 +46,24 @@ This document lists common issues encountered when deploying, testing, or develo
   - Ensure the transport channel preserves packet order (e.g., TCP).
   - If a packet was lost, trigger a session reconnect to reset sequence counters.
 
+### 2.3 TCP Connection Failures & Firewall Blocks
+* **Symptom**: The client prints `[USMP] TCP connect failed` or `Unable to connect to <IP>:<Port>` even though Wi-Fi is connected.
+* **Cause**:
+  - The USMP server is not running or is listening on a different IP/port.
+  - The host machine running the server has a firewall blocking incoming traffic. This is extremely common on Windows when network profiles default to "Public".
+* **Resolution**:
+  - Verify that the server is online and listening on the specified IP and port.
+  - Ensure the client's network subnet matches the server's network subnet (especially if using static IP configurations).
+  - Open port `9000` (or your custom port) on the host machine's firewall.
+  - On Windows, run the following command in an **elevated Command Prompt (Admin)** to allow incoming TCP traffic on port `9000` for both Public and Private networks:
+    ```cmd
+    netsh advfirewall firewall add rule name="USMP TCP 9000" dir=in action=allow protocol=TCP localport=9000 profile=any
+    ```
+    Or in **PowerShell (Admin)**:
+    ```powershell
+    New-NetFirewallRule -DisplayName "USMP TCP 9000" -Direction Inbound -LocalPort 9000 -Protocol TCP -Action Allow -Profile Any
+    ```
+
 ---
 
 ## 3. Embedded & Hardware Limitations
