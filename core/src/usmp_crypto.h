@@ -12,6 +12,7 @@
  * prepends it to the output: out = nonce(12) || ciphertext || tag(16)
  *
  * @param key        32-byte AES-256 session key
+ * @param nonce      12-byte nonce
  * @param aad        Additional authenticated data (frame header, 10 bytes)
  * @param aad_len    Length of AAD
  * @param plaintext  Data to encrypt
@@ -21,6 +22,7 @@
  * @return           0 on success, -1 on failure
  */
 int usmp_gcm_encrypt(const uint8_t *key,
+                     const uint8_t *nonce,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *plaintext, size_t plain_len,
                      uint8_t *out, size_t *out_len);
@@ -31,6 +33,7 @@ int usmp_gcm_encrypt(const uint8_t *key,
  * Expects input as: nonce(12) || ciphertext || tag(16)
  *
  * @param key                  32-byte AES-256 session key
+ * @param nonce                Expected 12-byte nonce
  * @param aad                  Additional authenticated data (frame header, 10 bytes)
  * @param aad_len              Length of AAD
  * @param nonce_ct_tag         Input: nonce || ciphertext || tag
@@ -40,6 +43,7 @@ int usmp_gcm_encrypt(const uint8_t *key,
  * @return                     0 on success, -1 on authentication failure or error
  */
 int usmp_gcm_decrypt(const uint8_t *key,
+                     const uint8_t *nonce,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *nonce_ct_tag, size_t nct_len,
                      uint8_t *out, size_t *out_len);

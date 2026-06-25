@@ -1,6 +1,7 @@
 #include "usmp_crypto.h"
 #include "usmp_port.h"
 #include "mbedtls/gcm.h"
+#include "mbedtls/constant_time.h"
 #include <string.h>
 
 /*
@@ -13,14 +14,10 @@
  * sequence number, session length, or key material.
  */
 int usmp_gcm_encrypt(const uint8_t *key,
+                     const uint8_t *nonce,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *plaintext, size_t plain_len,
                      uint8_t *out, size_t *out_len) {
-  /* Generate a fresh random nonce — never derived from seq/session_id */
-  uint8_t nonce[USMP_GCM_NONCE_LEN];
-  if (usmp_port_random(nonce, USMP_GCM_NONCE_LEN) != 0)
-    return -1;
-
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
 
@@ -66,6 +63,7 @@ done:
  * Returns -1 if authentication tag does not match (tampered or wrong key).
  */
 int usmp_gcm_decrypt(const uint8_t *key,
+                     const uint8_t *nonce,
                      const uint8_t *aad, size_t aad_len,
                      const uint8_t *nonce_ct_tag, size_t nct_len,
                      uint8_t *out, size_t *out_len) {
@@ -73,7 +71,10 @@ int usmp_gcm_decrypt(const uint8_t *key,
   if (nct_len < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN)
     return -1;
 
-  const uint8_t *nonce      = nonce_ct_tag;
+  /* Verify nonce matches expected deterministic nonce */
+  if (mbedtls_ct_memcmp(nonce_ct_tag, nonce, USMP_GCM_NONCE_LEN) != 0)
+    return -1;
+
   const uint8_t *ciphertext = nonce_ct_tag + USMP_GCM_NONCE_LEN;
   size_t cipher_len         = nct_len - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
   const uint8_t *tag        = ciphertext + cipher_len;
@@ -97,7 +98,7 @@ int usmp_gcm_decrypt(const uint8_t *key,
   }
 
   if (mbedtls_gcm_auth_decrypt(&gcm, cipher_len,
-                                nonce, USMP_GCM_NONCE_LEN,
+                                nonce_ct_tag, USMP_GCM_NONCE_LEN,
                                 aad, aad_len,
                                 tag, USMP_GCM_TAG_LEN,
                                 ct_ptr, out_ptr) != 0)

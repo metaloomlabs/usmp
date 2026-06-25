@@ -1,6 +1,7 @@
 # src/usmp/_session.py
 
 import asyncio
+import struct
 import time
 
 from ._crypto import decrypt, encrypt
@@ -40,8 +41,10 @@ class USMPSession:
     async def send(self, data: bytes) -> None:
         """Encrypt and send a DATA frame."""
         seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.session_key,
+            nonce=nonce,
             seq=seq,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
@@ -65,8 +68,10 @@ class USMPSession:
                         f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
                     )
 
+                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                 plaintext = decrypt(
                     key=self._info.session_key,
+                    nonce=nonce,
                     seq=frame.seq,
                     type_=int(frame.type),
                     version=frame.version,
@@ -104,8 +109,10 @@ class USMPSession:
     async def ping(self) -> None:
         """Send a PING frame."""
         seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.session_key,
+            nonce=nonce,
             seq=seq,
             type_=int(PacketType.PING),
             version=USMP_VERSION,
@@ -118,8 +125,10 @@ class USMPSession:
     async def bye(self) -> None:
         """Send a BYE frame and close the connection."""
         seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.session_key,
+            nonce=nonce,
             seq=seq,
             type_=int(PacketType.BYE),
             version=USMP_VERSION,
@@ -132,8 +141,10 @@ class USMPSession:
 
     async def _send_pong(self) -> None:
         seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.session_key,
+            nonce=nonce,
             seq=seq,
             type_=int(PacketType.PONG),
             version=USMP_VERSION,

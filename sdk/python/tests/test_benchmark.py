@@ -107,12 +107,14 @@ def test_bench_session_key_derivation():
 def test_bench_aes_gcm_encrypt():
     key = b"\x05" * 32
     plaintext = b"hello encrypted world"
+    nonce = b"\x01" * 12
     times = []
 
     for _ in range(RUNS):
         t0 = time.perf_counter()
         encrypt(
             key=key,
+            nonce=nonce,
             seq=0,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
@@ -128,8 +130,10 @@ def test_bench_aes_gcm_encrypt():
 def test_bench_aes_gcm_decrypt():
     key = b"\x05" * 32
     plaintext = b"hello encrypted world"
+    nonce = b"\x01" * 12
     ct = encrypt(
         key=key,
+        nonce=nonce,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -142,6 +146,7 @@ def test_bench_aes_gcm_decrypt():
         t0 = time.perf_counter()
         decrypt(
             key=key,
+            nonce=nonce,
             seq=0,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,

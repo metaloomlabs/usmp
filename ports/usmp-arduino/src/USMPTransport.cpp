@@ -18,7 +18,7 @@ static int arduino_tcp_send(usmp_transport_t *t, const uint8_t *data,
 
 static int arduino_tcp_recv(usmp_transport_t *t, uint8_t *buf, size_t max_len) {
   USMPArduinoTcpCtx *ctx = (USMPArduinoTcpCtx *)t->ctx;
-  const uint32_t TIMEOUT_MS = 5000;
+  const uint32_t TIMEOUT_MS = 500;
 
   // Step 1: read header exactly
   if (max_len < USMP_HEADER_SIZE)
