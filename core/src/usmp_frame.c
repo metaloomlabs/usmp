@@ -81,10 +81,10 @@ int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt) {
   if (pkt->version != USMP_VERSION)
     return -1;
 
-  if ((size_t)len < (size_t)USMP_HEADER_SIZE + pkt->length)
+  if (pkt->length > USMP_MAX_PAYLOAD)
     return -1;
 
-  if (pkt->length > USMP_MAX_PAYLOAD)
+  if ((size_t)len < (size_t)USMP_HEADER_SIZE + pkt->length)
     return -1;
 
   memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
