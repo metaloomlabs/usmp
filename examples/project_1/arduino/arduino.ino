@@ -7,9 +7,9 @@
 // In production, provision and load the PSK from a secure storage mechanism
 // (e.g. EEPROM, Flash secure partition, or over a secure provisioning protocol).
 #define PSK "usmp-dev-psk-change-me-before-prod"
-#define SERVER_IP "10.52.94.175"
+#define SERVER_IP "192.168.1.100"
 #define WIFI_SSID "connecting....."
-#define WIFI_PASS "x64.winter"
+#define WIFI_PASS "YOUR_WIFI_PASSWORD"
 
 USMPClient usmp(PSK);
 

@@ -29,7 +29,7 @@ This project provides a complete plug-and-play echo application running across t
 We'll start the server first so that our microcontrollers can connect to it immediately when they boot.
 
 1. Ensure your host machine and microcontrollers are on the same Wi-Fi network.
-2. Find the local IP address of your host machine (e.g. `192.168.1.100` or `10.52.94.175`).
+2. Find the local IP address of your host machine (e.g. `192.168.1.100`).
 3. Run the gateway server:
    ```bash
    cd sdk/python
