@@ -40,12 +40,16 @@ def test_session_key_changes_with_nonce():
 
 
 def test_gcm_nonce_construction():
-    # Encrypt twice, nonces must be different (randomness verification)
+    # Encrypt with different nonces, verify they are used
     key = b"\x05" * 32
     plaintext = b"hello"
 
+    nonce1 = b"\x01" * 12
+    nonce2 = b"\x02" * 12
+
     ct1 = encrypt(
         key=key,
+        nonce=nonce1,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -55,6 +59,7 @@ def test_gcm_nonce_construction():
 
     ct2 = encrypt(
         key=key,
+        nonce=nonce2,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -62,11 +67,9 @@ def test_gcm_nonce_construction():
         plaintext=plaintext,
     )
 
-    nonce1 = ct1[:12]
-    nonce2 = ct2[:12]
-    assert len(nonce1) == 12
-    assert len(nonce2) == 12
-    assert nonce1 != nonce2
+    assert ct1[:12] == nonce1
+    assert ct2[:12] == nonce2
+    assert ct1 != ct2
 
 
 def test_aad_construction():
@@ -83,9 +86,11 @@ def test_aad_construction():
 def test_encrypt_decrypt_roundtrip():
     key = b"\x05" * 32
     plaintext = b"hello encrypted world"
+    nonce = b"\x01" * 12
 
     ct = encrypt(
         key=key,
+        nonce=nonce,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -95,6 +100,7 @@ def test_encrypt_decrypt_roundtrip():
 
     pt = decrypt(
         key=key,
+        nonce=nonce,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -108,10 +114,12 @@ def test_encrypt_decrypt_roundtrip():
 
 def test_decrypt_fails_on_tampered_ciphertext():
     key = b"\x05" * 32
+    nonce = b"\x01" * 12
 
     ct = bytearray(
         encrypt(
             key=key,
+            nonce=nonce,
             seq=0,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
@@ -124,6 +132,7 @@ def test_decrypt_fails_on_tampered_ciphertext():
     with pytest.raises(CryptoError):
         decrypt(
             key=key,
+            nonce=nonce,
             seq=0,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,
@@ -136,9 +145,11 @@ def test_decrypt_fails_on_tampered_ciphertext():
 def test_decrypt_fails_on_wrong_seq():
     key = b"\x05" * 32
     plaintext = b"secret"
+    nonce = b"\x01" * 12
 
     ct = encrypt(
         key=key,
+        nonce=nonce,
         seq=0,
         type_=int(PacketType.DATA),
         version=USMP_VERSION,
@@ -150,6 +161,7 @@ def test_decrypt_fails_on_wrong_seq():
     with pytest.raises(CryptoError):
         decrypt(
             key=key,
+            nonce=nonce,
             seq=1,
             type_=int(PacketType.DATA),
             version=USMP_VERSION,

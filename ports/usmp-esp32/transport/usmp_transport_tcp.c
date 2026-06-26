@@ -31,10 +31,10 @@ static int tcp_dial(usmp_tcp_ctx_t *tcp) {
   int flag = 1;
   setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
-  // Set receive timeout to 5 seconds to prevent infinite blocking
+  // Set receive timeout to 500ms to prevent long blocking
   struct timeval tv = {
-      .tv_sec = 5,
-      .tv_usec = 0
+      .tv_sec = 0,
+      .tv_usec = 500000
   };
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 

@@ -98,7 +98,7 @@ async def server_handshake(
             raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
         # ── Verify client HMAC ────────────────────────────────────────────────────
-        expected_client = _compute_hmac(resolved_psk, nonce, device_id)
+        expected_client = _compute_hmac(resolved_psk, nonce, device_id, pub_c, pub_s)
         received_client = frame.payload[:USMP_HMAC_LEN]
 
         if not hmac.compare_digest(expected_client, received_client):
@@ -106,7 +106,7 @@ async def server_handshake(
 
         # ── Step 4: Send SESSION_OK [session_id(16) || hmac_server(32)] ───────────
         session_id = os.urandom(USMP_SESSION_ID_LEN)
-        hmac_server = _compute_hmac(resolved_psk, nonce, session_id)
+        hmac_server = _compute_hmac(resolved_psk, nonce, session_id, pub_c, pub_s)
         await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
         if ip in _failed_handshakes:
@@ -181,7 +181,7 @@ async def client_handshake(
     session_key = derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-    hmac_client = _compute_hmac(psk, nonce, device_id)
+    hmac_client = _compute_hmac(psk, nonce, device_id, pub_c, pub_s)
     await write_frame(writer, PacketType.HELLO_ACK, hmac_client)
 
     # ── Step 4: Receive SESSION_OK [session_id(4) || hmac_server(32)] ────────
@@ -205,7 +205,7 @@ async def client_handshake(
     ]
 
     # ── Verify server HMAC ────────────────────────────────────────────────────
-    expected_server = _compute_hmac(psk, nonce, session_id)
+    expected_server = _compute_hmac(psk, nonce, session_id, pub_c, pub_s)
     if not hmac.compare_digest(expected_server, hmac_server):
         raise AuthError("Server HMAC verification failed — possible rogue server")
 

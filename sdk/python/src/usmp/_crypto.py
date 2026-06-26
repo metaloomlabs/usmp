@@ -76,6 +76,7 @@ def build_aad(
 
 def encrypt(
     key: bytes,
+    nonce: bytes,
     seq: int,
     type_: int,
     version: int,
@@ -84,11 +85,8 @@ def encrypt(
 ) -> bytes:
     """
     Encrypt plaintext with AES-256-GCM.
-    Generates a random 12-byte nonce and prepends it to the output.
     Returns nonce(12) || ciphertext || tag(16).
     """
-    import os
-    nonce = os.urandom(12)
     # AAD uses the post-encryption payload length (nonce + plaintext + tag)
     enc_length = 12 + len(plaintext) + USMP_TAG_LEN
     aad = build_aad(magic, version, type_, seq, enc_length)
@@ -101,6 +99,7 @@ def encrypt(
 
 def decrypt(
     key: bytes,
+    nonce: bytes,
     seq: int,
     type_: int,
     version: int,
@@ -116,7 +115,10 @@ def decrypt(
     if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
         raise CryptoError("Payload too short")
 
-    nonce = nonce_ct_tag[:12]
+    received_nonce = nonce_ct_tag[:12]
+    if received_nonce != nonce:
+        raise CryptoError("Nonce mismatch")
+
     ct_tag = nonce_ct_tag[12:]
     aad = build_aad(magic, version, type_, seq, length)
 

@@ -212,9 +212,11 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   // Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
   uint8_t hmac_client[USMP_HMAC_LEN];
   {
-    uint8_t input[USMP_NONCE_LEN + USMP_DEVICE_ID_LEN];
+    uint8_t input[USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
     memcpy(input, nonce, USMP_NONCE_LEN);
     memcpy(input + USMP_NONCE_LEN, session->device_id, USMP_DEVICE_ID_LEN);
+    memcpy(input + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
+    memcpy(input + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
     if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_client) != 0) {
       USMP_LOGE(TAG, "Client HMAC computation failed");
       goto cleanup;
@@ -259,9 +261,11 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   // Verify server HMAC ────────────────────────────────────────────────────
   uint8_t hmac_server_expected[USMP_HMAC_LEN];
   {
-    uint8_t input[USMP_NONCE_LEN + USMP_SESSION_ID_LEN];
+    uint8_t input[USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
     memcpy(input, nonce, USMP_NONCE_LEN);
     memcpy(input + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
+    memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN, pub_c, PUB_KEY_LEN);
+    memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
     if (compute_hmac(psk, psk_len, input, sizeof(input),
                      hmac_server_expected) != 0) {
       USMP_LOGE(TAG, "Server HMAC computation failed");
