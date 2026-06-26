@@ -169,3 +169,56 @@ async def test_wrong_psk_server_rejected():
     assert isinstance(result.get("client_error"), AuthError), (
         f"Expected AuthError, got {result.get('client_error')}"
     )
+
+
+async def test_rate_limiter_non_ip_fallback():
+    from usmp._handshake import _failed_handshakes, server_handshake
+    from usmp.errors import HandshakeError
+    import pytest
+    from unittest.mock import Mock
+
+    _failed_handshakes.clear()
+
+    mock_reader = Mock(spec=asyncio.StreamReader)
+    mock_writer = Mock(spec=asyncio.StreamWriter)
+    mock_writer.get_extra_info.return_value = None
+
+    for _ in range(5):
+        with pytest.raises(Exception):
+            await server_handshake(mock_reader, mock_writer, b"some-psk")
+
+    with pytest.raises(HandshakeError) as exc_info:
+        await server_handshake(mock_reader, mock_writer, b"some-psk")
+    assert "Rate limit exceeded" in str(exc_info.value)
+
+    fallback_key = f"conn_{id(mock_writer)}"
+    assert fallback_key in _failed_handshakes
+    assert _failed_handshakes[fallback_key][0] == 5
+
+    _failed_handshakes.clear()
+
+
+async def test_rate_limiter_table_capping():
+    from usmp._handshake import _failed_handshakes, server_handshake
+    import pytest
+    from unittest.mock import Mock
+
+    _failed_handshakes.clear()
+
+    import time
+    now = time.monotonic()
+    for i in range(1000):
+        _failed_handshakes[f"ip_{i}"] = (1, 0.0, now - 500.0 + float(i) * 0.1)
+
+    mock_reader = Mock(spec=asyncio.StreamReader)
+    mock_writer = Mock(spec=asyncio.StreamWriter)
+    mock_writer.get_extra_info.return_value = ("192.168.1.99", 54321)
+
+    with pytest.raises(Exception):
+        await server_handshake(mock_reader, mock_writer, b"some-psk")
+
+    assert len(_failed_handshakes) == 1000
+    assert "ip_0" not in _failed_handshakes
+    assert "192.168.1.99" in _failed_handshakes
+
+    _failed_handshakes.clear()
