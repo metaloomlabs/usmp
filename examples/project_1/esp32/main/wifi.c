@@ -10,7 +10,6 @@
 #include "lwip/ip4_addr.h"
 #include "nvs_flash.h"
 
-
 #define WIFI_SSID "connecting....."
 #define WIFI_PASS "YOUR_WIFI_PASSWORD"
 #define STATIC_IP "192.168.1.10"
