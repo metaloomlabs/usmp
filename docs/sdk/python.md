@@ -2,42 +2,44 @@
 
 The USMP Python SDK is an asyncio-based library designed to build high-performance USMP gateways, test clients, and tools.
 
----
-
 ## 1. Installation
 
 ### Explanation
+
 The Python SDK is distributed as a standard Python library and can be installed via any PEP 517 build tool (e.g. `pip`, `pipenv`, `poetry`, or `uv`).
 
 ### Implementation
+
 ```bash
 pip install usmp
 ```
+
 *For development, you can use `uv` inside the repository:*
+
 ```bash
 uv pip install -e ./sdk/python
 ```
 
----
-
 ## 2. SDK Architecture
 
 ### Explanation
+
 The SDK is designed using asynchronous I/O (`asyncio`) to handle multiple concurrent device sessions efficiently.
 
 **Key Components:**
+
 * **[USMPServer](server.md)**: Listens for incoming TCP connections and performs the server-side handshake.
 * **[USMPClient](client.md)**: Connects to a remote gateway and performs the client-side handshake.
 * **[USMPSession](session.md)**: Manages an active, authenticated session (encryption, decryption, keepalives, sequence number tracking).
 
----
-
 ## 3. Minimal Echo Server Example
 
 ### Explanation
+
 The following implementation shows how to start a USMP server on port `9000` with a hardcoded pre-shared key, registering a session handler to receive data and respond.
 
 ### Implementation
+
 ```python
 import asyncio
 from usmp import USMPServer, USMPSession
@@ -68,8 +70,6 @@ async def handle_session(session: USMPSession):
 # Run the event loop
 asyncio.run(server.serve())
 ```
-
----
 
 ## 4. API Reference Deep-Dives
 

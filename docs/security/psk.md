@@ -11,8 +11,6 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 # Example output: 7f3a1b9e2c4d5f6a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a
 ```
 
----
-
 ## Storing the PSK
 
 === "ESP32 (ESP-IDF development)"
@@ -68,26 +66,33 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
     PSK = open("/etc/usmp/psk", "rb").read().strip()
     ```
 
----
-
 ## Multi-device PSK
 
-The current version uses a single PSK for all devices. For larger deployments, derive per-device PSKs from a master secret using HKDF or HMAC:
+For larger deployments, you can configure unique PSKs per device. The Python SDK gateway (`USMPServer`) natively supports this in two ways:
 
-```python
-import hmac, hashlib
+1. **Registry Map (`dict`)**: Pass a dictionary mapping device IDs (`bytes`) to unique PSKs:
 
-MASTER_SECRET = os.environ["USMP_MASTER_SECRET"].encode()
+    ```python
+    psk_registry = {
+        b"device-id-1": b"unique-psk-for-device-1",
+        b"device-id-2": b"unique-psk-for-device-2",
+    }
+    server = USMPServer(host="0.0.0.0", port=9000, psk=psk_registry)
+    ```
 
-def get_psk(device_id: bytes) -> bytes:
-    # device_id is the 6-byte unique MAC address
-    return hmac.new(MASTER_SECRET, device_id, hashlib.sha256).digest()
-```
+2. **Dynamic Lookup (`Callable`)**: Pass a dynamic function matching the signature `def get_psk(device_id: bytes) -> bytes`. For example, deriving keys dynamically from a master secret:
 
-!!! note
-    Native per-device PSK lookup on the gateway is planned for a future release.
+    ```python
+    import hmac, hashlib, os
 
----
+    MASTER_SECRET = os.environ["USMP_MASTER_SECRET"].encode()
+
+    def get_psk(device_id: bytes) -> bytes:
+        # derive a device-unique PSK dynamically using HMAC-SHA256
+        return hmac.new(MASTER_SECRET, device_id, hashlib.sha256).digest()
+
+    server = USMPServer(host="0.0.0.0", port=9000, psk=get_psk)
+    ```
 
 ## Security Rules
 

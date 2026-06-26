@@ -1,39 +1,46 @@
-# Quick Start — ESP32
+# Quick Start — Getting ESP32 Online and Secure
 
-Get a secure USMP session running between your ESP32 and a Python gateway in under 10 minutes.
+Welcome to the ESP32 quickstart! In this guide, we will hook up your ESP32 board to a secure Python gateway in under 10 minutes. By the end, you'll have a fully encrypted, mutually authenticated tunnel running over a raw TCP socket.
 
 ## Prerequisites
 
-- ESP32 DevKit (any variant)
-- ESP-IDF v5.0 or later
-- Python 3.11+
-- A WiFi network both your laptop and ESP32 can join (or use your laptop's hotspot)
+Before we start, make sure you have:
 
-## Step 1 — Add the USMP component
+* **An ESP32 DevKit** (any standard variant).
+* **ESP-IDF v5.0 or later** installed and configured in your environment.
+* **Python 3.11+** installed on your development machine.
+* **A local network** (Wi-Fi or mobile hotspot) that both your laptop and ESP32 can connect to.
 
-In your ESP-IDF project's `CMakeLists.txt`:
+## Step 1 — Adding the USMP Component
 
-```cmake
-set(EXTRA_COMPONENT_DIRS
-    "/path/to/usmp/ports/usmp-esp32"
-)
+USMP fits cleanly into the ESP-IDF build system. Let's register it:
 
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(your_project)
-```
+1. In your project's root `CMakeLists.txt`, register the USMP component directory:
 
-In your `main/CMakeLists.txt`:
+   ```cmake
+   # Tell CMake where the USMP component lives
+   set(EXTRA_COMPONENT_DIRS
+       "/path/to/usmp/ports/usmp-esp32"
+   )
 
-```cmake
-idf_component_register(
-    SRCS "app.c" "wifi.c"
-    INCLUDE_DIRS "."
-    REQUIRES usmp-esp32
-    PRIV_REQUIRES nvs_flash esp_wifi
-)
-```
+   include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+   project(your_project)
+   ```
 
-## Step 2 — Write your application
+2. In your application's source directory (usually `main/CMakeLists.txt`), declare your dependencies:
+
+   ```cmake
+   idf_component_register(
+       SRCS "app.c" "wifi.c"
+       INCLUDE_DIRS "."
+       REQUIRES usmp-esp32
+       PRIV_REQUIRES nvs_flash esp_wifi
+   )
+   ```
+
+## Step 2 — Writing Your Application
+
+Let's write a simple application that connects to the gateway, establishes a secure session, sends a telemetry message, and waits for a response.
 
 ```c title="main/app.c"
 #include "usmp.h"
@@ -44,79 +51,96 @@ idf_component_register(
 #include "freertos/task.h"
 #include <string.h>
 
-static const char *TAG = "APP";
+static const char *TAG = "USMP_APP";
 
 void app_main(void)
 {
-    // Connect to WiFi first
+    // 1. Initialize your Wi-Fi interface (implement this based on your standard Wi-Fi flow)
     wifi_init();
 
-    // Initialize TCP transport
+    // 2. Initialize the TCP transport to point to your gateway server
     usmp_transport_t transport = {0};
     if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
-        ESP_LOGE(TAG, "TCP connect failed");
+        ESP_LOGE(TAG, "Failed to connect TCP socket to the gateway");
         return;
     }
 
-    // USMP handshake — mutual auth + key exchange
+    // 3. Set up the USMP context
     usmp_t ctx = {0};
+    
+    // Define the secret Pre-Shared Key (must match the server's key!)
     static const uint8_t s_psk[] = "usmp-dev-psk-change-me-before-prod";
     ctx.psk     = s_psk;
-    ctx.psk_len = sizeof(s_psk) - 1; // exclude null terminator
+    ctx.psk_len = sizeof(s_psk) - 1; // Exclude the null terminator
 
+    // 4. Kick off the mutual handshake!
+    ESP_LOGI(TAG, "Starting secure USMP handshake...");
     if (usmp_connect(&ctx, &transport) != 0) {
-        ESP_LOGE(TAG, "USMP connect failed");
+        ESP_LOGE(TAG, "USMP handshake failed!");
         return;
     }
 
-    ESP_LOGI(TAG, "Session established!");
+    ESP_LOGI(TAG, "Secure session established successfully!");
 
-    // Send encrypted data
-    const char *msg = "hello from ESP32";
-    usmp_send(&ctx, (const uint8_t *)msg, strlen(msg));
+    // 5. Send an encrypted message
+    const char *msg = "Hello Gateway! This is ESP32 speaking securely.";
+    if (usmp_send(&ctx, (const uint8_t *)msg, strlen(msg)) == 0) {
+        ESP_LOGI(TAG, "Encrypted message sent!");
+    }
 
-    // Receive response
+    // 6. Receive a secure reply
     uint8_t buf[256];
     int len = usmp_recv(&ctx, buf, sizeof(buf));
     if (len > 0) {
-        ESP_LOGI(TAG, "Received: %.*s", len, buf);
+        ESP_LOGI(TAG, "Received encrypted reply: %.*s", len, buf);
     }
 
+    // 7. Clean up and close the session gracefully
     usmp_close(&ctx);
+    ESP_LOGI(TAG, "Session closed.");
 }
 ```
 
-!!! tip "PSK Configuration"
-    The PSK must be set at runtime in the `usmp_t` context before calling `usmp_connect()`.
-    
-    ```c
-    static const uint8_t my_psk[] = "your-secret-key-here";
-    ctx.psk     = my_psk;
-    ctx.psk_len = sizeof(my_psk) - 1; // exclude null terminator
-    ```
-    Never hardcode production PSKs in your codebase — load them from NVS or secure storage instead.
+> [!WARNING]
+> **Production Key Management**
+> Never hardcode production Pre-Shared Keys directly in your application source code! Instead, load the PSK at runtime from the ESP32's non-volatile storage (NVS) using `nvs_get_blob()`, or provision it during manufacturing.
 
-## Step 3 — Build and flash
+## Step 3 — Build and Flash
+
+Build your project, flash it onto your ESP32, and launch the monitor to watch the logs:
 
 ```bash
 idf.py build flash monitor
 ```
 
+## Step 4 — Run the Python Gateway
 
-## Step 4 — Run the gateway
+To capture the connection, you'll need the gateway running on your laptop. Jump over to the [Python Quick Start](quickstart-python.md) to launch the receiver server.
 
-See [Quick Start (Python)](quickstart-python.md) to set up the receiving end.
+## Under the Hood: What Just Happened?
 
+When you called `usmp_connect()`, USMP performed a secure, 4-step cryptographic handshake:
 
-## What just happened?
+```text
+ESP32 (Client)                                      Gateway (Server)
+      │                                                     │
+      │ ─── 1. HELLO (device_id, pub_C) ──────────────────> │
+      │                                                     │
+      │ <── 2. CHALLENGE (nonce, pub_S) ─────────────────── │
+      │                                                     │ [X25519 Key Exchange]
+      │                                                     │ [HKDF-SHA256 derivation]
+      │ ─── 3. HELLO_ACK (HMAC_client) ───────────────────> │
+      │                                                     │ [Verify Client HMAC]
+      │ <── 4. SESSION_OK (session_id, HMAC_server) ─────── │
+      │                                                     │
+      └──────────────── Encrypted Session ──────────────────┘
+```
 
-When `usmp_connect` runs, USMP performs a full 4-step handshake:
+1. **The Intro (`HELLO`)**: The ESP32 sends its hardware Device ID along with a freshly generated ephemeral X25519 public key (`pub_C`).
+2. **The Challenge (`CHALLENGE`)**: The gateway replies with a random salt (`nonce`) and its own ephemeral X25519 public key (`pub_S`).
+3. **The Client Proof (`HELLO_ACK`)**: Both sides calculate a shared secret via Diffie-Hellman (`X25519`). Using HKDF-SHA256, they derive temporary keys. The ESP32 then calculates an HMAC using the Pre-Shared Key (PSK), cryptographically binding `pub_C` and `pub_S` to the HMAC to prove its identity and prevent Man-in-the-Middle (MITM) key-swapping.
+4. **The Server Confirmation (`SESSION_OK`)**: The gateway verifies the client's proof, computes its own HMAC (also binding the keys), and sends back a unique Session ID.
 
-1. **HELLO** — ESP32 sends its device ID and an ephemeral X25519 public key
-2. **CHALLENGE** — Gateway sends a random nonce and its own X25519 public key
-3. **HELLO_ACK** — ESP32 proves it knows the PSK via HMAC
-4. **SESSION_OK** — Gateway proves it knows the PSK via HMAC + sends session ID
+Now, both sides share an identical AES-256-GCM symmetric session key. **This key was never sent over the air.** If an eavesdropper intercepted the entire handshake, they cannot compute the session key without knowing the secret PSK.
 
-Both sides independently derive the same AES-256-GCM session key from the X25519 shared secret via HKDF. The key never travels over the wire.
-
-After the handshake, every frame is encrypted and authenticated. A corrupted or replayed frame is immediately detected and rejected.
+Every subsequent data packet is encrypted with AES-256-GCM using deterministic nonces. If anyone tampers with the ciphertext, decryption fails immediately, protecting your device from unauthorized commands!

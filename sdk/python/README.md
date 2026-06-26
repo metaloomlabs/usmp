@@ -103,8 +103,6 @@ Requires Python 3.11+.
 
 The Arduino library and ESP-IDF component are available at [github.com/metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
 
----
-
 <p align="center">
   <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
   Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>

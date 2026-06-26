@@ -10,8 +10,6 @@ usmp_connect(&ctx, &transport);
 usmp_send(&ctx, data, len);
 ```
 
----
-
 ## Why USMP?
 
 Most IoT protocols make you choose between **simple** and **secure**:
@@ -31,8 +29,6 @@ USMP is **secure by default**. There is no insecure mode. Every session is:
 - **Forward secret** — X25519 ephemeral keys, new per session
 - **Replay protected** — nonces + monotonic sequence numbers
 
----
-
 ## How it works
 
 ```txt
@@ -48,43 +44,39 @@ ESP32                          Gateway
 
 The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5ms**.
 
----
-
 ## Features
 
 - **Mutual authentication** — PSK-based HMAC, both sides verified
 - **Forward secrecy** — X25519 ephemeral key exchange per session
 - **AES-256-GCM encryption** — mandatory, authenticated
 - **Replay protection** — per-session nonces + sequence numbers
-- **Transport agnostic** — TCP now, UART and UDP coming
+- **Payload fragmentation** — automatically fragments and reassembles payloads up to ~1.8 KB (4 frames of 452 bytes)
+- **Transport agnostic** — TCP now, UART and BLE planned
 - **Simple API** — connect, send, recv, close
-- **Cross-platform** — ESP32, Arduino (ESP32 cores), STM32 coming
-- **Python SDK** — asyncio server, client, and multi-device manager
-
----
+- **Cross-platform** — ESP32 (ESP-IDF), Arduino (ESP32 cores), STM32 planned
+- **Python SDK** — asyncio server, client, and session manager
 
 ## Status
 
-**Active Development — v0.4.4**
+**Active Development — v0.4.7**
 
 | Component | Status |
 |---|---|
 | Protocol spec | Complete |
-| Frame layer | Working |
-| Handshake | Working |
-| AES-256-GCM encryption | Working |
+| Frame layer & fragmentation | Working |
+| Handshake & MITM mitigation | Working |
+| AES-256-GCM encryption | Working (deterministic nonces) |
 | Mutual authentication | Working |
 | ESP32 port | Working |
 | Arduino port | Working |
-| Python SDK | Working |
+| Python SDK | Working (with rate limiting / DoS lockout) |
 | Transport abstraction | Working |
 | Multi-device management | Working |
 | UART transport | In Progress |
 | CLI tool | In Progress |
 | mDNS discovery | In Progress |
-| Cloud bridge | Planned |
 
----
+| Cloud bridge | Planned |
 
 ## Quick links
 

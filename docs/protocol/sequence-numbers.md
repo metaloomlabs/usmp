@@ -1,65 +1,66 @@
-# Sequence Numbers
+# Sequence Numbers: Keeping Things in Order
 
-Sequence numbers provide **replay protection** for individual frames
-within an established session.
+In any secure protocol, it's not enough to encrypt the data. You also have to make sure an attacker cannot record a valid packet and replay it later to trick your device. This is called a **replay attack**.
 
-## How they work
+USMP uses **monotonic sequence numbers** to defend against replay attacks. Think of them as a numbering system on pages of a book: if a page is missing, duplicated, or out of order, you notice it immediately!
 
-Each direction has an independent counter starting at `0`:
+## How Sequence Numbers Work
 
-```txt
+Both the client and the server maintain two independent 32-bit counters:
 
-Client TX seq:  0  1  2  3  4  ...
-Server TX seq:  0  1  2  3  4  ...
+* **TX Sequence Counter**: Increments by 1 every time a packet is sent.
+* **RX Sequence Counter**: Tracks the expected sequence number of the next incoming packet.
 
+When a session starts, both counters are set to `0`. As data begins to flow, the sequence numbers increment independently in each direction:
+
+```text
+Client (TX: 0, RX: 0)  ====== DATA (seq=0) =====>  Server (TX: 0, RX: 1)
+Client (TX: 1, RX: 0)  <===== DATA (seq=0) ======  Server (TX: 1, RX: 1)
+Client (TX: 1, RX: 1)  ====== DATA (seq=1) =====>  Server (TX: 1, RX: 2)
+Client (TX: 2, RX: 1)  <===== DATA (seq=1) ======  Server (TX: 2, RX: 2)
 ```
 
-The receiver tracks the expected next sequence number and rejects any frame
-that doesn't match:
+## Why Strict Equality? (No Windows allowed)
+
+Many internet protocols (like IPSec or DTLS) use a sliding "window" to accept out-of-order packets. This is because they run over unreliable networks (like UDP) where packets can naturally get reordered or dropped.
+
+**USMP is different.** It is designed to run over reliable transport streams:
+
+1. **TCP Sockets**: TCP guarantees that packets arrive in the exact order they were sent.
+2. **UART Serial (with COBS + ACKs)**: The USMP serial port wrapper handles acknowledgments and retransmissions under the hood, presenting a reliable, in-order stream to the core protocol.
+
+Because the underlying transport guarantees order, **any out-of-order sequence number is a critical error.** If a frame arrives with `seq = 5` when the receiver is expecting `seq = 4`, it means one of three things:
+
+* **A replay attack** is underway.
+* There is a **software bug** in the sequence tracking logic.
+* The transport layer is **corrupted** or desynchronized.
+
+Rather than trying to recover from this corrupted state, USMP follows a "fail-fast" safety philosophy: the receiver immediately closes the connection, throws away the session keys, and forces a clean reconnect.
 
 ```c
-if (frame.seq != expected_seq) {
-    // Reject — possible replay or reorder
-    close_connection();
+if (frame.seq != expected_rx_seq) {
+    // Security violation or critical desync! Reject immediately.
+    usmp_close(ctx);
+    return USMP_ERR_SEQ;
 }
-expected_seq++;
+expected_rx_seq++;
 ```
 
----
+## Cryptographic Binding
 
-## Why strict equality?
+To prevent header manipulation, USMP tightly integrates the sequence number into the cryptographic layer:
 
-USMP uses strict equality rather than a window-based check.
+1. **Nonce Construction**: The sequence number forms the first 4 bytes of the AES-GCM nonce: `seq (4 bytes, LE) || session_id[0..7]`. Because the sequence increments by 1 per frame, the nonce is guaranteed to be unique for every frame.
+2. **Header Authentication (AAD)**: The sequence number is fed into the AES-GCM engine as Additional Authenticated Data. If an attacker tries to change the sequence number of a packet in transit, the GCM tag verification will fail, and the receiver will reject it.
 
-**Rationale:** USMP runs over reliable transports (TCP, UART with ACK).
-On a reliable transport, frames arrive in order. A frame with an unexpected
-sequence number means either:
+## Handshakes and Overflow Protection
 
-1. A replay attack
-2. A bug in the implementation
-3. A corrupted connection
+### Handshake Sequence
 
-In all three cases, the correct response is to close the connection and reconnect.
+During the 4-step handshake (`PKT_HELLO` through `PKT_SESSION_OK`), the sequence number in the header is always set to `0`. Once the handshake is complete and the session becomes active, the data sequence counter starts fresh at `0`.
 
----
+### Overflow Protection
 
-## Sequence numbers and replay protection
+What happens if the sequence counter wraps around after hitting its maximum value? The sequence number is a 32-bit unsigned integer, meaning it wraps at $2^{32} - 1$ (4,294,967,295 frames).
 
-The sequence number is passed in the Additional Authenticated Data (AAD) for AES-GCM encryption. Although it does not form the GCM nonce (which is now generated purely randomly per packet to protect against timing and chosen-ciphertext variants), its inclusion in the AAD ensures that the receiver can detect and reject any replayed, out-of-order, or modified frames.
-
----
-
-## Handshake frames
-
-Handshake frames (PKT_HELLO through PKT_SESSION_OK) always carry `seq = 0`.
-The sequence counter for data frames starts fresh at `0` after the handshake completes.
-
----
-
-## Overflow
-
-The sequence number is a `uint32` — it wraps at 2^32 (approximately 4 billion frames).
-
-An ESP32 sending one frame per second would take **136 years** to overflow.
-In practice this limit will never be reached. If it ever were, the session
-MUST be terminated and a new handshake performed.
+If your device sends one frame every second, it would take **136 years** to overflow! In practice, your session will be closed or re-keyed long before this limit is reached. However, as a safeguard, if the sequence number ever reaches `0xFFFFFFFF`, the session is terminated and a new handshake is forced.

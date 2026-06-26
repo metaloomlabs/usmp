@@ -2,8 +2,6 @@
 
 Thank you for your interest in contributing to USMP! To maintain high code quality and secure cryptographic implementations, please follow the guidelines below.
 
----
-
 ## 1. Code Style and Formatting
 
 We enforce strict formatting rules across C and Python parts of the repository:
@@ -34,8 +32,6 @@ We enforce strict formatting rules across C and Python parts of the repository:
   uv run mypy src/
   ```
 
----
-
 ## 2. Secure Coding Standards
 
 USMP is a security-oriented protocol. All contributions must adhere to these guidelines:
@@ -43,8 +39,6 @@ USMP is a security-oriented protocol. All contributions must adhere to these gui
 1. **Never Hardcode Secrets**: Do not add default pre-shared keys (PSKs) to library sources or example code.
 2. **Clear Sensitive Memory**: Wipe any local keys, nonces, or ECDH shared secrets immediately after use using compiler-safe routines (e.g. `mbedtls_platform_zeroize` in C or clearing byte references in Python).
 3. **Validate Inputs**: Always cast lengths to `size_t`, verify bounds, and check parameters for null pointer values before use.
-
----
 
 ## 3. Running Tests
 

@@ -7,8 +7,6 @@ No TLS stack. No certificates. Three function calls.
 idf_component_manager add metaloomlabs/usmp
 ```
 
----
-
 ## Why USMP
 
 Full TLS is 60–100 KB of flash and significant RAM. Raw TCP has no security.  
@@ -21,14 +19,10 @@ USMP sits in between: a 4-message handshake gives you mutual authentication and 
 - Encryption (AES-256-GCM, mandatory)
 - Replay protection (monotonic sequence numbers)
 
----
-
 ## Requirements
 
 - ESP-IDF v5.0 or later
 - Python counterpart: `pip install usmp` (the `USMPServer` / `USMPClient` gateway)
-
----
 
 ## Installation
 
@@ -39,8 +33,6 @@ idf.py add-dependency "metaloomlabs/usmp"
 ```
 
 **Manual:** clone the repo and add `ports/usmp-esp32` as a component.
-
----
 
 ## Quickstart
 
@@ -151,8 +143,6 @@ async def main():
 asyncio.run(main())
 ```
 
----
-
 ## Handshake overview
 
 ```py
@@ -168,8 +158,6 @@ Device                         Server
 
 Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="usmp-v1"||pub_C||pub_S)`
 
----
-
 ## Packet types
 
 | Value | Name       | Direction       |
@@ -184,26 +172,20 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 | 0x08  | BYE        | Both            |
 | 0xFF  | ERROR      | Both            |
 
----
-
 ## Transport abstraction
 
 `usmp_transport_t` is a struct of five function pointers (`send`, `recv`, `close`, `reconnect`, `available`). TCP over Wi-Fi is provided. UART with COBS framing is planned for v0.4.0.
-
----
 
 ## Roadmap
 
 | Version | Feature |
 |---------|---------|
-| v0.2.x  | ✅ TCP/Wi-Fi, mutual auth, AES-256-GCM, Python SDK, 61 tests |
+| v0.2.x  | TCP/Wi-Fi, mutual auth, AES-256-GCM, Python SDK, 61 tests |
 | v0.3.0  | ESP-IDF Component Registry + PlatformIO publish |
 | v0.4.0  | UART transport (COBS framing) |
 | v0.5.0  | Discovery CLI + mDNS |
 | v0.6.0  | OTA firmware (Ed25519 signed, atomic swap) |
 | v1.0.0  | Cloud bridge, Arduino Library Manager |
-
----
 
 ## License
 

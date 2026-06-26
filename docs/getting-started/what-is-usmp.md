@@ -1,78 +1,69 @@
-# What is USMP?
+# Welcome to USMP: Unified Secure Multi-transport Protocol
 
-USMP (Unified Secure Multi-transport Protocol) is a lightweight binary protocol for **secure, authenticated communication between embedded devices and a gateway**.
+Secure communication for IoT devices shouldn't be hard. Yet today, developers are forced to choose between two extremes:
+* **Raw TCP (Simple but completely insecure)**: Your packets are sent in plain text, open to eavesdropping and manipulation.
+* **Full TLS (Secure but incredibly heavy)**: Demands massive CPU cycles, eats up heap memory, requires managing complex public-key infrastructure (PKI) certificates, and is generally a headache to debug on constrained microcontrollers.
 
-It is designed for the gap that exists in the IoT ecosystem today:
+**USMP fills this gap.** It gives your hardware production-grade security (mutual authentication, forward secrecy, and AES-256-GCM encryption) with the ease of three simple function calls.
 
-!!! quote "The IoT security gap"
-    Most embedded devices either use **no security at all** (raw TCP, plain MQTT),
-    or bolt on **TLS** — which is complex, heavy, and hard to configure correctly
-    on constrained hardware.
+## What USMP Is (and What It Isn't)
 
-USMP sits in the middle: **genuinely secure, genuinely simple**.
+To understand how USMP fits into your project, it's helpful to see what it is built for:
 
-## What USMP is
+### What USMP Is
+* **A Session Protocol**: It creates a secure, authenticated bridge (a session) between two endpoints.
+* **Transport Agnostic**: It does not care how bytes move. It runs beautifully over TCP sockets, serial UART wires, UDP, or BLE.
+* **Lightweight & Binary**: Designed from the ground up for microcontrollers. There is no JSON parser, XML parsing, or heavy certificate checking—just tight, efficient binary frames.
+* **Secure by Default**: There is no "insecure mode." Every single byte sent post-handshake is encrypted and verified.
 
-- A **session protocol** — it establishes a secure, authenticated session between two endpoints
-- A **transport-agnostic** protocol — it runs on TCP, UART, UDP, or anything that moves bytes
-- A **binary protocol** — compact, efficient, no JSON or XML overhead
-- A **protocol with mandatory security** — there is no plaintext mode
+### What USMP Is Not
+* **An Application Protocol**: USMP is not a replacement for MQTT or HTTP. It handles the **device-to-gateway** security layer. Your app payloads (like JSON sensor readings or binary control logs) sit *inside* the secure USMP envelope.
+* **A Wireless Protocol**: It runs on top of whatever network layer you already have configured (WiFi, cellular, serial).
+* **A Cloud Broker**: It does not require any cloud infrastructure. It runs entirely on your own local gateway and end-device hardware.
 
-## What USMP is not
+## The Three-Function Developer API
 
-- A replacement for MQTT at cloud scale — USMP handles the **device → gateway** leg
-- A data format — USMP doesn't care what's inside your frames (that's your application)
-- A radio protocol — USMP runs on top of WiFi, UART, BLE, whatever you have
-- A cloud service — USMP is infrastructure-free, runs entirely on your hardware
-
-## Who is USMP for?
-
-### Makers and hobbyists
-
-You want your ESP32 to talk to your laptop securely without a cloud dependency or a complex TLS setup. USMP gives you that in three function calls.
-
-### Embedded engineers
-
-You're building a product with 10–10,000 devices. You need mutual authentication, forward secrecy, and replay protection — but you don't want to manage a PKI or pay for a cloud broker. USMP gives you production-grade security on $5 hardware.
-
-### Researchers and students
-
-You want to understand how a secure IoT protocol works from the inside. USMP is small enough to read in a day, with every security decision documented and explained.
-
-## The three-function API
+Integrating USMP into your C application takes only a few lines of code:
 
 ```c
-// 1. Connect
+// 1. Set up the transport and connect
 usmp_transport_t transport = {0};
-usmp_transport_tcp_init(&transport, "192.168.137.1", 9000);
+usmp_transport_tcp_init(&transport, "192.168.1.100", 9000);
 
 usmp_t ctx = {0};
-usmp_connect(&ctx, &transport);
+static const uint8_t psk[] = "your-secret-key";
+ctx.psk     = psk;
+ctx.psk_len = sizeof(psk);
 
-// 2. Send
-usmp_send(&ctx, (uint8_t *)"hello", 5);
-
-// 3. Receive
-uint8_t buf[256];
-int len = usmp_recv(&ctx, buf, sizeof(buf));
+if (usmp_connect(&ctx, &transport) == 0) {
+    // 2. Send secure, encrypted data
+    usmp_send(&ctx, (const uint8_t *)"Hello Gateway", 13);
+    
+    // 3. Receive secure, decrypted data
+    uint8_t buffer[256];
+    int len = usmp_recv(&ctx, buffer, sizeof(buffer));
+}
 ```
 
-That's the entire API surface for 90% of use cases.
+That is the entire API surface you need for 90% of your usage.
 
-## Security at a glance
+## Security Checklist: How USMP Protects You
 
-| Property | How USMP achieves it |
-|----------|---------------------|
-| Device authentication | HMAC-SHA256 with PSK |
-| Gateway authentication | HMAC-SHA256 with PSK (mutual) |
-| Confidentiality | AES-256-GCM |
-| Integrity | AES-256-GCM authentication tag |
-| Forward secrecy | X25519 ephemeral key exchange |
-| Replay protection | Per-session nonce + sequence numbers |
-| Key derivation | HKDF-SHA256 |
+Here is a quick look at the cryptographic armor USMP wraps around your device's traffic:
 
-## Next steps
+| Security Goal | How USMP Achieves It |
+|---|---|
+| **Identity Verification** | **HMAC-SHA256 with a Pre-Shared Key (PSK)**. Both the device and the gateway prove to each other that they know the secret key without sending the key over the air. |
+| **Confidentiality (Secrecy)** | **AES-256-GCM**. All session data is fully encrypted. Anyone sniffing the network sees only random-looking noise. |
+| **Data Integrity** | **AES-GCM Authenticated Tag**. If an attacker tampers with even a single bit of a frame in transit, decryption fails instantly and the session is dropped. |
+| **Forward Secrecy** | **X25519 Ephemeral Key Exchange**. Ephemeral keys are generated fresh for every session and thrown away. If your PSK leaks in the future, past session traffic remains completely secure. |
+| **Replay Protection** | **Deterministic Nonces + Monotonic Sequence Numbers**. Prevents attackers from capturing valid packets and re-sending them later to mimic commands. |
+| **Key Derivation** | **HKDF-SHA256**. Generates cryptographic-grade session keys from the key exchange secrets. |
 
-- [Quick Start (ESP32)](quickstart-esp32.md) — get running in 10 minutes
-- [Quick Start (Python)](quickstart-python.md) — set up the gateway
-- [Protocol Overview](../protocol/overview.md) — understand what's happening under the hood
+## Where to Go Next?
+
+Ready to build? Dive into the quickstarts:
+* [Quick Start (ESP-IDF)](quickstart-esp32.md) — Get running on ESP32 native C.
+* [Quick Start (Arduino)](quickstart-arduino.md) — Build using the C++ Arduino client.
+* [Quick Start (Python)](quickstart-python.md) — Launch your Python gateway server.
+* [Protocol Specifications](../protocol/overview.md) — Peek under the hood.

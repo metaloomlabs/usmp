@@ -1,414 +1,206 @@
-# USMP — Unified Secure Multi-transport Protocol | Specification v0.4.4
+# USMP Specification | Protocol Version v0.4.7
 
-## 1. Overview
+Welcome to the official technical specification for the **Unified Secure Multi-transport Protocol (USMP) v0.4.7**.
 
-USMP is a lightweight, binary, application-layer protocol for secure authenticated
-communication between constrained embedded devices and a host gateway.
+This document serves as the canonical reference for developers implementing USMP client libraries, server SDKs, or alternative transport adapters. It covers frame layouts, cryptographic sequences, state machine rules, and resource limits.
 
-### Design principles
-- Binary encoding, no JSON or XML
-- Mandatory encryption — no plaintext after handshake
-- Mutual authentication — both sides verify each other
-- Forward secrecy — ephemeral X25519 keys per session
-- Transport agnostic — runs over any reliable byte stream
-- Minimal — small enough to audit in a day
+## 1. Protocol Philosophy
 
+USMP is a lightweight, binary, session-oriented protocol designed to bridge the "IoT Security Gap." It is built upon five core guidelines:
 
-## 2. Conventions
+* **Keep it Simple**: The protocol is small enough to be read, understood, and audited in a single afternoon.
+* **Mandatory Encryption**: There is no "plaintext mode." Every byte sent after the handshake is encrypted.
+* **Mutual Trust**: Both the device and the gateway must prove identity before a session is established.
+* **Ephemeral Keys**: Every session uses fresh Curve25519 keys, providing forward secrecy.
+* **Transport Independence**: USMP runs over any reliable byte stream (TCP, Serial UART, UDP, BLE).
 
-- All multi-byte integers are **little-endian**
-- All lengths are in **bytes**
-- `u8`, `u16`, `u32` denote unsigned integers of 1, 2, 4 bytes
-- `bytes[N]` denotes a fixed-length byte array of N bytes
-- `bytes[*]` denotes a variable-length byte array
+## 2. Structural Conventions
 
+* **Endianness**: All multi-byte integer values are transmitted in **little-endian** byte order.
+* **Sizes**: All sizes, offsets, and length fields are measured in **bytes**.
+* **Data Types**:
+  * `u8`: Unsigned 8-bit integer (1 byte)
+  * `u16`: Unsigned 16-bit integer (2 bytes, little-endian)
+  * `u32`: Unsigned 32-bit integer (4 bytes, little-endian)
+  * `bytes[N]`: Fixed-length array of $N$ bytes
+  * `bytes[*]`: Variable-length byte array
 
-## 3. Frame Format
+## 3. Frame Layout
 
-Every USMP message is a frame with the following structure:
+Every USMP packet is serialized into a single binary frame. The header occupies exactly **12 bytes**, and the payload is limited to a maximum of **480 bytes** to ensure the entire frame fits within 512 bytes:
 
+```text
+ 0               1               2               3
+ 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Magic (0xABCD)            | Version       | Type          |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|                    Sequence Number (32-bit)                   |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Payload Length            |     CRC-16/IBM                |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+|     Payload (N bytes)                                         |
++-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────────────────────────
-0       2     magic    Frame start marker. Always 0xABCD (LE)
-2       1     version  Protocol version. Currently 0x01
-3       1     type     Packet type (see Section 4)
-4       4     seq      Sequence number (u32 LE, starts at 0)
-8       2     length   Byte length of payload field (u16 LE)
-10      2     crc      CRC-16/IBM over bytes [0..9] + payload
-12      N     payload  Frame payload (N = length)
-```
 
-**Total header size: 12 bytes**
-**Maximum payload size: 480 bytes** (keeps total frame under 512 bytes)
+### Field Reference
 
-### 3.1 Magic
-
-The magic bytes `0xABCD` serve as a frame start marker and basic corruption
-guard. A receiver that does not see `0xABCD` at offset 0 MUST discard the frame
-and close the connection.
-
-### 3.2 Version
-
-Currently `0x01`. A receiver that receives an unsupported version MUST send
-a `PKT_ERROR` frame with code `ERR_VERSION` and close the connection.
-
-### 3.3 Sequence Number
-
-- Starts at `0` for the first post-handshake frame
-- Increments by 1 for each frame sent in a given direction
-- TX and RX sequence numbers are independent (per-direction)
-- Handshake frames (types 0x01–0x04) always carry `seq = 0`
-- A receiver that receives an out-of-order sequence number MUST close
-  the connection
-
-### 3.4 CRC-16
-
-CRC-16/IBM (polynomial 0xA001, initial value 0xFFFF) computed over:
-
-- Header bytes at offsets [0..9] (10 bytes, excludes the crc field itself)
-- Payload bytes
-
-The CRC field is at offset 10 and is NOT included in the CRC computation.
-A receiver MUST verify the CRC and discard frames with a bad CRC.
-
-### 3.5 Payload Encryption
-
-- Handshake frames (types 0x01–0x04): payload is **plaintext**
-- Post-handshake frames (types 0x05+): payload is **AES-256-GCM ciphertext**
-
-For encrypted frames, the payload field contains:
-
-```
-[ ciphertext (length - 16 bytes) ][ GCM authentication tag (16 bytes) ]
-```
+* **`magic`** *(u16, offset 0)*: Frame boundary marker. Must always be `0xABCD`. If a receiver parses a packet starting with any other value, it must drop the transport connection immediately.
+* **`version`** *(u8, offset 2)*: Protocol version. Currently `0x01`. If a receiver gets an unsupported version, it sends a `PKT_ERROR` (code `ERR_VERSION`) and disconnects.
+* **`type`** *(u8, offset 3)*: Packet identifier. Determines the payload structure and processing rules (see Section 4).
+* **`seq`** *(u32, offset 4)*: Monotonic sequence number. Starts at `0` for the first post-handshake packet and increments by 1 per frame. Handshake packets always carry `seq = 0`. If a receiver receives an out-of-order sequence number, it terminates the session.
+* **`length`** *(u16, offset 8)*: Byte length of the variable `payload` field (maximum `480`).
+* **`crc`** *(u16, offset 10)*: CRC-16/IBM error check (polynomial `0xA001`, initial value `0xFFFF`) calculated over bytes `0..9` (the header excluding the CRC field) plus the variable `payload` bytes.
+* **`payload`** *(bytes[length], offset 12)*: Handshake payloads are plaintext. Post-handshake payloads are encrypted with AES-256-GCM, containing the ciphertext followed by a 16-byte authentication tag:
+    $$\text{payload} = \text{ciphertext} \parallel \text{tag}$$
 
 ## 4. Packet Types
 
-```
-Value  Name             Direction   Encrypted
-─────  ───────────────  ──────────  ─────────
-0x01   PKT_HELLO        C → S       No
-0x02   PKT_CHALLENGE    S → C       No
-0x03   PKT_HELLO_ACK    C → S       No
-0x04   PKT_SESSION_OK   S → C       No
-0x05   PKT_DATA         Both        Yes
-0x06   PKT_PING         Both        Yes
-0x07   PKT_PONG         Both        Yes
-0x08   PKT_BYE          Both        Yes
-0xFF   PKT_ERROR        Both        No
-```
+| Value | Name | Direction | Encrypted? | Description / Role |
+|:---|:---|:---|:---|:---|
+| `0x01` | `PKT_HELLO` | Client → Server | No | Announces Device ID and client public key `pub_C`. |
+| `0x02` | `PKT_CHALLENGE` | Server → Client | No | Pushes server challenge `nonce` and public key `pub_S`. |
+| `0x03` | `PKT_HELLO_ACK` | Client → Server | No | Proves client identity via HMAC, binding handshake keys. |
+| `0x04` | `PKT_SESSION_OK` | Server → Client | No | Confirms server identity, sends Session ID. |
+| `0x05` | `PKT_DATA` | Both | Yes | Application payload (or final frame of a fragmented group). |
+| `0x06` | `PKT_PING` | Both | Yes | Keepalive heartbeat. |
+| `0x07` | `PKT_PONG` | Both | Yes | Keepalive response. |
+| `0x08` | `PKT_BYE` | Both | Yes | Graceful connection exit. |
+| `0x09` | `PKT_DATA_FRAG` | Both | Yes | Payload fragment (initial/middle chunks). |
+| `0xFF` | `PKT_ERROR` | Both | No | Session termination flag containing error details. |
 
-C = Client (ESP32), S = Server (gateway)
+## 5. The Handshake Sequence
 
+The handshake is a 4-step mutual key-exchange and verification routine. It must complete successfully before any data frames can be sent:
 
-## 5. Handshake
-
-The handshake establishes a mutually authenticated encrypted session.
-It MUST complete before any PKT_DATA frames are exchanged.
-
-### 5.1 Sequence
-
-```
-Client                                Server
-  │                                     │
-  │──── PKT_HELLO ─────────────────────▶│
-  │     device_id(6) || pub_C(32)       │
-  │                                     │
-  │◀─── PKT_CHALLENGE ──────────────────│
-  │     nonce(32) || pub_S(32)          │
-  │                                     │
-  │  [Both derive session key]          │
-  │                                     │
-  │──── PKT_HELLO_ACK ─────────────────▶│
-  │     hmac(32)                        │
-  │                                     │
-  │◀─── PKT_SESSION_OK ─────────────────│
-  │     session_id(16) || hmac_server(32)│
-  │                                     │
-  │════════ SESSION ESTABLISHED ════════│
+```text
+Client (Device)                                      Server (Gateway)
+      │                                                     │
+      │ ─── 1. PKT_HELLO (device_id, pub_C) ──────────────> │
+      │                                                     │
+      │ <── 2. PKT_CHALLENGE (nonce, pub_S) ─────────────── │
+      │                                                     │
+      │      [Both compute shared keys locally]             │
+      │                                                     │
+      │ ─── 3. PKT_HELLO_ACK (hmac_client) ───────────────> │
+      │                                                     │
+      │ <── 4. PKT_SESSION_OK (session_id, hmac_server) ─── │
+      │                                                     │
+      └──────────────── ESTABLISHED Session ────────────────┘
 ```
 
-### 5.2 PKT_HELLO (Client → Server)
+### 5.1 `PKT_HELLO` (0x01)
 
-Payload (38 bytes):
-```
-Offset  Size  Field      Description
-──────  ────  ─────────  ──────────────────────────────────
-0       6     device_id  Client MAC address (WiFi STA)
-6       32    pub_C      Client X25519 ephemeral public key
-```
+* **Payload Length**: 38 bytes
+* **Structure**:
+  * `0..5` (6 bytes): `device_id` (Station Wi-Fi MAC address).
+  * `6..37` (32 bytes): `pub_C` (client's ephemeral Curve25519 public key).
 
-### 5.3 PKT_CHALLENGE (Server → Client)
+### 5.2 `PKT_CHALLENGE` (0x02)
 
-Payload (64 bytes):
-```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────────────────────
-0       32    nonce    Cryptographically random 32-byte nonce
-32      32    pub_S    Server X25519 ephemeral public key
-```
+* **Payload Length**: 64 bytes
+* **Structure**:
+  * `0..31` (32 bytes): `nonce` (cryptographically secure random challenge).
+  * `32..63` (32 bytes): `pub_S` (server's ephemeral Curve25519 public key).
 
-### 5.4 Session Key Derivation
+### 5.3 Cryptographic Key Derivation
 
-Both sides independently derive the session key after receiving the peer
-public key:
+Once both public keys are exchanged, both endpoints perform Diffie-Hellman calculations:
 
-```
-shared        = X25519(priv_local, pub_peer)
+$$\text{shared} = \text{X25519}(\text{priv\_local}, \text{pub\_peer})$$
 
-session_key   = HKDF-SHA256(
-    ikm   = shared,
-    salt  = nonce,
-    info  = "usmp-v1" || pub_C(32) || pub_S(32),
-    len   = 32
-)
-```
+$$\text{session\_key} = \text{HKDF-SHA256}(\text{ikm}=\text{shared}, \text{salt}=\text{nonce}, \text{info}=\text{"usmp-v1"} \parallel \text{pub\_C} \parallel \text{pub\_S}, \text{len}=32)$$
 
-Mixing both public keys into the HKDF `info` field binds the session key
-to this specific key exchange, preventing unknown key-share attacks.
+* *Note: Injected public keys are concatenated to bind the session key to this specific negotiation.*
 
-### 5.5 PKT_HELLO_ACK (Client → Server)
+### 5.4 `PKT_HELLO_ACK` (0x03)
 
-Payload (32 bytes):
-```
-Offset  Size  Field  Description
-──────  ────  ─────  ──────────────────────────────────────────────
-0       32    hmac   HMAC-SHA256(PSK, nonce || device_id)
-```
+* **Payload Length**: 32 bytes
+* **Structure**:
+  * `0..31` (32 bytes): `hmac_client` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{device\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
+* *Validation*: The server computes the expected HMAC. If it fails to match (checked using constant-time comparison), the server returns `PKT_ERROR` (code `ERR_AUTH`) and disconnects.
 
-The server MUST verify this HMAC. If verification fails, the server MUST
-send PKT_ERROR with ERR_AUTH and close the connection.
+### 5.5 `PKT_SESSION_OK` (0x04)
 
-### 5.6 PKT_SESSION_OK (Server → Client)
+* **Payload Length**: 48 bytes
+* **Structure**:
+  * `0..15` (16 bytes): `session_id` (random 16-byte session identifier).
+  * `16..47` (32 bytes): `hmac_server` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{session\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
+* *Validation*: The client computes the expected server HMAC and validates it. If it fails, the connection is aborted immediately.
 
-Payload (48 bytes):
-```
-Offset  Size  Field        Description
-──────  ────  ───────────  ──────────────────────────
-0       16    session_id   Randomly generated 16-byte session ID
-16      32    hmac_server  HMAC-SHA256(PSK, nonce || session_id)
-```
+## 6. Authenticated Encryption (AES-GCM)
 
-The client MUST verify this HMAC. If verification fails, the client MUST close the connection immediately (preventing connection to a rogue server).
-
-
-## 6. Encryption
-
-All post-handshake frames use AES-256-GCM.
+All packets after the handshake are protected with AES-256-GCM.
 
 ### 6.1 Nonce Construction
 
-The 12-byte GCM nonce is generated fresh as a random 12-byte block via a cryptographically secure random number generator (e.g. `usmp_port_random` on the device, or `os.urandom` on the server). It is never derived from sequence numbers or session IDs, guaranteeing that the same (key, nonce) pair is never reused.
+To prevent nonce reuse, the 12-byte GCM nonce is constructed deterministically from the 32-bit sequence number and the Session ID:
 
-The generated nonce is prepended directly to the encrypted payload output:
+$$\text{nonce} = \text{seq (4 bytes, Little-Endian)} \parallel \text{session\_id[0..7] (8 bytes)}$$
 
-    payload = nonce (12 bytes) || ciphertext || GCM authentication tag (16 bytes)
+This guarantees uniqueness per frame and session, avoiding the speed penalty of random number generators.
 
 ### 6.2 Additional Authenticated Data (AAD)
 
-The AAD covers the frame header to detect tampering:
+To prevent header metadata spoofing, the first 10 bytes of the header are fed into the AES-GCM engine as AAD:
 
-```
-aad = magic(2 LE) || version(1) || type(1) || seq(4 LE) || length(2 LE)
-```
+$$\text{aad} = \text{magic (2 bytes)} \parallel \text{version (1 byte)} \parallel \text{type (1 byte)} \parallel \text{seq (4 bytes)} \parallel \text{length (2 bytes)}$$
 
-**Note:** The `crc` field and the payload are NOT included in the AAD.
-Total AAD size: 10 bytes.
+## 7. Dynamic Payload Fragmentation & Reassembly
 
-### 6.3 Encryption
+Plaintext capacity per frame is limited:
 
-```
-(ciphertext, tag) = AES-256-GCM-Encrypt(
-    key   = session_key,
-    nonce = nonce,             // 12 random bytes
-    aad   = aad,
-    plain = plaintext
-)
+* **Frame Capacity**: Header (12 bytes) + Payload (480 bytes max) = 492 bytes.
+* **Plaintext Capacity**: GCM payload contains a 12-byte nonce, the ciphertext, and a 16-byte tag. This leaves **452 bytes** for plaintext application data (`USMP_MAX_DATA_LEN`).
 
-frame.payload = nonce || ciphertext || tag
-frame.length  = 12 + len(plaintext) + 16
-```
+### Fragmentation Rules
 
-### 6.4 Decryption
+If an outgoing payload exceeds 452 bytes:
 
-```
-nonce      = frame.payload[0 : 12]
-ciphertext = frame.payload[12 : frame.length - 16]
-tag        = frame.payload[frame.length - 16 : frame.length]
+1. The sender splits the data into multiple sequential chunks of up to 452 bytes.
+2. The first $N-1$ frames are transmitted with type `PKT_DATA_FRAG` (`0x09`).
+3. The final frame is transmitted with type `PKT_DATA` (`0x05`).
+4. **Limits**: Payloads are capped at a maximum of **4 frames** (`USMP_MAX_FRAMES`). The absolute maximum reassembled plaintext size is $452 \times 4 = 1808$ bytes (~1.8 KB). Payloads exceeding this are rejected immediately before transmission.
 
-plaintext  = AES-256-GCM-Decrypt(
-    key        = session_key,
-    nonce      = nonce,
-    aad        = aad,
-    ciphertext = ciphertext,
-    tag        = tag
-)
-```
+### Reassembly Constraints
 
-If authentication fails, the receiver MUST close the connection immediately.
+The receiver decrypts and appends each chunk sequentially. Reassembly is complete once a frame of type `PKT_DATA` is processed.
 
+* If a control frame (`PING`, `PONG`, `BYE`) is interleaved while reassembly is in progress, the session is terminated due to a protocol violation (`ERR_SEQ`).
+* If the fragment count exceeds 4 frames before completion, the session is dropped (`ERR_BAD_FRAME`).
 
-## 7. Error Handling
+## 8. Keepalive & Timeout watchdogs
 
-### 7.1 PKT_ERROR
+USMP uses asymmetrical timers to verify connections:
 
-Payload (3 bytes):
-```
-Offset  Size  Field    Description
-──────  ────  ───────  ──────────────────────
-0       1     code     Error code (see 7.2)
-1       2     detail   Optional detail (u16)
-```
+* **Client Keepalive (TX-driven)**: The client monitors its own **transmit inactivity** (time elapsed since the client last sent a frame). It sends a `PKT_PING` frame every 30 seconds if it has been idle. **Incoming packets do not reset this timer.**
+* **Server Watchdog (RX-driven)**: The server tracks **receive inactivity** (time elapsed since the server last received a packet from the client). If a client fails to transmit a packet (telemetry or PING) within the configured session timeout (default 60 seconds), the server closes the session. **Outgoing packets sent to the client do not reset this timer.**
 
-### 7.2 Error Codes
+## 9. Error Reference
 
-```
-Code  Name              Description
-────  ────────────────  ──────────────────────────────────────
-0x01  ERR_VERSION       Unsupported protocol version
-0x02  ERR_AUTH          HMAC verification failed
-0x03  ERR_SEQ           Sequence number out of order
-0x04  ERR_CRYPTO        Decryption or tag verification failed
-0x05  ERR_BAD_FRAME     Malformed frame (bad magic, CRC, etc.)
-0x06  ERR_TIMEOUT       Handshake or keepalive timeout
-0x07  ERR_INTERNAL      Internal implementation error
-```
+When a session terminates due to an error, a `PKT_ERROR` frame is sent carrying a 1-byte code and a 2-byte details field:
 
+| Code | Name | Description / Trigger |
+|:---|:---|:---|
+| `0x01` | `ERR_VERSION` | Received an unsupported protocol version number. |
+| `0x02` | `ERR_AUTH` | HMAC verification failed during handshake validation. |
+| `0x03` | `ERR_SEQ` | Monotonic sequence number mismatch or interleaving error. |
+| `0x04` | `ERR_CRYPTO` | AES-256-GCM decryption or tag signature check failed. |
+| `0x05` | `ERR_BAD_FRAME` | Malformed binary frame, invalid magic, or CRC mismatch. |
+| `0x06` | `ERR_TIMEOUT` | Inactivity watchdog or handshake timer expired. |
+| `0x07` | `ERR_INTERNAL` | Cryptographic engine or physical hardware failure. |
 
-## 8. Session Lifecycle
+## 10. Memory & Resource Footprint (C Reference)
 
-```
-DISCONNECTED
-    │
-    │ TCP connect
-    ▼
-    HANDSHAKING
-    │
-    │ PKT_SESSION_OK received
-    ▼
-ESTABLISHED ◀────────────────────┐
-    │                            │
-    │ PKT_DATA / PKT_PING        │ PKT_PONG
-    ▼                            │
-  sending/receiving ─────────────┘
-    │
-    │ PKT_BYE or TCP close or timeout
-    ▼
-DISCONNECTED
-```
+USMP uses **zero heap allocations** once a session is established.
 
-### 8.1 Keepalive
-
-- Client SHOULD send PKT_PING every 30 seconds if no data has been sent
-- Server MUST respond with PKT_PONG within 10 seconds
-- If no PKT_PONG is received, the client MUST close and reconnect
-- PKT_PING and PKT_PONG payloads are empty (length = 0 before encryption)
-
-#### 8.1.1 Keepalive Timer Behavior & Rationale
-
-To ensure reliable detection of asymmetric connection drops and dead endpoints:
-* **Client Keepalive (TX-driven)**: The client's keepalive timer tracks **transmit inactivity** (time elapsed since the last outgoing packet was sent by the client). Incoming packets received from the server (RX) **do not** reset the client's keepalive timer. This guarantees that the client's uplink transmit path is regularly tested.
-* **Server Watchdog (RX-driven)**: The server's session watchdog tracks **receive inactivity** (time elapsed since the last packet was received from the client). Outgoing packets sent by the server to the client (TX) **do not** reset the watchdog. This ensures the server will successfully detect and timeout a dead client even if the server is continuously broadcasting data to it.
-
-### 8.2 Graceful Disconnect
-
-Either side MAY send PKT_BYE before closing the TCP connection.
-PKT_BYE payload is empty. The receiver SHOULD close the connection
-after receiving PKT_BYE.
-
-
-## 9. Security Considerations
-
-### 9.1 PSK Management
-The pre-shared key MUST be at least 16 bytes of cryptographically random data.
-It MUST NOT be hardcoded in production firmware. Use ESP32 NVS with encryption,
-or provision via a secure channel.
-
-### 9.2 Replay Attacks
-Replay attacks are prevented by:
-- Fresh random nonce per session (prevents session replay)
-- Monotonic per-direction sequence numbers (prevents frame replay)
-
-### 9.3 Forward Secrecy
-Ephemeral X25519 keypairs are generated fresh for every session and
-discarded after key derivation. Compromise of the PSK does not expose
-past session traffic.
-
-### 9.4 Nonce Reuse
-A session MUST be terminated before the sequence number wraps around
-(at 2^32 frames). In practice this limit will never be reached on
-constrained devices.
-
-
-## 10. Test Vectors
-
-### 10.1 CRC-16
-
-```
-input:  00 00 00 00 00 00 00 00 00 00  (10 zero bytes)
-output: 0x1C54 (LE: 54 1C)
-
-input:  CD AB 01 05 00 00 00 00 15 00  (DATA frame header, seq=0, len=21)
-output: to be computed by reference implementation
-```
-
-### 10.2 HKDF
-
-```
-shared_secret : (32 bytes of 0x01)
-nonce         : (32 bytes of 0x02)
-pub_C         : (32 bytes of 0x03)
-pub_S         : (32 bytes of 0x04)
-info          : "usmp-v1" || pub_C || pub_S
-
-expected_key  : to be computed by reference implementation
-```
-
-### 10.3 AES-256-GCM
-
-```
-key        : (32 bytes of 0x05)
-seq        : 0x00000000
-nonce      : (12 random bytes, prepended to payload)
-aad        : CD AB 01 05 00 00 00 00 31 00  (DATA frame header, seq=0, len=49 = 12 nonce + 21 plain + 16 tag)
-plaintext  : "hello encrypted world" (21 bytes)
-```
-
-## 11. Memory & Resource Constraints
-
-USMP is designed for highly constrained embedded devices. The reference C implementation enforces the following memory requirements and limits:
-
-### 11.1 Persistent Session Memory (RAM)
-
-* **Persistent Context Struct (`usmp_t`)**:
-  * **32-bit Architecture (e.g. ESP32)**: **~108 bytes** (depending on compiler packing).
-  * **64-bit Architecture**: **~160–180 bytes**.
-* **Dynamic Heap Allocation**: **0 bytes**. Once a session is established, no persistent heap memory is allocated.
-
-### 11.2 Stack Memory Requirements
-
-During standard session operation, the stack requirements are deterministic and bounded:
-* **`usmp_send()`**: **~1 KB** stack usage (due to local frame buffer allocation).
-* **`usmp_recv()`**: **~1 KB** stack usage.
-
-### 11.3 Handshake Memory Overhead (Peak Allocation)
-
-The connection phase represents the peak memory utilization of the protocol lifecycle:
-* **Stack Memory**: **~1 KB** stack usage inside `usmp_handshake()`.
-* **Transient Heap Allocations**:
-  * **Core Buffers**: **1 KB** (two 512-byte temporary TX/RX buffers are dynamically allocated to prevent stack overflows on systems with small stacks, e.g., Arduino).
-  * **mbedTLS Operations**: **~2 KB to 4 KB** dynamic heap allocation for Curve25519 (ECDH) arithmetic context, entropy pool, and CTR_DRBG seed context.
-  * **Secure Cleanup**: All handshake heap buffers and intermediate cryptographic structures are securely zeroed out (`mbedtls_platform_zeroize`) and freed immediately after the handshake completes.
-
----
-
-## 12. Version History
-
-| Version | Date       | Changes                    |
-|---------|------------|----------------------------|
-| 0.4.4   | 2026-06-22 | Version bump. |
-| 0.4.3   | 2026-06-22 | Documented resource constraints & keepalive details; fixed keepalive timeout in usmp_recv. |
-| 0.4.2   | 2026-06-19 | Upgraded session ID to 16 bytes, switched to random 12-byte AES-GCM nonces, deprecated compile-time PSK. |
-| 0.2.0   | 2026-06-04 | Unified Secure Multi-transport Protocol v0.2.0 |
-| 0.1     | 2026-04-13 | Initial specification      |
+* **Session Context (`usmp_t`)**:
+  * *32-bit (ESP32)*: **~108 bytes** of persistent RAM.
+  * *64-bit*: **~160–180 bytes** of persistent RAM.
+* **Stack Bounding**:
+  * Standard `usmp_send` or `usmp_recv` calls use **~1 KB** of stack space.
+* **Handshake Peak Memory**:
+  * Peak stack allocation: **~1 KB** stack inside the handshake runner.
+  * Dynamic Heap Allocations (freed and zeroed immediately after handshake):
+    * Transient local buffers: **1 KB** (two 512-byte buffers to avoid stack bloat on microcontrollers).
+    * mbedTLS contexts: **~2 KB to 4 KB** dynamic memory for ECDH arithmetic, seeds, and key negotiation.

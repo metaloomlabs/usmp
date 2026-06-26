@@ -1,146 +1,190 @@
 # USMP | Unified Secure Multi-transport Protocol
 
-> Secure, encrypted device communication for ESP32, Arduino, and IoT. E2E encrypted sessions that run anywhere.
+> **Say goodbye to the "IoT Security Gap"!** USMP is a lightweight, secure, and developer-friendly protocol designed to bring end-to-end encrypted, mutually authenticated sessions to ESP32, Arduino, and Python.
 
 [![Python SDK](https://img.shields.io/pypi/v/usmp?label=usmp&color=blue)](https://pypi.org/project/usmp)
-[![Tests](https://img.shields.io/badge/tests-61%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-69%20passing-brightgreen)](#testing)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.3%2B-blue)](#esp32-esp-idf)
 [![Arduino](https://img.shields.io/badge/Arduino-ESP32-teal)](#arduino)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](#license)
 
-## What is USMP?
+## Why USMP?
 
-USMP fills the gap between **raw TCP (no security)** and **full TLS (too heavy for microcontrollers)**.
+In the world of IoT, developers are often forced to make a frustrating choice when connecting devices:
+1. **Raw TCP / Serial / BLE**: Fast and lightweight, but completely open to eavesdropping and tampering.
+2. **Full TLS**: Rock-solid, but extremely heavy, slow to shake hands, and often resource-prohibitive for smaller microcontrollers.
 
-It gives any constrained device a fully encrypted, mutually authenticated session with a gateway - with three function calls:
+**USMP fills this gap.** It gives you a lightweight, transport-agnostic, and secure tunnel that runs anywhere. Establishing a secure connection on your device is as simple as:
 
 ```c
+// 1. Initialize your transport (TCP, UART, etc.)
 usmp_transport_tcp_init(&transport, "192.168.1.1", 9000);
+
+// 2. Perform the handshake and establish a secure session
 usmp_connect(&ctx, &transport);
+
+// 3. Send encrypted data safely!
 usmp_send(&ctx, data, len);
 ```
 
-**No insecure mode. Every session has:**
+### Iron-clad Security, Built-In
+USMP doesn't do "insecure mode." Every single session gets:
+*   **Mutual Authentication**: Both sides verify each other's identity using HMAC-SHA256 and a Pre-Shared Key (PSK).
+*   **Forward Secrecy**: An ephemeral X25519 key exchange occurs with every session, ensuring that past traffic remains secret even if keys are compromised later.
+*   **Mandatory Encryption**: All payload data is encrypted using AES-256-GCM.
+*   **Tamper Resistance**: Ephemeral public keys (`pub_C` and `pub_S`) are cryptographically bound directly to the handshake HMACs, preventing Man-in-the-Middle (MITM) key-swapping attacks.
+*   **Replay Protection**: Strict, monotonic 32-bit sequence numbers are verified for every frame.
+*   **Deterministic Nonces**: Under the hood, AES-GCM nonces are deterministically constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate nonce collision risks.
 
-- Mutual authentication - both sides verify each other via HMAC-SHA256 + PSK
-- Forward secrecy - X25519 ephemeral key exchange per session
-- Encryption - AES-256-GCM, mandatory
-- Replay protection - monotonic sequence numbers per session
+## Key Features
 
-## Features
-
-- **Transport agnostic** - same protocol over TCP, UART (v0.4.0), BLE (planned)
-- **Platform agnostic** - pure C core with 5 platform hooks
-- **Reconnect + keepalive** - automatic PING/PONG, explicit reconnect API
-- **Python SDK** - asyncio `USMPServer`, `USMPClient`, `USMPSession`
-- **ESP32 ready** - ESP-IDF v5+ component, tested on real hardware
-- **Arduino ready** - installable `.zip` library, single `#include <USMP.h>`
-- **61 tests** - unit, crypto, handshake, integration, API surface
+*   **Transport Agnostic**: Runs over TCP, UART (with robust COBS framing & sliding window ACKs), and soon BLE!
+*   **Platform Agnostic**: A pure C core with only 5 platform hooks to implement for any new platform.
+*   **Dynamic Payload Fragmentation**: Need to send large payloads? USMP dynamically fragments payloads up to ~1.8 KB into multiple frames (plaintext capacity of 452 bytes per frame) and transparently reassembles them at the receiver.
+*   **Built-in Rate Limiting & Hardening**: The Python server automatically protects itself by locking out offending clients/IPs for up to 60 seconds after consecutive handshake failures.
+*   **Plug & Play SDKs**:
+    *   **Python**: Fully async, event-driven SDK with a server and client.
+    *   **ESP-IDF**: Ready-to-go component for ESP32 devices.
+    *   **Arduino**: Single-header `#include <USMP.h>` with intuitive callback interfaces.
 
 ## Supported Platforms
 
-| Platform | Status |
-|---|---|
-| ESP32 (ESP-IDF v5+) | ✅ Production ready |
-| ESP32 (Arduino) | ✅ Production ready |
-| Python 3.11+ | ✅ Production ready |
-| STM32 | 🔜 Planned |
-| Linux | 🔜 Planned |
+| Platform | Status | Getting Started |
+|:---|:---|:---|
+| **ESP32 (ESP-IDF v5+)** | Production ready | [ESP-IDF Quickstart](docs/getting-started/quickstart-esp32.md) |
+| **ESP32 (Arduino)** | Production ready | [Arduino Quickstart](docs/getting-started/quickstart-arduino.md) |
+| **Python 3.11+** | Production ready | [Python Quickstart](docs/getting-started/quickstart-python.md) |
+| **STM32** | Planned | [Porting Guide](docs/ports/porting-guide.md) |
+| **Linux** | Planned | - |
 
 ## Quick Start
 
-### Python Server
+Here is how you can set up a secure ecosystem in minutes.
 
-```bash
-pip install usmp
-```
+### Python Server
+Run `pip install usmp` and launch this async server:
 
 ```python
 import asyncio
 from usmp import USMPServer, USMPSession, ConnectionClosedError
 
-PSK = b"your-psk-here"
+# Keep this secret!
+PSK = b"your-psk-here-make-it-long-and-secure"
 
 server = USMPServer(host="0.0.0.0", port=9000, psk=PSK)
 
 @server.on_session
-async def handle(session: USMPSession):
+async def handle_device(session: USMPSession):
     print(f"Device connected: {session.device_id}")
     try:
         while True:
+            # Receive decrypted data
             data = await session.recv()
-            print(f"RX: {data}")
-            await session.send(b"ACK")
+            print(f"Received: {data.decode('utf-8')}")
+            
+            # Send an encrypted reply
+            await session.send(b"Got your message loud and clear!")
     except ConnectionClosedError:
         print(f"Device disconnected: {session.device_id}")
 
-asyncio.run(server.serve())
+print("USMP Server starting on port 9000...")
+async def main():
+    await server.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-### ESP32 - ESP-IDF
+### ESP32 - ESP-IDF (C)
+Initialize your network, hook up USMP, and send secure telemetry:
 
 ```c
 #include "usmp.h"
 #include "usmp_transport.h"
 
 void app_main(void) {
+    // 1. Set up your Wi-Fi or Ethernet
     wifi_init();
 
     usmp_t ctx = {0};
     usmp_transport_t transport = {0};
 
+    // 2. Configure the TCP transport & connect
     usmp_transport_tcp_init(&transport, "192.168.1.1", 9000);
-    usmp_connect(&ctx, &transport);
+    if (usmp_connect(&ctx, &transport) == 0) {
+        printf("Secure session established!\n");
+    }
 
+    // 3. Configure keepalives (e.g., 15 seconds)
     ctx.keepalive_ms = 15000;
 
-    usmp_send(&ctx, (const uint8_t *)"hello", 5);
+    // 4. Send encrypted messages
+    usmp_send(&ctx, (const uint8_t *)"Hello, USMP!", 12);
 
+    // 5. Maintain the session in your loop
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
-        if (usmp_keepalive_tick(&ctx) < 0)
+        
+        // Tick keepalive and handle automatic reconnects if the link drops
+        if (usmp_keepalive_tick(&ctx) < 0) {
+            printf("Connection lost, reconnecting...\n");
             usmp_reconnect(&ctx);
+        }
     }
 }
 ```
 
-### ESP32 - Arduino
+### ESP32 - Arduino (C++)
+Use the friendly C++ wrapper with event-driven callbacks:
 
 ```cpp
 #include <USMP.h>
 
-#define PSK       "your-psk-here"
+#define PSK       "your-psk-here-make-it-long-and-secure"
 #define SERVER_IP "192.168.1.1"
 #define WIFI_SSID "YourNetwork"
 #define WIFI_PASS "YourPassword"
 
 USMPClient usmp(PSK);
 
+// Callback triggered when we get an encrypted message
+void onMessageReceived(const uint8_t *data, size_t len) {
+    Serial.print("Received Message: ");
+    Serial.write(data, len);
+    Serial.println();
+}
+
 void setup() {
     Serial.begin(115200);
 
+    // Register our callback
+    usmp.onMessage(onMessageReceived);
+
+    // Start connection (handles Wi-Fi and Handshake automatically!)
     if (!usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
-        Serial.println("Connect failed");
+        Serial.println("Connection failed!");
         return;
     }
 
-    Serial.println("Session: " + usmp.sessionId());
-    usmp.send("hello from arduino");
+    // IMPORTANT: Keepalive configuration must be set AFTER begin()!
+    usmp.keepalive(15000);
+
+    Serial.println("Session started! ID: " + usmp.sessionId());
+    usmp.send("Hello from Arduino ESP32!");
 }
 
 void loop() {
-    usmp.maintain(); // keepalive + reconnect
-
-    if (usmp.available())
-        Serial.println("RX: " + usmp.read());
+    // Keep the engine running - maintains keepalives & reconnects under the hood
+    usmp.maintain();
 }
 ```
 
-## Protocol
+## Protocol Overview
 
 ### Frame Format
+Each USMP packet is packed tightly to minimize overhead on constrained networks:
 
-```py
+```text
  0               1               2               3
  0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7 0 1 2 3 4 5 6 7
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -154,327 +198,86 @@ void loop() {
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
-### Packet Types
+*   **Magic (16 bits)**: Always `0xABCD` to verify frame alignment.
+*   **Version (8 bits)**: Current version (e.g. `0x01`).
+*   **Type (8 bits)**: Packet function (e.g., `0x01` HELLO, `0x05` DATA, `0x09` DATA_FRAG).
+*   **Sequence Number (32 bits)**: Strict counter preventing replays.
+*   **Payload Length (16 bits)**: Size of the payload (up to 480 bytes including AES-GCM tag).
+*   **CRC-16 (16 bits)**: Error detection over the header and payload.
 
-| Value | Name | Direction |
-|---|---|---|
-| `0x01` | HELLO | Device → Server |
-| `0x02` | CHALLENGE | Server → Device |
-| `0x03` | HELLO_ACK | Device → Server |
-| `0x04` | SESSION_OK | Server → Device |
-| `0x05` | DATA | Both |
-| `0x06` | PING | Both |
-| `0x07` | PONG | Both |
-| `0x08` | BYE | Both |
-| `0xFF` | ERROR | Both |
+For a deeper dive into the wire layout, see [Frame Format Details](docs/protocol/frame-format.md).
 
-### Handshake
+### The Handshake Sequence
+Here is how USMP establishes trust, negotiates keys, and binds them cryptographically:
 
-```cpp
+```text
 Device                          Server
   |                               |
   |─── HELLO (device_id, pub_C) ─→|
   |                               |
   |←── CHALLENGE (nonce, pub_S) ──|
-  |                               |  ← X25519 shared secret computed
-  |                               |  ← HKDF session key derived
+  |                               |  ← Compute X25519 shared secret
+  |                               |  ← Derive session keys using HKDF-SHA256
   |                               |
-  |─── HELLO_ACK (HMAC_client) ──→|  ← Client proves PSK knowledge
+  |─── HELLO_ACK (HMAC_client) ──→|  ← Prove knowledge of PSK & bind pub_C/pub_S
   |                               |
-  |←── SESSION_OK (id, HMAC_srv) ─|  ← Server proves PSK knowledge
+  |←── SESSION_OK (id, HMAC_srv) ─|  ← Server confirms PSK knowledge & key binding
   |                               |
-  |   [Encrypted session begins]  |
+  |   [Encrypted Session Open]    |
 ```
 
-**Session key derivation:**
-
-```c
-session_key = HKDF-SHA256(
-    ikm  = X25519(priv_C, pub_S),
-    salt = nonce,
-    info = "usmp-v1" || pub_C || pub_S
-)
-```
-
-## Installation
-
-### Python SDK
-
-```bash
-pip install usmp
-# or
-uv add usmp
-```
-
-### ESP32 - ESP-IDF
-
-Add to your `idf_component.yml`:
-
-```yaml
-dependencies:
-  metaloomlabs/usmp: ">=0.2.0"
-```
-
-Or clone and add as a local component:
-
-```bash
-cd your_project/components
-git clone https://github.com/metaloomlabs/usmp.git
-```
-
-### Arduino
-
-1. Download `usmp-arduino.zip` from [Releases](https://github.com/metaloomlabs/usmp/releases)
-2. Arduino IDE → Sketch → Include Library → Add .ZIP Library
-3. Select the downloaded zip
-
-Or build from source:
-
-```powershell
-.\scripts\build-arduino-zip.ps1
-```
-
----
-
-## C API Reference
-
-### Connection
-
-```c
-// Initialize TCP transport (allocates context internally)
-int usmp_transport_tcp_init(usmp_transport_t *t, const char *ip, int port);
-
-// Connect and perform handshake
-int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
-
-// Explicit reconnect - full new handshake, resets sequence numbers
-int usmp_reconnect(usmp_t *ctx);
-
-// Close session
-void usmp_close(usmp_t *ctx);
-
-// Check connection state
-bool usmp_is_connected(const usmp_t *ctx);
-```
-
-### Data
-
-```c
-// Send encrypted data. Supports dynamic fragmentation up to 4 frames (~1.8 KB total).
-// Single frame limit (USMP_MAX_DATA_LEN) is 452 bytes.
-int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
-
-// Receive and decrypt data (optionally reassembled from multiple fragments)
-int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
-```
-
-### Keepalive
-
-```c
-// Send PING frame
-int usmp_ping(usmp_t *ctx);
-
-// Call in main loop - sends PING if keepalive_ms elapsed since last TX
-// Returns -1 if connection dead (time to call usmp_reconnect)
-int usmp_keepalive_tick(usmp_t *ctx);
-```
-
-### Platform hooks (implement for your target)
-
-```c
-int      usmp_port_get_device_id(uint8_t *out, size_t len);
-int      usmp_port_random(uint8_t *out, size_t len);
-void     usmp_port_delay_ms(uint32_t ms);
-uint32_t usmp_port_millis(void);
-void     usmp_port_log(char level, const char *tag, const char *msg);
-```
-
-## Python SDK Reference
-
-### USMPServer
-
-```python
-server = USMPServer(
-    host="0.0.0.0",
-    port=9000,
-    psk=b"your-psk",
-    handshake_timeout=10.0,    # seconds
-    session_timeout=60.0,      # seconds - watchdog fires if no data/PING
-    on_timeout=my_callback,    # async fn(device_id, session_id) - optional
-)
-
-@server.on_session
-async def handler(session: USMPSession):
-    data = await session.recv()   # transparently handles PING/PONG
-    await session.send(b"reply")
-
-asyncio.run(server.serve())
-```
-
-### USMPClient
-
-```python
-client = USMPClient(
-    host="192.168.1.1",
-    port=9000,
-    psk=b"your-psk",
-    device_id=bytes(6),    # optional - auto-generated if not provided
-)
-
-await client.connect()
-await client.send(b"hello")
-data = await client.recv()
-await client.ping()
-await client.disconnect()
-```
-
-### USMPSession
-
-```python
-# Available inside @server.on_session handler
-session.device_id    # "aa:bb:cc:dd:ee:ff"
-session.session_id   # "a1b2c3d4"
-
-await session.send(b"data")
-data = await session.recv()   # blocks until DATA frame (skips PING/PONG)
-await session.ping()
-await session.bye()
-```
-
-### Arduino API
-
-```cpp
-USMPClient usmp(PSK);
-
-// Connect
-usmp.begin(USMP::TCP("ip", port).wifi("ssid", "pass"));
-
-// Send
-usmp.send("string");
-usmp.send(buf, len);
-
-// Receive
-if (usmp.available())
-    String msg = usmp.read();
-
-// State
-usmp.alive()       // bool
-usmp.deviceId()    // String "aa:bb:cc:dd:ee:ff"
-usmp.sessionId()   // String "a1b2c3d4"
-
-// Keepalive config
-usmp.keepalive(15000);  // PING every 15s
-
-// Main loop driver - handles PING + reconnect + onMessage callback
-usmp.maintain();
-
-// Callbacks
-usmp.onConnect(fn);
-usmp.onDisconnect(fn);
-usmp.onReconnect(fn);
-usmp.onMessage(fn);  // fn(const uint8_t *data, size_t len)
-```
+*For more details on key binding and session derivation, check out the [Handshake Specification](docs/protocol/handshake.md).*
 
 ## Testing
+
+We love reliability. USMP is backed by a comprehensive suite of unit, integration, and performance tests:
 
 ```bash
 cd sdk/python
 uv run pytest tests/ -v
 ```
 
-```c
-61 passed in 3.3s
+```text
+======================= 69 passed in 3.42s =======================
 ├── 16 API surface tests
 ├── 8  benchmark tests
 ├── 8  crypto tests
 ├── 7  frame tests
 ├── 12 handshake tests
 ├── 8  integration tests (real loopback TCP)
-└── 3  session tests
+└── 10 session & fragmentation tests
 ```
 
 ## Repository Structure
 
-```txt
-usmp/
-  core/                    ← Pure C, zero platform dependencies
-    include/               ← Public headers
-    src/                   ← Implementation
+*   `core/`: Pure C implementation of the USMP protocol state machine. Zero heap allocations, zero platform dependencies.
+*   `ports/`: Platform-specific adaptors and client SDKs.
+    *   `usmp-esp32/`: Native ESP-IDF v5 component.
+    *   `usmp-arduino/`: Arduino library.
+*   `sdk/python/`: Fully async Python SDK for servers and test clients.
+*   `examples/`: Sample code to get you up and running quickly.
+*   `docs/`: Full documentation site (written in friendly Markdown).
 
-  ports/
-    usmp-esp32/            ← ESP-IDF v5+ port
-    usmp-arduino/          ← Arduino library
+## Roadmap & Ecosystem
 
-  sdk/
-    python/                ← Python asyncio SDK
-      src/usmp/
-      tests/
-
-  scripts/
-    build-arduino-zip.ps1  ← Build Arduino .zip (Windows)
-    build-arduino-zip.sh   ← Build Arduino .zip (macOS/Linux)
-    publish-pypi.ps1
-    publish-pypi.sh
-    test-sdk.ps1
-    test-sdk.sh
-
-  firmware/                ← ESP32 reference firmware (ESP-IDF)
-  examples/                ← Usage examples
-  docs/                    ← MkDocs Material documentation
-```
-
-## Roadmap
-
-```python
-v0.2.0 ✅  Core protocol + Reconnect + Keepalive + Arduino port
-v0.3.0 🔨  Publish
-             - Python SDK on PyPI
-             - ESP-IDF component registry
-             - PlatformIO library ✅
-v0.4.0 📋  UART transport
-             - COBS framing
-             - ACK/retry layer
-v0.5.0 📋  Discovery + CLI
-             - mDNS + UDP broadcast scan
-             - usmp scan / connect / logs / send / monitor
-v0.6.0 📋  OTA firmware update
-             - Ed25519 signed firmware
-             - Chunked transfer + atomic swap
-v0.7.0 📋  Multi-device hardening
-             - Per-device PSK
-             - NVS key storage
-             - Device-to-device (usmp_listen on ESP32)
-v1.0.0 📋  Cloud bridge
-             - Gateway → MQTT / WebSocket
-             - Remote CLI via cloud
-```
-
-## Security
-
-**Development PSK:** The default PSK `usmp-dev-psk-change-me-before-prod` is for development only. Always use a strong, secret PSK in production.
-
-**Threat model:** USMP protects against passive eavesdropping, active MITM, replay attacks, and rogue server/device attacks. It does not protect against physical compromise of the device or PSK exposure.
+*   [x] **v0.2.0**: Core protocol, Keepalive mechanism, and Arduino Port.
+*   [x] **v0.3.0**: Python SDK published on PyPI.
+*   [x] **v0.4.0**: UART Transport layer with COBS framing & sliding window.
+*   [x] **v0.4.7**: Security hardening (Key Binding, Deterministic Nonces, Rate Limiting, Dynamic Fragmentation).
+*   [ ] **v0.5.0**: CLI tools and auto-discovery (mDNS / UDP).
+*   [ ] **v0.6.0**: Secure OTA firmware updates with Ed25519 signatures.
 
 ## Contributing
 
-1. Fork the repo
-2. Create a feature branch
-3. Run tests: `uv run pytest tests/ -v`
-4. Build Arduino zip: `.\scripts\build-arduino-zip.ps1`
-5. Build ESP-IDF: `idf.py build`
-6. Submit a PR
+We welcome all contributions! To get started:
+1. Fork the repository.
+2. Create a feature branch (`git checkout -b feature/cool-new-thing`).
+3. Ensure all tests pass: `uv run pytest tests/ -v`.
+4. Open a Pull Request!
 
-## License
-
-Apache License 2.0 - see [LICENSE](LICENSE)
-
-## Author
-
-**winterx64** - [github.com/winterx64](https://github.com/winterx64)
-
----
+Please review our [Contributing Guidelines](CONTRIBUTING.md) and [Code of Conduct](LICENSE) before submitting.
 
 <p align="center">
-  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
+  <strong>USMP™</strong> • Crafted by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
   Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>
 </p>

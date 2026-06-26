@@ -6,8 +6,6 @@ This project provides a complete plug-and-play echo application running across t
 2. **ESP32 (ESP-IDF) Client:** Connects over TCP, runs the handshake, and sends telemetry.
 3. **Arduino (ESP32) Client:** An alternative client sketch for Arduino IDE developers.
 
----
-
 ## Architecture Diagram
 
 ```text
@@ -22,8 +20,6 @@ This project provides a complete plug-and-play echo application running across t
   │  (ESP-IDF App)  │  │  (USMP Sketch)  │
   └─────────────────┘  └─────────────────┘
 ```
-
----
 
 ## Step 1: Start the Python Gateway Server
 
@@ -44,8 +40,6 @@ We'll start the server first so that our microcontrollers can connect to it imme
    [USMP] Listening on 0.0.0.0:9000
    ```
 
----
-
 ## Step 2: Configure & Deploy the Microcontroller Client
 
 Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
@@ -53,8 +47,8 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
 ### Option A: Arduino Client (ESP32)
 
 1. Open your Arduino IDE.
-2. Zip the [ports/usmp-arduino/](file:///c:/Users/main/codinways/MetaLoom/products/usmp/ports/usmp-arduino) directory to build `usmp-arduino.zip`, or copy the directory directly to your Arduino `libraries/USMP` folder.
-3. Open the sketch file [arduino.ino](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/project_1/arduino/arduino.ino) in your IDE.
+2. Zip the [ports/usmp-arduino/](../../ports/usmp-arduino) directory to build `usmp-arduino.zip`, or copy the directory directly to your Arduino `libraries/USMP` folder.
+3. Open the sketch file [arduino.ino](arduino/arduino.ino) in your IDE.
 4. Modify the config block at the top of the file:
 
    ```cpp
@@ -75,8 +69,6 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
    Session: 5f3b7c2a8e9d0a1b2c3d4e5f6a7b8c9d
    ```
 
----
-
 ### Option B: ESP32 Client (ESP-IDF)
 
 1. Navigate to the ESP32 project directory:
@@ -85,7 +77,7 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
    cd examples/project_1/esp32
    ```
 
-2. Open the application code [app.c](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/project_1/esp32/main/app.c).
+2. Open the application code [app.c](esp32/main/app.c).
 3. Update the `server_ip` variable to match your host machine IP:
 
    ```c
@@ -121,8 +113,6 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
    I (2565) USMP_SESSION: TX seq=0 len=16
    I (2570) APP: Message sent
    ```
-
----
 
 ## Step 3: Observe Server Outputs
 

@@ -35,13 +35,15 @@ void onMessage(const uint8_t *data, size_t len) {
 void setup() {
   Serial.begin(115200);
 
-  usmp.keepalive(15000); // PING every 15s
   usmp.onConnect(onConnect);
   usmp.onDisconnect(onDisconnect);
   usmp.onReconnect(onReconnect);
   usmp.onMessage(onMessage);
 
-  usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS));
+  if (usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
+    usmp.keepalive(15000); // PING every 15s — must be called after begin()
+  }
+
   // Callbacks fire automatically — no need to check return value here
 }
 

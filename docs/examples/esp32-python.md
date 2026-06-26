@@ -1,143 +1,225 @@
-# USMP Full-Build Demos & Examples
+# Complete Build Examples & Demos
 
-This document provides a set of complete, copy-paste-ready build examples demonstrating how to integrate USMP on different platforms. It includes:
-1. **Python Gateway Server & Test Client**
-2. **Arduino ESP32 Client** (using the USMP-Arduino port)
-3. **ESP-IDF Client** (native C with secure Static IP and non-blocking RX loops)
+Welcome to the examples guide! Here you will find complete, copy-paste-ready project templates showing how to integrate USMP into your systems.
 
----
+These projects are fully compatible with **USMP version 0.4.7** (which includes dynamic payload fragmentation, deterministic nonces, handshake public key binding, rate limiting, and timeout hardening).
 
 ## 1. Python Gateway Server
 
-### Explanation
-An asyncio-based USMP server that listens on port `9000` for incoming device connections, authenticates using the pre-shared key (PSK), and acts as a bidirectional message processor.
+This script implements an asynchronous gateway server. It listens on port `9000`, handles different Pre-Shared Keys per device, logs telemetry, and responds to messages.
 
-### Implementation
 Create a file named `server.py`:
-```python
+
+```python title="server.py"
 import asyncio
+import logging
 from usmp import USMPServer, USMPSession
 from usmp.errors import ConnectionClosedError, CryptoError, SequenceError
 
-PSK = b"usmp-dev-psk-change-me-before-prod"
-HOST = "0.0.0.0"
-PORT = 9000
+# Set up logging for visibility
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("usmp_gateway")
 
-# Configure the server with a 45-second inactivity timeout
-server = USMPServer(host=HOST, port=PORT, psk=PSK, session_timeout=45.0)
+# Setup a dictionary map for device-specific Pre-Shared Keys
+DEVICE_REGISTRY = {
+    b"\x00\x11\x22\x33\x44\x55": b"secure-psk-device-1",
+    b"\xaa\xbb\xcc\xdd\xee\xff": b"secure-psk-device-2"
+}
+
+# Bind to all interfaces on default port 9000
+server = USMPServer(
+    host="0.0.0.0",
+    port=9000,
+    psk=DEVICE_REGISTRY,
+    session_timeout=45.0  # Close inactive connection if no data/PING within 45s
+)
 
 @server.on_session
-async def handle_device(session: USMPSession):
-    print(f"[SESSION] Connected: device={session.device_id} (Session: {session.session_id})")
+async def handle_device_session(session: USMPSession):
+    print(f"[JOIN] Connected: device={session.device_id} (Session: {session.session_id})")
     try:
         while True:
             # Blocks until decrypted data is received (handles PING/PONG automatically)
             payload = await session.recv()
-            message = payload.decode().strip()
+            message = payload.decode("utf-8").strip()
             print(f"[RX] From {session.device_id}: {message}")
             
             # Respond to client
-            response_msg = f"Acknowledged: {message}"
-            await session.send(response_msg.encode())
+            reply = f"Acknowledged: {message}"
+            await session.send(reply.encode("utf-8"))
             
     except ConnectionClosedError:
         print(f"[CLOSED] Device {session.device_id} disconnected cleanly.")
-    except (CryptoError, SequenceError) as e:
-        print(f"[ERROR] Security violation on {session.device_id}: {e}")
+    except CryptoError as e:
+        print(f"[ERROR] Crypto tag verification failed on {session.device_id}: {e}")
+    except SequenceError as e:
+        print(f"[ERROR] Packet sequence mismatch on {session.device_id}: {e}")
     except Exception as e:
-        print(f"[ERROR] Unexpected session exception: {e}")
+        print(f"[ERROR] Unexpected session error: {e}")
 
 if __name__ == "__main__":
-    print(f"Starting USMP Gateway on {HOST}:{PORT}...")
+    print(f"Starting USMP Gateway on port 9000...")
     try:
         asyncio.run(server.serve())
     except KeyboardInterrupt:
         print("Gateway stopped.")
 ```
 
----
+## 2. Arduino Client Examples
 
-## 2. Arduino Client Demo
+For Arduino setups, you can choose between two main structures: **Polling** (checking for data in your loop) and **Callbacks** (registering event-driven hooks).
 
-### Explanation
-A complete sketch for ESP32 microcontrollers using the Arduino framework. It manages WiFi connection, initiates the USMP session, and schedules non-blocking checks in the `loop()` task using `usmp.maintain()`.
+### 2.1 The Callback-Based Client (Highly Recommended)
 
-### Implementation
-Create a sketch named `usmp_arduino_demo.ino`:
-```cpp
+Callbacks keep your main `loop()` clean and prevent data racing conditions where `available()` and `read()` might execute simultaneously with internal tasks.
+
+Create a sketch named `usmp_callbacks.ino`:
+
+```cpp title="usmp_callbacks.ino"
 #include <USMP.h>
 
-// ── Configuration Settings
-#define WIFI_SSID "your-wifi-ssid"
-#define WIFI_PASS "your-wifi-password"
-#define SERVER_IP "192.168.137.1"  // Gateway IP address
+// Wi-Fi and Server settings
+#define WIFI_SSID   "YourNetworkSSID"
+#define WIFI_PASS   "YourNetworkPassword"
+#define SERVER_IP   "192.168.1.100" // Gateway Server IP
 #define SERVER_PORT 9000
 
-// Pre-Shared Key (Warning: Do not use hardcoded PSK constants in production)
-#define USMP_PSK "usmp-dev-psk-change-me-before-prod"
+// Pre-Shared Key (This must match your device entry in the server registry)
+#define PSK         "secure-psk-device-1"
 
-USMPClient usmp(USMP_PSK);
-unsigned long last_send_time = 0;
+USMPClient usmp(PSK);
+unsigned long last_telemetry_time = 0;
+
+// Triggered when initial connection & handshake complete successfully
+void onConnect() {
+    Serial.println("Session established! ID: " + usmp.sessionId());
+    
+    // IMPORTANT: Keepalive configuration must be set AFTER begin()!
+    usmp.keepalive(15000); // Send keepalive pings every 15 seconds
+    
+    usmp.send("Hello Gateway! Client joined using callbacks.");
+}
+
+// Triggered if the connection drops
+void onDisconnect() {
+    Serial.println("Connection lost. Reconnecting in the background...");
+}
+
+// Triggered when a reconnection handshake completes successfully
+void onReconnect() {
+    Serial.println("Session restored! New Session ID: " + usmp.sessionId());
+}
+
+// Triggered when a decrypted payload arrives from the gateway
+void onMessage(const uint8_t *data, size_t len) {
+    Serial.print("Got message: ");
+    Serial.write(data, len);
+    Serial.println();
+}
 
 void setup() {
-  Serial.begin(115200);
-  delay(1000);
+    Serial.begin(115200);
+    delay(1000);
 
-  Serial.println("[APP] Initializing USMP Client...");
+    Serial.println("[APP] Starting event-driven USMP Client...");
 
-  // USMP handles Wi-Fi connections, socket dialing, and the handshake in one call.
-  // Note: Custom configurations (like keepalive) must be set AFTER begin().
-  if (!usmp.begin(USMP::TCP(SERVER_IP, SERVER_PORT).wifi(WIFI_SSID, WIFI_PASS))) {
-    Serial.println("[USMP] Connection/Handshake failed. Check configuration and server state.");
-    return;
-  }
+    // Register our events before connecting
+    usmp.onConnect(onConnect);
+    usmp.onDisconnect(onDisconnect);
+    usmp.onReconnect(onReconnect);
+    usmp.onMessage(onMessage);
 
-  // Set keepalive to 15 seconds (must be set after begin due to context initialization)
-  usmp.keepalive(15000);
-
-  Serial.println("[USMP] Handshake successful!");
-  Serial.printf("[USMP] Device ID: %s\n", usmp.deviceId().c_str());
-  Serial.printf("[USMP] Session ID: %s\n", usmp.sessionId().c_str());
-
-  // Transmit initial welcome frame
-  usmp.send("Hello from Arduino ESP32");
+    // Connecting handles WiFi join and TCP handshake automatically
+    usmp.begin(USMP::TCP(SERVER_IP, SERVER_PORT).wifi(WIFI_SSID, WIFI_PASS));
 }
 
 void loop() {
-  // 1. Maintain the connection (sends keepalive PINGs, manages reconnects)
-  usmp.maintain();
+    // Keep driving the network tasks and triggering callbacks
+    usmp.maintain();
 
-  // 2. Poll for incoming data (non-blocking)
-  if (usmp.available()) {
-    String message = usmp.read();
-    Serial.printf("[USMP] Received message: %s\n", message.c_str());
-  }
+    // Send a telemetry packet every 10 seconds while the connection is healthy
+    if (usmp.alive() && (millis() - last_telemetry_time >= 10000)) {
+        last_telemetry_time = millis();
+        String telemetry = "Uptime = " + String(millis() / 1000) + "s";
+        Serial.println("Sending: " + telemetry);
+        usmp.send(telemetry);
+    }
 
-  // 3. Periodically transmit telemetry every 10 seconds if connected
-  if (usmp.alive() && (millis() - last_send_time >= 10000)) {
-    last_send_time = millis();
-    String telemetry = "Telemetry uptime=" + String(millis() / 1000) + "s";
-    Serial.printf("[USMP] Transmitting: %s\n", telemetry.c_str());
-    usmp.send(telemetry);
-  }
-
-  delay(10); // yields to CPU/Wi-Fi tasks
+    delay(10); // Yield to background core processor
 }
 ```
 
----
+> [!CAUTION]
+> **Avoid Mixed Reading Modes**
+> If you register an `onMessage` callback handler, do not call `usmp.available()` or `usmp.read()`. Mixing the two models will consume packets twice or prevent the callback from triggering correctly!
+
+### 2.2 The Polling-Based Client (Simple Style)
+
+If you prefer checking for data sequentially alongside other sensor loops, you can use the polling API:
+
+Create a sketch named `usmp_polling.ino`:
+
+```cpp title="usmp_polling.ino"
+#include <USMP.h>
+
+#define WIFI_SSID   "YourNetworkSSID"
+#define WIFI_PASS   "YourNetworkPassword"
+#define SERVER_IP   "192.168.1.100"
+#define SERVER_PORT 9000
+#define PSK         "secure-psk-device-1"
+
+USMPClient usmp(PSK);
+unsigned long last_telemetry_time = 0;
+
+void setup() {
+    Serial.begin(115200);
+    delay(1000);
+
+    Serial.println("[APP] Starting polling-driven USMP Client...");
+
+    if (!usmp.begin(USMP::TCP(SERVER_IP, SERVER_PORT).wifi(WIFI_SSID, WIFI_PASS))) {
+        Serial.println("Connection failed!");
+        return;
+    }
+
+    // Set keepalive post-connection
+    usmp.keepalive(15000);
+
+    Serial.println("Session established! ID: " + usmp.sessionId());
+    usmp.send("Hello Gateway! Client joined using polling.");
+}
+
+void loop() {
+    // Maintain connection heartbeats and background reconnect routines
+    usmp.maintain();
+
+    // Poll for new incoming secure messages
+    if (usmp.available()) {
+        String msg = usmp.read();
+        Serial.println("Received: " + msg);
+    }
+
+    // Telemetry loop
+    if (usmp.alive() && (millis() - last_telemetry_time >= 10000)) {
+        last_telemetry_time = millis();
+        String telemetry = "Telemetry Uptime = " + String(millis() / 1000) + "s";
+        usmp.send(telemetry);
+    }
+
+    delay(10);
+}
+```
 
 ## 3. ESP-IDF Native C Client
 
-### Explanation
-A native Espressif IoT Development Framework (ESP-IDF) C project. This demo includes:
-1. **`wifi.c`**: Connects to the access point with a **static IP configuration**, safely ignoring standard DHCP state warnings during boot.
-2. **`app.c`**: Initializes the TCP transport, executes `usmp_connect()`, and maintains a non-blocking loop that reads incoming data (`usmp_recv`) and ticks the keepalive timer.
+This native C project compiles under the Espressif IoT Development Framework (v5.0+). It features:
 
-### Implementation
+* **Static IP WiFi Setup**: Configures a static IP connection without standard DHCP warnings on boot.
+* **Non-Blocking Event Loop**: Periodically checks the transport layer for incoming data, ticks the keepalive state machine, and implements a reconnect loop with an exponential backoff.
 
-#### Component 1: `wifi.c` (Safe Static IP Initialization)
-```c
+#### wifi.c (Static IP Configuration)
+
+```c title="main/wifi.c"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -148,13 +230,13 @@ A native Espressif IoT Development Framework (ESP-IDF) C project. This demo incl
 #include "lwip/ip4_addr.h"
 #include <string.h>
 
-#define WIFI_SSID       "your-wifi-ssid"
-#define WIFI_PASS       "your-wifi-password"
-#define STATIC_IP       "192.168.137.100"
-#define STATIC_GW       "192.168.137.1"
+#define WIFI_SSID       "YourNetworkSSID"
+#define WIFI_PASS       "YourNetworkPassword"
+#define STATIC_IP       "192.168.1.150"
+#define STATIC_GW       "192.168.1.1"
 #define STATIC_NETMASK  "255.255.255.0"
 
-static const char *TAG = "WIFI_CONFIG";
+static const char *TAG = "WIFI_MANAGER";
 static EventGroupHandle_t s_wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
 
@@ -164,10 +246,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "Disconnected from AP, reconnecting...");
+        ESP_LOGW(TAG, "Disconnected from AP. Retrying connection...");
         esp_wifi_connect();
     } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
-        ESP_LOGI(TAG, "Associated with AP. Static IP configuration active: " STATIC_IP);
+        ESP_LOGI(TAG, "Successfully joined AP. Static IP configuration active.");
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -203,10 +285,10 @@ bool wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
-    // Stop DHCP and apply Static IP parameters safely without triggering crashes
+    // Turn off DHCP client safely before applying Static IP settings
     esp_err_t dhcp_err = esp_netif_dhcpc_stop(netif);
     if (dhcp_err != ESP_OK && dhcp_err != ESP_ERR_ESP_NETIF_INVALID_STATE && dhcp_err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
-        ESP_LOGE(TAG, "Fatal DHCP client stop error: %s", esp_err_to_name(dhcp_err));
+        ESP_LOGE(TAG, "Failed to stop DHCP: %s", esp_err_to_name(dhcp_err));
         return false;
     }
 
@@ -224,8 +306,9 @@ bool wifi_init(void)
 }
 ```
 
-#### Component 2: `app.c` (Main Session & Non-blocking RX Loop)
-```c
+#### app.c (Main Session Tasks)
+
+```c title="main/app.c"
 #include "usmp.h"
 #include "usmp_transport.h"
 #include "wifi.h"
@@ -238,77 +321,80 @@ static const char *TAG = "APP_CORE";
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Initializing WiFi Station interface...");
+    ESP_LOGI(TAG, "Initializing Wi-Fi Interface...");
     if (!wifi_init()) {
-        ESP_LOGE(TAG, "WiFi registration timed out.");
+        ESP_LOGE(TAG, "Failed to connect to AP.");
         return;
     }
 
-    const char *server_ip = "192.168.137.1";
+    const char *server_ip = "192.168.1.100";
     const int port = USMP_DEFAULT_PORT;
 
     usmp_t ctx = {0};
     usmp_transport_t transport = {0};
 
-    // Pre-shared key definition
-    static const uint8_t s_psk[] = "usmp-dev-psk-change-me-before-prod";
+    // Configure client context with the Pre-Shared Key (matches server side)
+    static const uint8_t s_psk[] = "secure-psk-device-1";
     ctx.psk     = s_psk;
-    ctx.psk_len = sizeof(s_psk) - 1;
+    ctx.psk_len = sizeof(s_psk);
 
-    // Dial TCP socket
+    // Initialize TCP socket connection
     if (usmp_transport_tcp_init(&transport, server_ip, port) != 0) {
-        ESP_LOGE(TAG, "TCP socket connection failed.");
+        ESP_LOGE(TAG, "Failed to open TCP socket connection.");
         return;
     }
-    ESP_LOGI(TAG, "TCP Link established. Executing USMP handshake...");
+    ESP_LOGI(TAG, "TCP Socket open. Performing USMP Cryptographic Handshake...");
 
-    // Perform cryptographic handshake
+    // Connect & authenticate
     if (usmp_connect(&ctx, &transport) != 0) {
         ESP_LOGE(TAG, "USMP Handshake failed.");
         return;
     }
-    ESP_LOGI(TAG, "Session established successfully.");
-    ctx.keepalive_ms = 15000; // Tick keepalive timer every 15s
+    
+    ESP_LOGI(TAG, "Secure session established.");
+    ctx.keepalive_ms = 15000; // Trigger keepalive PING if inactive for 15 seconds
 
-    // Transmit initial data
-    const char *greet = "Hello gateway from ESP-IDF client";
+    // Send a welcome message
+    const char *greet = "Hello gateway! This is ESP-IDF native C speaking.";
     usmp_send(&ctx, (const uint8_t *)greet, strlen(greet));
 
-    // Active session reader/writer loop
+    // Active session receiver loop
     while (true)
     {
-        vTaskDelay(pdMS_TO_TICKS(100)); // Yield to context switches
+        vTaskDelay(pdMS_TO_TICKS(100)); // Yield to context switching
 
-        // 1. Non-blocking RX Check: poll transport for incoming data
+        // 1. Non-blocking Receive Check
         if (ctx.transport.available && ctx.transport.available(&ctx.transport) > 0)
         {
             uint8_t rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES + 1];
-            int bytes_read = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
-            if (bytes_read > 0)
+            int len = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
+            if (len > 0)
             {
-                rx_buf[bytes_read] = '\0';
-                ESP_LOGI(TAG, "[RX] Received payload: %s", (char *)rx_buf);
+                rx_buf[len] = '\0';
+                ESP_LOGI(TAG, "Received: %s", (char *)rx_buf);
             }
         }
 
-        // 2. Keepalive timer tick (sends PING when transmit inactivity exceeds 15 seconds)
+        // 2. Tick Keepalive (sends a PING frame automatically if no packets were sent)
         if (usmp_keepalive_tick(&ctx) == 0) {
-            continue; // Normal execution path
+            continue; // Keepalive tick normal, loop continues
         }
 
-        // 3. Fallthrough means connection was lost -> execute reconnect sequence
-        ESP_LOGW(TAG, "USMP link dropped. Attempting to reconnect...");
+        // 3. Keepalive tick returned < 0 -> connection was lost! Run reconnect backoff.
+        ESP_LOGW(TAG, "Connection lost! Attempting reconnect...");
         int backoff_ms = 2000;
         
         while (usmp_reconnect(&ctx) != 0)
         {
             ESP_LOGW(TAG, "Reconnect failed. Retrying in %dms...", backoff_ms);
             vTaskDelay(pdMS_TO_TICKS(backoff_ms));
+            
+            // Exponential backoff capped at 30 seconds
             if (backoff_ms < 30000) {
-                backoff_ms *= 2; // Exponential backoff capped at 30s
+                backoff_ms *= 2; 
             }
         }
-        ESP_LOGI(TAG, "Session re-established. Resuming normal operations.");
+        ESP_LOGI(TAG, "Session restored successfully. Resuming operations.");
     }
 }
 ```

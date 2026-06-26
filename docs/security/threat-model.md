@@ -1,71 +1,54 @@
-# Threat Model
+# Security Threat Model & Assumptions
 
-## Assumptions
+To understand how USMP protects your IoT devices, it is helpful to see what threats the protocol is built to counter, what assumptions we make, and what issues lie outside our scope.
 
-USMP assumes:
+## Basic Assumptions
 
-- The **network is hostile** — an attacker can intercept, modify, and replay traffic
-- The **PSK is secret** — devices and gateways have been securely provisioned
-- **Physical security is out of scope** — an attacker with physical device access can extract the PSK
+USMP operates under three core security assumptions:
 
-## Attacker capabilities
+1. **The Network is Hostile**: We assume an attacker can intercept, view, modify, inject, or replay any packet sent over your communication transport (Wi-Fi, Serial wires, UDP, BLE).
+2. **The PSK is Secret**: We assume that your Pre-Shared Key (PSK) was securely provisioned onto both the device and the gateway and has not been leaked to outside parties.
+3. **Physical Security is Out-of-Scope**: We assume that if an attacker has physical possession of a device, they can extract keys using flash dumps or debugging pins, unless you have configured advanced hardware-level protections (like ESP32 Flash Encryption and Secure Boot).
 
-| Capability | USMP's response |
-|------------|----------------|
-| Passive eavesdropping | AES-256-GCM — traffic is opaque |
-| Modify frames in transit | GCM tag fails — connection dropped |
-| Replay a captured session | Fresh nonce per session — replay rejected |
-| Replay individual frames | Sequence numbers — replay rejected |
-| Impersonate a device | Requires PSK — impossible without it |
-| Impersonate a gateway | Requires PSK — impossible without it |
-| Man-in-the-middle | Mutual HMAC — both sides verified |
+## Threats and Responses
 
-## Attack scenarios
+Here is how USMP defends your system against active and passive network attacks:
 
-### Passive eavesdropper
+| Attack Vector | Attacker Goal | USMP Defense Strategy |
+|:---|:---|:---|
+| **Eavesdropping** | Read device data. | **AES-256-GCM Encryption**: All post-handshake payloads are fully encrypted, appearing as random noise to sniffers. |
+| **Tampering** | Modify commands or payloads. | **GCM Authentication Tag**: If an attacker alters a single bit in a packet, the cryptographic tag check fails, and the session drops. |
+| **Session Replay** | Replay a recorded handshake. | **Fresh Random Nonce**: The server sends a new random challenge nonce for every handshake. Old handshake responses won't match. |
+| **Packet Replay** | Replay a valid command. | **Monotonic Sequence Numbers**: The receiver expects sequence numbers to increment strictly by 1. Replayed packets are ignored. |
+| **Impersonation** | Mimic a valid device or gateway. | **Mutual HMAC Authentication**: Both sides must prove knowledge of the PSK using HMAC signatures. |
+| **Man-in-the-Middle** | Intercept and relay data. | **Cryptographic Key Binding**: Ephermeral keys are hashed into the HMAC proofs, preventing attackers from swapping keys. |
 
-An attacker captures all traffic between device and gateway.
+## Detailed Attack Scenarios
 
-**Result:** The attacker sees only ciphertext. Without the session key
-(which was derived from ephemeral X25519 keys and never transmitted),
-the traffic cannot be decrypted.
+### 1. The Sniffer (Passive Eavesdropper)
 
-Even if the PSK is later compromised, past sessions remain private
-because the ephemeral keys no longer exist (**forward secrecy**).
+An attacker sits on the local Wi-Fi router and records every packet sent between your ESP32 and your gateway.
 
-### Active man-in-the-middle
+* **Result**: The attacker sees the handshake public keys, but cannot derive the session keys without knowing the private keys or the PSK.
+* **Forward Secrecy**: Even if the attacker manages to steal your PSK in the future, they still cannot decrypt the traffic they recorded today, because the ephemeral keys were erased from the device's RAM as soon as the session ended.
 
-An attacker intercepts the connection and tries to relay or modify traffic.
+### 2. The Impostor (Rogue Gateway)
 
-**Result:** The attacker cannot complete the handshake because they cannot
-produce valid HMAC values without the PSK. If they relay the handshake
-and try to inject frames, the GCM authentication tag will fail.
+An attacker sets up a fake server to mimic your gateway and tries to trick your device into sending telemetry or accepting control commands.
 
-### Rogue gateway
+* **Result**: The rogue gateway cannot produce a valid `SESSION_OK` HMAC signature because it does not possess the secret PSK. The client detects the bad signature and closes the TCP socket immediately.
 
-A malicious server tries to impersonate the real gateway.
+### 3. The Replayer (Sequence & Nonce Attacks)
 
-**Result:** The rogue server cannot produce a valid `SESSION_OK` HMAC
-without knowing the PSK. The device will detect this and close the connection.
+An attacker captures a valid `OPEN_DOOR` data command and replays it later.
 
-### Replay attack
+* **Result**: The receiver tracks the next expected sequence number. Since the replayed packet carries an old sequence number, the receiver rejects the packet and closes the connection.
+* **GCM Nonce Safety**: Nonces are constructed as `seq || session_id[0..7]`. Monotonic sequence counters prevent nonce reuse within a session, and random session IDs ensure unique nonces across different sessions.
 
-An attacker records a valid session and replays it later.
+## Out of Scope (What USMP Does Not Do)
 
-**Result:**
+Some security protections must be managed at the system or hardware level:
 
-- **Session replay** — rejected because the server generates a fresh random
-  nonce for each session. The replayed HELLO_ACK references an old nonce
-  that no longer matches.
-- **Frame replay** — rejected because the sequence number doesn't match
-  the expected next value.
-
-## Out of scope
-
-| Threat | Notes |
-|--------|-------|
-| PSK exfiltration | Protect with flash encryption and secure provisioning |
-| Physical tampering | Hardware security modules or secure enclaves required |
-| DoS attacks | Rate limiting at application or network layer |
-| Side-channel attacks | mbedtls constant-time operations mitigate most cases |
-| Quantum cryptography | X25519 is not quantum-resistant; post-quantum upgrade planned |
+* **Key Exfiltration**: If your microcontroller does not use Flash Encryption, an attacker with physical access can read the flash memory to extract the PSK. You must enable ESP32 Flash Encryption to secure your key storage.
+* **Volumetric DDoS**: While the USMP Python server rate-limits handshake floods to protect its CPU, it cannot block network-level packet flooding. You must configure standard network firewalls (like `iptables` or cloud firewalls) to block flood traffic.
+* **Quantum Cryptography**: Our X25519 key exchange is not quantum-resistant. Post-quantum upgrades are planned for future versions of the protocol.

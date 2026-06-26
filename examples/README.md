@@ -12,8 +12,6 @@ examples/
 └── python_server/       ← Minimal Python Asyncio Server implementation
 ```
 
----
-
 ## 1. Unified Multi-Platform Demo (`project_1`)
 
 This is the recommended starting point for testing different target hardware. It contains:
@@ -22,9 +20,7 @@ This is the recommended starting point for testing different target hardware. It
 * An ESP-IDF (ESP32) application that registers wifi and communicates.
 * An Arduino (ESP32) sketch using the Arduino wrapper client.
 
-👉 **Get Started:** Follow the detailed setup instructions in [project_1/README.md](project_1/README.md).
-
----
+**Get Started:** Follow the detailed setup instructions in [project_1/README.md](project_1/README.md).
 
 ## 2. Secure Telemetry Demo (`secure_telemetry`)
 
@@ -51,8 +47,6 @@ cd sdk/python
 uv run python ../../examples/secure_telemetry/client.py
 ```
 
----
-
 ## 3. Minimal Python Client & Server (`python_client` & `python_server`)
 
 These directories contain standalone, minimal client and server implementations. They are perfect references for embedding USMP into your custom Python backends or scripts.
@@ -70,8 +64,6 @@ uv run python ../../examples/python_server/server.py
 cd sdk/python
 uv run python ../../examples/python_client/client.py
 ```
-
----
 
 ## Notes on Key Setup and Security
 

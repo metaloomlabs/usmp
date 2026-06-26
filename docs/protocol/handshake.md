@@ -1,263 +1,199 @@
-# USMP Handshake Specification & Implementation
+# USMP Handshake: Setting Up a Secure Session
 
-The USMP handshake establishes a mutually authenticated, encrypted session using ephemeral Curve25519 (ECDH) key exchange and Pre-Shared Key (PSK) authentication. It completes in **4 messages** and takes approximately **200ms** on an ESP32.
+The USMP handshake is where the magic starts. It is a mutually authenticated, forward-secret exchange that establishes a secure tunnel in **4 messages**. On a standard ESP32, the entire process takes about **200ms** to complete.
 
-```
+Here is the high-level choreographic sequence:
+
+```text
 Client (ESP32 / Arduino)                        Server (Python Gateway)
       │                                                   │
-      │─────────────── PKT_HELLO (0x01) ─────────────────▶│
+      │─────────────── 1. PKT_HELLO (0x01) ──────────────▶│
       │           [device_id(6) || pub_C(32)]             │
       │                                                   │
-      │◀────────────── PKT_CHALLENGE (0x02) ──────────────│
+      │◀────────────── 2. PKT_CHALLENGE (0x02) ───────────│
       │             [nonce(32) || pub_S(32)]              │
       │                                                   │
-      │       [Both derive Ephemeral Session Key]         │
+      │         [Both derive session keys locally]        │
       │                                                   │
-      │─────────────── PKT_HELLO_ACK (0x03) ─────────────▶│
+      │─────────────── 3. PKT_HELLO_ACK (0x03) ──────────▶│
       │                 [hmac_client(32)]                 │
       │                                                   │
-      │◀────────────── PKT_SESSION_OK (0x04) ─────────────│
+      │◀────────────── 4. PKT_SESSION_OK (0x04) ──────────│
       │         [session_id(16) || hmac_server(32)]       │
       │                                                   │
       │═══════════════ SESSION ESTABLISHED ═══════════════│
 ```
 
----
+## A Conversational Handshake Dialogue
 
-## Step 1: PKT_HELLO (0x01)
+Let's tell the story of the handshake as a friendly dialogue between the Client and the Server:
 
-### Explanation
-The client initiates the connection by declaring its physical identity (`device_id`) and sharing its ephemeral public key (`pub_C`).
+1. **Client (`PKT_HELLO`)**: *"Hey there! I want to establish a secure session. Here is my hardware address (`device_id`) and an ephemeral public key (`pub_C`) I just generated."*
+2. **Server (`PKT_CHALLENGE`)**: *"Hi! I see you. To start, here is my own ephemeral public key (`pub_S`) along with a random value (`nonce`) we'll use to mix up our keys."*
+3. **Client (`PKT_HELLO_ACK`)**: *"Awesome. I've computed our shared secret using Curve25519, run it through HKDF, and generated session keys. To prove I know our Pre-Shared Key (PSK), I've signed the nonce and our public keys with an HMAC. Here it is!"*
+4. **Server (`PKT_SESSION_OK`)**: *"Looks perfect! I've checked your HMAC proof, and it matches. To prove that I also know the PSK (so you know you're not talking to an imposter), here is my own HMAC proof along with a unique `session_id` to track our connection."*
 
-**Payload Layout (38 bytes):**
-* `0..5` (6 bytes): `device_id` - The client's unique hardware identifier (e.g. WiFi MAC address).
-* `6..37` (32 bytes): `pub_C` - Ephemeral X25519 public key generated fresh for this session.
+Now both sides are fully authenticated, they share identical symmetric session keys, and they're ready to communicate securely!
 
-### Implementation
+## Step-by-Step Packet Details
 
-#### Client-Side (C / ESP32 & Arduino)
-The client retrieves its local MAC address, generates a keypair via mbedTLS, and formats the packet payload:
-```c
-// Ephemeral key generation
-uint8_t pub_buf[65];
-size_t pub_buf_len = 0;
-mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf), 
-                         mbedtls_ctr_drbg_random, &ctr_drbg);
-uint8_t *pub_c = pub_buf + (pub_buf_len - 32);
+Let's inspect the binary layout and implementation of each handshake step.
 
-// Pack device ID and public key into payload
-usmp_packet_t pkt;
-pkt.magic = USMP_MAGIC;
-pkt.version = 1;
-pkt.type = USMP_TYPE_HELLO;
-pkt.seq = 0;
-pkt.length = 38;
-memcpy(pkt.payload, session->device_id, 6);
-memcpy(pkt.payload + 6, pub_c, 32);
+### Step 1: `PKT_HELLO` (0x01)
 
-uint16_t tx_len = 0;
-uint8_t tx_buf[512];
-usmp_build_packet(&pkt, tx_buf, &tx_len);
-transport->send(transport, tx_buf, tx_len);
-```
+The client initiates the handshake by announcing its physical hardware identity (`device_id`) and sending its ephemeral Curve25519 public key (`pub_C`).
 
-#### Server-Side (Python SDK)
-The server reads the packet, asserts the packet type/length, and resolves the pre-shared key (PSK) associated with the `device_id`:
-```python
-# Receive and unpack HELLO
-frame = await read_frame(reader, verify_crc=False)
-if frame.type != PacketType.HELLO or frame.length != 38:
-    raise HandshakeError("Invalid HELLO frame received")
+#### Payload Layout (38 bytes)
 
-device_id = frame.payload[:6]
-pub_c = frame.payload[6:38]
+* **Bytes `0..5` (6 bytes)**: `device_id` (e.g. WiFi MAC address).
+* **Bytes `6..37` (32 bytes)**: `pub_C` (ephemeral X25519 public key generated fresh for this session).
 
-# Resolve client PSK
-resolved_psk = psk.get(device_id) if isinstance(psk, dict) else psk
-if resolved_psk is None:
-    raise HandshakeError("Device ID not registered")
-```
+#### Implementation
 
----
+* **Client (C)**: Generates a temporary Curve25519 keypair and writes the packet payload:
 
-## Step 2: PKT_CHALLENGE (0x02)
+    ```c
+    uint8_t pub_buf[65];
+    size_t pub_buf_len = 0;
+    mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf), 
+                             mbedtls_ctr_drbg_random, &ctr_drbg);
+    uint8_t *pub_c = pub_buf + (pub_buf_len - 32);
 
-### Explanation
-The server responds with a random challenge (`nonce`) and its own ephemeral public key (`pub_S`).
+    usmp_packet_t pkt;
+    pkt.magic = USMP_MAGIC;
+    pkt.version = 1;
+    pkt.type = USMP_TYPE_HELLO;
+    pkt.seq = 0;
+    pkt.length = 38;
+    memcpy(pkt.payload, session->device_id, 6);
+    memcpy(pkt.payload + 6, pub_c, 32);
 
-**Payload Layout (64 bytes):**
-* `0..31` (32 bytes): `nonce` - Cryptographically secure random 32-byte number generated by the server.
-* `32..63` (32 bytes): `pub_S` - Ephemeral X25519 public key generated fresh by the server.
+    // Build and send the packet...
+    ```
 
-### Implementation
+* **Server (Python)**: Parses the HELLO frame and matches the client's `device_id` against the registered Pre-Shared Keys:
 
-#### Server-Side (Python SDK)
-The server generates its ephemeral keypair, creates the secure random nonce, and transmits the `CHALLENGE` packet:
-```python
-# Generate server ephemeral keypair
-priv_s, pub_s = generate_keypair()
+    ```python
+    frame = await read_frame(reader, verify_crc=False)
+    if frame.type != PacketType.HELLO or frame.length != 38:
+        raise HandshakeError("Invalid HELLO frame received")
 
-# Generate random nonce and send CHALLENGE
-nonce = os.urandom(32)
-await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
-```
+    device_id = frame.payload[:6]
+    pub_c = frame.payload[6:38]
+    ```
 
-#### Client-Side (C / ESP32 & Arduino)
-The client reads the challenge payload and extracts the server's public key and nonce:
-```c
-uint8_t rx_buf[512];
-int len = transport->recv(transport, rx_buf, 512);
+### Step 2: `PKT_CHALLENGE` (0x02)
 
-usmp_packet_t pkt;
-if (usmp_parse_packet(rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_CHALLENGE) {
-    // Handle handshake parsing failure
-}
+The server replies with a random challenge salt (`nonce`) and its own ephemeral public key (`pub_S`).
 
-uint8_t nonce[32];
-uint8_t pub_s[32];
-memcpy(nonce, pkt.payload, 32);
-memcpy(pub_s, pkt.payload + 32, 32);
-```
+#### Payload Layout (64 bytes)
 
----
+* **Bytes `0..31` (32 bytes)**: `nonce` (cryptographically secure random salt).
+* **Bytes `32..63` (32 bytes)**: `pub_S` (server's ephemeral X25519 public key).
 
-## Ephemeral Key Derivation (ECDH & HKDF)
+#### Implementation
 
-### Explanation
-Both sides combine the public keys and nonces to derive a shared session key using X25519 ECDH and HKDF-SHA256. The session key is never transmitted on the wire.
+* **Server (Python)**: Generates a server X25519 keypair and random nonce:
 
-```
-shared_secret = X25519(priv_local, pub_peer)
-session_key   = HKDF-SHA256(ikm=shared_secret, salt=nonce, info="usmp-v1" || pub_C || pub_S, len=32)
-```
+    ```python
+    priv_s, pub_s = generate_keypair()
+    nonce = os.urandom(32)
+    await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
+    ```
+
+* **Client (C)**: Extracts the nonce and server public key from the received packet:
+
+    ```c
+    uint8_t nonce[32];
+    uint8_t pub_s[32];
+    memcpy(nonce, pkt.payload, 32);
+    memcpy(pub_s, pkt.payload + 32, 32);
+    ```
+
+### Key Derivation (ECDH & HKDF)
+
+Before proceeding, both sides combine their private keys with the other side's public key to compute a Curve25519 shared secret. They run this secret through HKDF-SHA256:
+
+$$\text{shared\_secret} = \text{X25519}(\text{priv\_local}, \text{pub\_peer})$$
+
+$$\text{session\_key} = \text{HKDF-SHA256}(\text{ikm}=\text{shared\_secret}, \text{salt}=\text{nonce}, \text{info}=\text{"usmp-v1"} \parallel \text{pub\_C} \parallel \text{pub\_S}, \text{len}=32)$$
 
 > [!TIP]
-> **Why mix public keys into info?**
-> Binding both `pub_C` and `pub_S` to the HKDF `info` parameter ensures the resulting key is uniquely tied to this specific key exchange, protecting against unknown key-share and replay/man-in-the-middle exploits.
+> **Why bind the public keys to the HKDF `info` block?**
+> By including `pub_C` and `pub_S` in the HKDF info block, the derived session key is cryptographically tied to this specific key exchange. This protects the protocol from unknown key-share exploits.
 
-### Implementation
+### Step 3: `PKT_HELLO_ACK` (0x03)
 
-#### Client-Side (C / ESP32 & Arduino)
-```c
-// Load server public key and compute Curve25519 shared secret
-uint8_t peer_buf[33] = {32};
-memcpy(peer_buf + 1, pub_s, 32);
-mbedtls_ecdh_read_public(&ecdh, peer_buf, 33);
+The client authenticates itself by sending an HMAC proof. To prevent Man-in-the-Middle (MITM) key-swapping, the HMAC is computed over the challenge `nonce`, `device_id`, and **both public keys** (`pub_C` and `pub_S`).
 
-uint8_t shared_secret[32];
-size_t shared_len = 0;
-mbedtls_ecdh_calc_secret(&ecdh, &shared_len, shared_secret, 32, 
-                         mbedtls_ctr_drbg_random, &ctr_drbg);
+#### Payload Layout (32 bytes)
 
-// Derive session key using HKDF-SHA256
-uint8_t info[7 + 32 + 32];
-memcpy(info, "usmp-v1", 7);
-memcpy(info + 7, pub_c, 32);
-memcpy(info + 7 + 32, pub_s, 32);
+* **Bytes `0..31` (32 bytes)**: `hmac_client` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{device\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
 
-mbedtls_hkdf(mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 
-             nonce, 32, 
-             shared_secret, shared_len, 
-             info, sizeof(info), 
-             session->session_key, 32);
-```
+#### Implementation
 
-#### Server-Side (Python SDK)
-```python
-# Derive key from private key, client public key, and parameters
-session_key = derive_session_key(priv_s, pub_c, nonce, pub_c, pub_s)
-```
+* **Client (C)**: Concatenates parameters and computes the client HMAC:
 
----
+    ```c
+    uint8_t hmac_client[32];
+    uint8_t input[32 + 6 + 32 + 32];
+    memcpy(input, nonce, 32);
+    memcpy(input + 32, session->device_id, 6);
+    memcpy(input + 32 + 6, pub_c, 32);
+    memcpy(input + 32 + 6 + 32, pub_s, 32);
 
-## Step 3: PKT_HELLO_ACK (0x03)
+    compute_hmac(psk, psk_len, input, sizeof(input), hmac_client);
+    ```
 
-### Explanation
-The client verifies itself to the server by calculating an HMAC-SHA256 over the challenge `nonce` and its `device_id` using the pre-shared key (PSK).
+* **Server (Python)**: Computes the expected HMAC locally and performs a constant-time comparison to verify:
 
-**Payload Layout (32 bytes):**
-* `0..31` (32 bytes): `hmac_client` - `HMAC-SHA256(PSK, nonce || device_id)`
+    ```python
+    expected_client = _compute_hmac(resolved_psk, nonce, device_id, pub_c, pub_s)
+    if not hmac.compare_digest(expected_client, frame.payload):
+        raise AuthError("Client HMAC verification failed")
+    ```
 
-### Implementation
+### Step 4: `PKT_SESSION_OK` (0x04)
 
-#### Client-Side (C / ESP32 & Arduino)
-```c
-uint8_t hmac_client[32];
-uint8_t input[32 + 6];
-memcpy(input, nonce, 32);
-memcpy(input + 32, session->device_id, 6);
+The server authenticates itself by sending back a unique `session_id` and a server HMAC proof computed over the `nonce`, `session_id`, and both public keys.
 
-compute_hmac(psk, psk_len, input, sizeof(input), hmac_client);
+#### Payload Layout (48 bytes)
 
-// Send HELLO_ACK packet
-pkt.type = USMP_TYPE_HELLO_ACK;
-pkt.length = 32;
-memcpy(pkt.payload, hmac_client, 32);
-// ... build and transmit frame
-```
+* **Bytes `0..15` (16 bytes)**: `session_id` (cryptographically random session identifier).
+* **Bytes `16..47` (32 bytes)**: `hmac_server` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{session\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
 
-#### Server-Side (Python SDK)
-The server recalculates the expected HMAC and compares it to the incoming payload using a constant-time comparison:
-```python
-# Receive HELLO_ACK
-frame = await read_frame(reader, verify_crc=False)
-if frame.type != PacketType.HELLO_ACK or frame.length != 32:
-    raise HandshakeError("Expected HELLO_ACK")
+#### Implementation
 
-# Verify Client HMAC
-expected_client = _compute_hmac(resolved_psk, nonce, device_id)
-if not hmac.compare_digest(expected_client, frame.payload):
-    raise AuthError("Client HMAC verification failed")
-```
+* **Server (Python)**: Generates a session ID, computes the HMAC proof, and transmits:
 
----
+    ```python
+    session_id = os.urandom(16)
+    hmac_server = _compute_hmac(resolved_psk, nonce, session_id, pub_c, pub_s)
+    await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
+    ```
 
-## Step 4: PKT_SESSION_OK (0x04)
+* **Client (C)**: Computes the expected server HMAC and performs a constant-time memory comparison (`mbedtls_ct_memcmp`) to verify:
 
-### Explanation
-The server authenticates itself to the client by generating a random `session_id` and sending its own HMAC proof computed over the `nonce` and the `session_id`.
+    ```c
+    uint8_t session_id[16];
+    uint8_t hmac_server_received[32];
+    // ... unpack payload
 
-**Payload Layout (48 bytes):**
-* `0..15` (16 bytes): `session_id` - Cryptographically random 16-byte session identifier.
-* `16..47` (32 bytes): `hmac_server` - `HMAC-SHA256(PSK, nonce || session_id)`
+    uint8_t hmac_server_expected[32];
+    uint8_t input[32 + 16 + 32 + 32];
+    // input = nonce(32) || session_id(16) || pub_c(32) || pub_s(32)
+    memcpy(input, nonce, 32);
+    memcpy(input + 32, session_id, 16);
+    memcpy(input + 32 + 16, pub_c, 32);
+    memcpy(input + 32 + 16 + 32, pub_s, 32);
+    compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected);
 
-### Implementation
+    if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, 32) != 0) {
+        USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
+        // Close transport and exit...
+    }
+    ```
 
-#### Server-Side (Python SDK)
-```python
-# Generate session ID and calculate server HMAC proof
-session_id = os.urandom(16)
-hmac_server = _compute_hmac(resolved_psk, nonce, session_id)
-
-# Transmit SESSION_OK
-await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
-```
-
-#### Client-Side (C / ESP32 & Arduino)
-The client parses the message and verifies the server's identity using constant-time comparison (`mbedtls_ct_memcmp`) to prevent timing attacks:
-```c
-len = transport->recv(transport, rx_buf, 512);
-usmp_parse_packet(rx_buf, len, &pkt);
-
-if (pkt.type != USMP_TYPE_SESSION_OK || pkt.length != 48) {
-    // Handle handshake error
-}
-
-uint8_t session_id[16];
-uint8_t hmac_server_received[32];
-memcpy(session_id, pkt.payload, 16);
-memcpy(hmac_server_received, pkt.payload + 16, 32);
-
-// Calculate expected server HMAC
-uint8_t hmac_server_expected[32];
-uint8_t input[32 + 16];
-memcpy(input, nonce, 32);
-memcpy(input + 32, session_id, 16);
-compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected);
-
-// Constant-time compare
-if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, 32) != 0) {
-    USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
-    // Tear down connection
-}
-```
+> [!IMPORTANT]
+> **Constant-Time Verification**
+> Both sides MUST perform constant-time comparisons (`hmac.compare_digest` in Python, `mbedtls_ct_memcmp` in C) when validating handshakes. Traditional string or buffer comparisons exit early upon finding the first mismatching byte, exposing the handshake to timing attacks.
