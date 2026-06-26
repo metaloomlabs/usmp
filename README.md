@@ -260,10 +260,11 @@ bool usmp_is_connected(const usmp_t *ctx);
 ### Data
 
 ```c
-// Send encrypted data (max USMP_MAX_DATA_LEN = 464 bytes)
+// Send encrypted data. Supports dynamic fragmentation up to 4 frames (~1.8 KB total).
+// Single frame limit (USMP_MAX_DATA_LEN) is 452 bytes.
 int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
 
-// Receive and decrypt data
+// Receive and decrypt data (optionally reassembled from multiple fragments)
 int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
 ```
 

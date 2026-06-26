@@ -80,52 +80,68 @@ int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len) {
   if (!ctx || !ctx->established)
     return -1;
 
+  if (len > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES) {
+    USMP_LOGE(TAG, "Payload too large for fragmentation limits");
+    return -1;
+  }
+
+  uint16_t offset = 0;
   char _msg[64];
-  usmp_packet_t pkt;
-  memset(&pkt, 0, sizeof(pkt));
 
-  pkt.magic   = USMP_MAGIC;
-  pkt.version = 1;
-  pkt.type    = USMP_TYPE_DATA;
-  pkt.seq     = ctx->tx_seq;
+  while (offset < len || len == 0) {
+    uint16_t chunk_len = len - offset;
+    if (chunk_len > USMP_MAX_DATA_LEN) {
+      chunk_len = USMP_MAX_DATA_LEN;
+    }
 
-  /*
-   * Encrypted payload length: nonce(12) + plaintext(len) + tag(16)
-   * The nonce is generated inside usmp_gcm_encrypt() and prepended.
-   */
-  uint16_t enc_length = 12 + len + USMP_GCM_TAG_LEN;
-  uint8_t aad[10];
-  build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
+    usmp_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
 
-  uint8_t nonce[USMP_GCM_NONCE_LEN];
-  nonce[0] = pkt.seq & 0xFF;
-  nonce[1] = (pkt.seq >> 8) & 0xFF;
-  nonce[2] = (pkt.seq >> 16) & 0xFF;
-  nonce[3] = (pkt.seq >> 24) & 0xFF;
-  memcpy(nonce + 4, ctx->session_id, 8);
+    pkt.magic   = USMP_MAGIC;
+    pkt.version = 1;
+    pkt.type    = (offset + chunk_len < len) ? USMP_TYPE_DATA_FRAG : USMP_TYPE_DATA;
+    pkt.seq     = ctx->tx_seq;
 
-  size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad),
-                       data, len, pkt.payload, &out_len) != 0) {
-    USMP_LOGE(TAG, "Encryption failed");
-    return -1;
+    uint16_t enc_length = 12 + chunk_len + USMP_GCM_TAG_LEN;
+    uint8_t aad[10];
+    build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
+
+    uint8_t nonce[USMP_GCM_NONCE_LEN];
+    nonce[0] = pkt.seq & 0xFF;
+    nonce[1] = (pkt.seq >> 8) & 0xFF;
+    nonce[2] = (pkt.seq >> 16) & 0xFF;
+    nonce[3] = (pkt.seq >> 24) & 0xFF;
+    memcpy(nonce + 4, ctx->session_id, 8);
+
+    size_t out_len = 0;
+    if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad),
+                         data + offset, chunk_len, pkt.payload, &out_len) != 0) {
+      USMP_LOGE(TAG, "Encryption failed");
+      return -1;
+    }
+
+    pkt.length = (uint16_t)out_len;
+
+    uint8_t tx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
+    uint16_t tx_len = 0;
+    usmp_build_packet(&pkt, tx_buf, &tx_len);
+
+    if (ctx->transport.send(&ctx->transport, tx_buf, tx_len) < 0) {
+      USMP_LOGE(TAG, "Send failed");
+      return -1;
+    }
+
+    snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u type=0x%02x", (unsigned long)ctx->tx_seq, chunk_len, pkt.type);
+    USMP_LOGI(TAG, _msg);
+
+    ctx->tx_seq++;
+    offset += chunk_len;
+
+    if (len == 0) {
+      break;
+    }
   }
 
-  pkt.length = (uint16_t)out_len;
-
-  uint8_t tx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
-  uint16_t tx_len = 0;
-  usmp_build_packet(&pkt, tx_buf, &tx_len);
-
-  if (ctx->transport.send(&ctx->transport, tx_buf, tx_len) < 0) {
-    USMP_LOGE(TAG, "Send failed");
-    return -1;
-  }
-
-  snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u", (unsigned long)ctx->tx_seq, len);
-  USMP_LOGI(TAG, _msg);
-
-  ctx->tx_seq++;
   ctx->last_tx_ms = usmp_port_millis();
   return 0;
 }
@@ -139,14 +155,9 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
   usmp_packet_t pkt;
   uint8_t dummy_out[32]; // large enough for nonce+tag of empty plaintext
 
-  /*
-   * Iterative PING/PONG/BYE handling.
-   *
-   * The original implementation used tail-recursion here, which could
-   * overflow the stack on Arduino if a peer sends many consecutive
-   * control frames. We replace this with a bounded loop capped at
-   * USMP_MAX_CTRL_FRAMES iterations.
-   */
+  uint16_t bytes_written = 0;
+  uint8_t frame_count = 0;
+
   for (int ctrl_count = 0; ; ) {
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
     if (len < 0) {
@@ -167,14 +178,25 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
       return -1;
     }
 
-    /* Choose output buffer: control frames go to dummy, DATA goes to caller */
-    uint8_t *dec_dest = out;
-    uint16_t dec_max  = max_len;
-    if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING ||
-        pkt.type == USMP_TYPE_BYE) {
+    /* Choose output buffer and max length for decryption */
+    uint8_t *dec_dest = NULL;
+    uint16_t dec_max = 0;
+
+    if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING || pkt.type == USMP_TYPE_BYE) {
+      if (bytes_written > 0) {
+        USMP_LOGE(TAG, "Protocol error: control frame during fragmentation");
+        return -1;
+      }
       dec_dest = dummy_out;
       dec_max  = sizeof(dummy_out);
-    } else if (pkt.type != USMP_TYPE_DATA) {
+    } else if (pkt.type == USMP_TYPE_DATA || pkt.type == USMP_TYPE_DATA_FRAG) {
+      dec_dest = out + bytes_written;
+      if (max_len < bytes_written) {
+        USMP_LOGE(TAG, "Buffer overflow sanity check failed");
+        return -1;
+      }
+      dec_max  = max_len - bytes_written;
+    } else {
       snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
       USMP_LOGE(TAG, _msg);
       return -1;
@@ -210,7 +232,7 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
 
     ctx->rx_seq++;
 
-    /* Handle control frames and loop back for the next DATA frame */
+    /* Handle control frames and loop back for the next frame */
     if (pkt.type == USMP_TYPE_PONG) {
       USMP_LOGI(TAG, "PONG received");
       if (++ctrl_count >= USMP_MAX_CTRL_FRAMES) {
@@ -244,11 +266,24 @@ int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len) {
       return -1;
     }
 
-    /* DATA frame — return to caller */
-    snprintf(_msg, sizeof(_msg), "RX seq=%lu len=%d",
-             (unsigned long)pkt.seq, (int)out_len);
-    USMP_LOGI(TAG, _msg);
-    return (int)out_len;
+    /* It's a DATA or DATA_FRAG frame */
+    bytes_written += (uint16_t)out_len;
+    frame_count++;
+
+    if (pkt.type == USMP_TYPE_DATA) {
+      /* Reassembly complete */
+      snprintf(_msg, sizeof(_msg), "RX total len=%u frames=%u", bytes_written, frame_count);
+      USMP_LOGI(TAG, _msg);
+      return bytes_written;
+    }
+
+    /* It was a DATA_FRAG frame. Verify we haven't hit the frame limit */
+    if (frame_count >= USMP_MAX_FRAMES) {
+      USMP_LOGE(TAG, "Protocol error: exceeded max fragments limit");
+      return -1;
+    }
+
+    /* Loop back to read the next fragment immediately */
   }
 }
 

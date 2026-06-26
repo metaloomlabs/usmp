@@ -39,16 +39,20 @@ async def server_handshake(
     Returns SessionInfo on success, raises HandshakeError on failure.
     """
     addr = writer.get_extra_info("peername")
-    ip = addr[0] if addr else None
+    if addr and isinstance(addr, tuple):
+        limiter_key = addr[0]
+    elif addr:
+        limiter_key = str(addr)
+    else:
+        limiter_key = f"conn_{id(writer)}"
 
-    if ip:
-        now = time.monotonic()
-        entry = _failed_handshakes.get(ip)
-        if entry:
-            _, lockout_until, _ = entry
-            if lockout_until > now:
-                remaining = lockout_until - now
-                raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
+    now = time.monotonic()
+    entry = _failed_handshakes.get(limiter_key)
+    if entry:
+        _, lockout_until, _ = entry
+        if lockout_until > now:
+            remaining = lockout_until - now
+            raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
 
     try:
         # ── Step 1: Receive HELLO [device_id(6) || pub_C(32)] ────────────────────
@@ -109,8 +113,8 @@ async def server_handshake(
         hmac_server = _compute_hmac(resolved_psk, nonce, session_id, pub_c, pub_s)
         await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
-        if ip in _failed_handshakes:
-            del _failed_handshakes[ip]
+        if limiter_key in _failed_handshakes:
+            del _failed_handshakes[limiter_key]
 
         return SessionInfo(
             device_id=device_id,
@@ -119,30 +123,35 @@ async def server_handshake(
         )
 
     except Exception:
-        if ip:
-            now = time.monotonic()
-            entry = _failed_handshakes.get(ip)
-            if entry:
-                fails, lockout_until, _ = entry
-            else:
-                fails, lockout_until = 0, 0.0
+        now = time.monotonic()
+        entry = _failed_handshakes.get(limiter_key)
+        if entry:
+            fails, lockout_until, _ = entry
+        else:
+            fails, lockout_until = 0, 0.0
 
-            fails += 1
-            if fails >= 5:
-                # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
-                backoff = min(60.0, 2.0 ** (fails - 5))
-                lockout_until = now + backoff
-            else:
-                lockout_until = 0.0
-            _failed_handshakes[ip] = (fails, lockout_until, now)
+        fails += 1
+        if fails >= 5:
+            # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
+            backoff = min(60.0, 2.0 ** (fails - 5))
+            lockout_until = now + backoff
+        else:
+            lockout_until = 0.0
 
-            # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
-            expired_ips = [
-                k for k, v in _failed_handshakes.items()
-                if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
-            ]
-            for expired_ip in expired_ips:
-                del _failed_handshakes[expired_ip]
+        # Cap dictionary size to 1000 to prevent memory growth DoS
+        if len(_failed_handshakes) >= 1000 and limiter_key not in _failed_handshakes:
+            oldest_key = min(_failed_handshakes.keys(), key=lambda k: _failed_handshakes[k][2])
+            del _failed_handshakes[oldest_key]
+
+        _failed_handshakes[limiter_key] = (fails, lockout_until, now)
+
+        # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
+        expired_keys = [
+            k for k, v in _failed_handshakes.items()
+            if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
+        ]
+        for expired_key in expired_keys:
+            del _failed_handshakes[expired_key]
         raise
 
 

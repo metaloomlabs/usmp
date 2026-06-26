@@ -282,8 +282,8 @@ void app_main(void)
         // 1. Non-blocking RX Check: poll transport for incoming data
         if (ctx.transport.available && ctx.transport.available(&ctx.transport) > 0)
         {
-            uint8_t rx_buf[USMP_MAX_DATA_LEN + 1];
-            int bytes_read = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN);
+            uint8_t rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES + 1];
+            int bytes_read = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
             if (bytes_read > 0)
             {
                 rx_buf[bytes_read] = '\0';

@@ -18,11 +18,13 @@ extern "C" {
 #define USMP_TYPE_PING 0x06
 #define USMP_TYPE_PONG 0x07
 #define USMP_TYPE_BYE 0x08
+#define USMP_TYPE_DATA_FRAG 0x09
 #define USMP_TYPE_ERROR 0xFF // Unused (reserved for future error reporting)
 
 // Frame sizes
 #define USMP_HEADER_SIZE 12
 #define USMP_MAX_PAYLOAD 480 // matches Python SDK
+#define USMP_MAX_FRAMES 4
 #define USMP_GCM_TAG_LEN 16
 
 // Packet struct
