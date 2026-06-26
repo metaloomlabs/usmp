@@ -6,9 +6,16 @@ import time
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, SequenceError, PayloadError
+from .errors import ConnectionClosedError, PayloadError, SequenceError
 from .errors import TimeoutError as USMPTimeoutError
-from .types import USMP_MAGIC, USMP_VERSION, PacketType, SessionInfo, USMP_MAX_DATA_LEN, USMP_MAX_FRAMES
+from .types import (
+    USMP_MAGIC,
+    USMP_MAX_DATA_LEN,
+    USMP_MAX_FRAMES,
+    USMP_VERSION,
+    PacketType,
+    SessionInfo,
+)
 
 
 class USMPSession:
@@ -42,7 +49,8 @@ class USMPSession:
         """Encrypt and send data frames, dynamically fragmenting if necessary."""
         if len(data) > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES:
             raise PayloadError(
-                f"Payload too large for fragmentation limits: {len(data)} bytes, max {USMP_MAX_DATA_LEN * USMP_MAX_FRAMES}"
+                f"Payload too large for fragmentation limits: {len(data)} bytes, "
+                f"max {USMP_MAX_DATA_LEN * USMP_MAX_FRAMES}"
             )
 
         offset = 0
@@ -111,7 +119,9 @@ class USMPSession:
                     await self._send_pong()
                     ctrl_count += 1
                     if ctrl_count >= 8:
-                        raise ConnectionClosedError("Too many consecutive control frames received consecutively")
+                        raise ConnectionClosedError(
+                            "Too many consecutive control frames received"
+                        )
                     continue
 
                 if frame.type == PacketType.PONG:
@@ -119,7 +129,9 @@ class USMPSession:
                         raise SequenceError("Protocol error: PONG received during fragmentation")
                     ctrl_count += 1
                     if ctrl_count >= 8:
-                        raise ConnectionClosedError("Too many consecutive control frames received consecutively")
+                        raise ConnectionClosedError(
+                            "Too many consecutive control frames received"
+                        )
                     continue
 
                 if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):

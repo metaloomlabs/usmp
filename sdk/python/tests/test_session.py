@@ -61,7 +61,7 @@ async def test_fragmented_message():
     # 1000 bytes needs 3 frames (452 + 452 + 96)
     large_payload = b"A" * 1000
     await client_session.send(large_payload)
-    
+
     # Allow background tasks to run and read the stream
     received = await server_session.recv()
     assert received == large_payload
@@ -84,17 +84,18 @@ async def test_fragmentation_limit_exceeded():
 
 async def test_control_frame_during_fragmentation():
     server_session, client_session = await _connected_pair()
-    from usmp.types import PacketType, USMP_VERSION, USMP_MAGIC
-    from usmp._frame import write_frame
-    from usmp.errors import SequenceError
-    import pytest
-
     # We will simulate a manual write on the writer to inject a PING in between
     # But wait, a simple way is just to manually construct a bad sequence:
     # We will send a DATA_FRAG first, then a PING.
     import struct
+
+    import pytest
+
     from usmp._crypto import encrypt
-    
+    from usmp._frame import write_frame
+    from usmp.errors import SequenceError
+    from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
+
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]
     ciphertext = encrypt(
@@ -108,7 +109,7 @@ async def test_control_frame_during_fragmentation():
     )
     await write_frame(client_session._writer, PacketType.DATA_FRAG, ciphertext, seq=seq)
     client_session._info.tx_seq += 1
-    
+
     # Now send a PING instead of the expected DATA
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]

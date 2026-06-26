@@ -172,10 +172,12 @@ async def test_wrong_psk_server_rejected():
 
 
 async def test_rate_limiter_non_ip_fallback():
+    from unittest.mock import Mock
+
+    import pytest
+
     from usmp._handshake import _failed_handshakes, server_handshake
     from usmp.errors import HandshakeError
-    import pytest
-    from unittest.mock import Mock
 
     _failed_handshakes.clear()
 
@@ -199,9 +201,11 @@ async def test_rate_limiter_non_ip_fallback():
 
 
 async def test_rate_limiter_table_capping():
-    from usmp._handshake import _failed_handshakes, server_handshake
-    import pytest
     from unittest.mock import Mock
+
+    import pytest
+
+    from usmp._handshake import _failed_handshakes, server_handshake
 
     _failed_handshakes.clear()
 
