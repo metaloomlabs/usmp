@@ -17,6 +17,7 @@ examples/
 ## 1. Unified Multi-Platform Demo (`project_1`)
 
 This is the recommended starting point for testing different target hardware. It contains:
+
 * A python gateway/echo server.
 * An ESP-IDF (ESP32) application that registers wifi and communicates.
 * An Arduino (ESP32) sketch using the Arduino wrapper client.
@@ -27,19 +28,24 @@ This is the recommended starting point for testing different target hardware. It
 
 ## 2. Secure Telemetry Demo (`secure_telemetry`)
 
-This example demonstrates sending structured sensor readings (temperature and humidity) serialized as JSON payloads inside the encrypted GCM channel. 
+This example demonstrates sending structured sensor readings (temperature and humidity) serialized as JSON payloads inside the encrypted GCM channel.
+
 * **Dynamic Interval Adjustment:** The server responds with command/control parameters, instructing the client to adjust its telemetry rate.
 * **Premium Dashboard Format:** The server prints incoming readings in a colored terminal status box.
 
 ### Run the Server
+
 In one terminal, run:
+
 ```bash
 cd sdk/python
 uv run python ../../examples/secure_telemetry/server.py
 ```
 
 ### Run the Client
+
 In a second terminal, run:
+
 ```bash
 cd sdk/python
 uv run python ../../examples/secure_telemetry/client.py
@@ -52,12 +58,14 @@ uv run python ../../examples/secure_telemetry/client.py
 These directories contain standalone, minimal client and server implementations. They are perfect references for embedding USMP into your custom Python backends or scripts.
 
 ### Run the Server
+
 ```bash
 cd sdk/python
 uv run python ../../examples/python_server/server.py
 ```
 
 ### Run the Client
+
 ```bash
 cd sdk/python
 uv run python ../../examples/python_client/client.py
@@ -71,8 +79,9 @@ All development examples are preconfigured with the development PSK:
 `usmp-dev-psk-change-me-before-prod`
 
 > [!WARNING]
-> This key is public and must **never** be used in production firmware or servers. 
+> This key is public and must **never** be used in production firmware or servers.
 > To generate a secure key for production deployments:
+>
 > ```bash
 > python -c "import secrets; print(secrets.token_hex(32))"
 > ```

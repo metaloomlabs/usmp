@@ -477,4 +477,3 @@ Apache License 2.0 - see [LICENSE](LICENSE)
   <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
   Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>
 </p>
-
