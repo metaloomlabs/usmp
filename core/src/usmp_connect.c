@@ -136,6 +136,6 @@ void usmp_close(usmp_t *ctx) {
 }
 
 const char* usmp_get_version(void) {
-  return "0.4.4";
+  return "0.4.7";
 }
 

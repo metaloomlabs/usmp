@@ -1,4 +1,4 @@
-version: "0.4.4"
+version: "0.4.7"
 description: >
   USMP — Unified Secure Multi-transport Protocol. Mutually authenticated,
   AES-256-GCM encrypted sessions for ESP32 over TCP. No TLS stack required.
