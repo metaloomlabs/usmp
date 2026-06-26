@@ -13,6 +13,7 @@ class PacketType(IntEnum):
     PING = 0x06
     PONG = 0x07
     BYE = 0x08
+    DATA_FRAG = 0x09
     ERROR = 0xFF
 
 
@@ -31,6 +32,7 @@ USMP_MAGIC = 0xABCD
 USMP_VERSION = 0x01
 USMP_HEADER_SIZE = 12  # magic(2)+ver(1)+type(1)+seq(4)+len(2)+crc(2)
 USMP_MAX_PAYLOAD = 480  # max payload bytes (keeps total frame under 512)
+USMP_MAX_FRAMES = 4  # default maximum fragments per message
 USMP_TAG_LEN = 16  # AES-GCM tag length
 USMP_NONCE_LEN = 32  # handshake nonce length
 USMP_DEVICE_ID_LEN = 6  # MAC address length
@@ -39,6 +41,7 @@ USMP_HMAC_LEN = 32  # HMAC-SHA256 output length
 USMP_SESSION_ID_LEN = 16  # session ID length
 USMP_SESSION_KEY_LEN = 32  # AES-256 key length
 USMP_GCM_NONCE_LEN = 12  # AES-GCM nonce length
+USMP_MAX_DATA_LEN = USMP_MAX_PAYLOAD - USMP_TAG_LEN - USMP_GCM_NONCE_LEN  # 452 bytes
 
 
 @dataclass

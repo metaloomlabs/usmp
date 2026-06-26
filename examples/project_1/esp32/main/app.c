@@ -8,7 +8,6 @@
 #include "usmp_transport.h"
 #include "wifi.h"
 
-
 static const char* TAG = "APP";
 
 void app_main(void) {
@@ -66,8 +65,8 @@ void app_main(void) {
 
     // Read incoming messages if available
     if (ctx.transport.available && ctx.transport.available(&ctx.transport) > 0) {
-      uint8_t rx_buf[USMP_MAX_DATA_LEN + 1];
-      int n = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN);
+      uint8_t rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES + 1];
+      int n = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
       if (n > 0) {
         rx_buf[n] = '\0';
         ESP_LOGI(TAG, "RX: %s", (char*)rx_buf);

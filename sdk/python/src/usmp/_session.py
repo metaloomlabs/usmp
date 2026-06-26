@@ -6,9 +6,9 @@ import time
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, SequenceError
+from .errors import ConnectionClosedError, SequenceError, PayloadError
 from .errors import TimeoutError as USMPTimeoutError
-from .types import USMP_MAGIC, USMP_VERSION, PacketType, SessionInfo
+from .types import USMP_MAGIC, USMP_VERSION, PacketType, SessionInfo, USMP_MAX_DATA_LEN, USMP_MAX_FRAMES
 
 
 class USMPSession:
@@ -39,27 +39,46 @@ class USMPSession:
         return self._info.session_id_str
 
     async def send(self, data: bytes) -> None:
-        """Encrypt and send a DATA frame."""
-        seq = self._info.tx_seq
-        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
-        ciphertext = encrypt(
-            key=self._info.session_key,
-            nonce=nonce,
-            seq=seq,
-            type_=int(PacketType.DATA),
-            version=USMP_VERSION,
-            magic=USMP_MAGIC,
-            plaintext=data,
-        )
-        await write_frame(self._writer, PacketType.DATA, ciphertext, seq=seq)
-        self._info.tx_seq += 1
+        """Encrypt and send data frames, dynamically fragmenting if necessary."""
+        if len(data) > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES:
+            raise PayloadError(
+                f"Payload too large for fragmentation limits: {len(data)} bytes, max {USMP_MAX_DATA_LEN * USMP_MAX_FRAMES}"
+            )
+
+        offset = 0
+        while offset < len(data) or len(data) == 0:
+            chunk = data[offset : offset + USMP_MAX_DATA_LEN]
+            is_frag = (offset + len(chunk) < len(data))
+            packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
+
+            seq = self._info.tx_seq
+            nonce = struct.pack("<I", seq) + self._info.session_id[:8]
+            ciphertext = encrypt(
+                key=self._info.session_key,
+                nonce=nonce,
+                seq=seq,
+                type_=int(packet_type),
+                version=USMP_VERSION,
+                magic=USMP_MAGIC,
+                plaintext=chunk,
+            )
+            await write_frame(self._writer, packet_type, ciphertext, seq=seq)
+            self._info.tx_seq += 1
+            offset += len(chunk)
+
+            if len(data) == 0:
+                break
 
     async def recv(self, timeout: float | None = None) -> bytes:
-        """Receive and decrypt a DATA frame. Transparently handles inbound PING/PONG."""
+        """Receive and decrypt data, reassembling fragmented packets if necessary."""
         effective_timeout = timeout if timeout is not None else self._recv_timeout
 
         async def _recv_internal() -> bytes:
-            for _ in range(8):
+            assembled_payload = bytearray()
+            frame_count = 0
+            ctrl_count = 0
+
+            while True:
                 frame = await read_frame(self._reader)
                 self._last_recv = time.monotonic()
 
@@ -82,21 +101,38 @@ class USMPSession:
                 self._info.rx_seq += 1
 
                 if frame.type == PacketType.BYE:
+                    if len(assembled_payload) > 0:
+                        raise SequenceError("Protocol error: BYE received during fragmentation")
                     raise ConnectionClosedError("Remote sent BYE")
 
                 if frame.type == PacketType.PING:
+                    if len(assembled_payload) > 0:
+                        raise SequenceError("Protocol error: PING received during fragmentation")
                     await self._send_pong()
+                    ctrl_count += 1
+                    if ctrl_count >= 8:
+                        raise ConnectionClosedError("Too many consecutive control frames received consecutively")
                     continue
 
                 if frame.type == PacketType.PONG:
+                    if len(assembled_payload) > 0:
+                        raise SequenceError("Protocol error: PONG received during fragmentation")
+                    ctrl_count += 1
+                    if ctrl_count >= 8:
+                        raise ConnectionClosedError("Too many consecutive control frames received consecutively")
                     continue
 
-                if frame.type != PacketType.DATA:
+                if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
                     raise ValueError(f"Unexpected frame type: {frame.type_name()}")
 
-                return plaintext
+                assembled_payload.extend(plaintext)
+                frame_count += 1
 
-            raise ConnectionClosedError("Too many control frames received consecutively")
+                if frame.type == PacketType.DATA:
+                    return bytes(assembled_payload)
+
+                if frame_count >= USMP_MAX_FRAMES:
+                    raise PayloadError("Protocol error: exceeded max fragments limit")
 
         if effective_timeout is not None:
             try:

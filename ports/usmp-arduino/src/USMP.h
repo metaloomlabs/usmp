@@ -41,7 +41,7 @@ private:
   void (*_on_disconnect)();
   void (*_on_reconnect)();
   void (*_on_message)(const uint8_t *data, size_t len);
-  uint8_t _rx_buf[USMP_MAX_DATA_LEN];
+  uint8_t _rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES];
   void _apply_psk();
   bool _do_reconnect();
 };
