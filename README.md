@@ -3,7 +3,7 @@
 > **Say goodbye to the "IoT Security Gap"!** USMP is a lightweight, secure, and developer-friendly protocol designed to bring end-to-end encrypted, mutually authenticated sessions to ESP32, Arduino, and Python.
 
 [![Python SDK](https://img.shields.io/pypi/v/usmp?label=usmp&color=blue)](https://pypi.org/project/usmp)
-[![Tests](https://img.shields.io/badge/tests-69%20passing-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-70%20passing-brightgreen)](#testing)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.3%2B-blue)](#esp32-esp-idf)
 [![Arduino](https://img.shields.io/badge/Arduino-ESP32-teal)](#arduino)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](#license)
@@ -238,14 +238,14 @@ uv run pytest tests/ -v
 ```
 
 ```text
-======================= 69 passed in 3.42s =======================
+======================= 70 passed in 3.74s =======================
 ├── 16 API surface tests
 ├── 8  benchmark tests
 ├── 8  crypto tests
 ├── 7  frame tests
 ├── 12 handshake tests
-├── 8  integration tests (real loopback TCP)
-└── 10 session & fragmentation tests
+├── 13 integration tests (real loopback TCP)
+└── 6  session & fragmentation tests
 ```
 
 ## Repository Structure
