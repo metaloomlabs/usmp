@@ -369,3 +369,34 @@ async def test_control_frame_integrity_enforced():
 
     await _run(server, client_coro())
     assert handler.crypto_error_raised is True
+
+
+@pytest.mark.asyncio
+async def test_multi_psk_async_callable():
+    port = _free_port()
+    device_id_fixed = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
+
+    async def resolve_psk_async(dev_id: bytes) -> bytes:
+        await asyncio.sleep(0.01)
+        if dev_id == device_id_fixed:
+            return b"dynamic-psk-123"
+        return b"default-psk"
+
+    server = USMPServer(host=HOST, port=port, psk=resolve_psk_async, session_timeout=5.0)
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        data = await session.recv()
+        await session.send(data + b"-dyn-async-ok")
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=b"dynamic-psk-123", device_id=device_id_fixed)
+        await client.connect()
+        await client.send(b"hello")
+        reply = await client.recv()
+        await client.disconnect()
+        return reply
+
+    reply = await _run(server, client_coro())
+    assert reply == b"hello-dyn-async-ok"
+

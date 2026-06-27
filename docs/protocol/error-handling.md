@@ -6,16 +6,20 @@ In some network protocols, if something goes wrong, the systems will try to nego
 
 Think of our error handling rules as safety seatbelts: if they detect any abnormal movement, they lock down instantly to protect your device and your data.
 
-## The `PKT_ERROR` Frame (0xFF)
+> [!NOTE]
+> **Reserved Status of `PKT_ERROR`**
+> The `PKT_ERROR` packet type (`0xFF`) and associated binary error codes are currently **reserved** in the protocol specification for future diagnostic telemetry. In the current reference implementation, both client and server immediately close the underlying transport connection without transmitting error frames. This prevents information leakage and timing attacks that could help an attacker map our service.
 
-When one side detects a protocol violation or cryptographic failure, it attempts to tell the other side *why* it is disconnecting by sending a `PKT_ERROR` packet before closing the socket.
+## The `PKT_ERROR` Frame (0xFF) [Reserved]
+
+When supported in future versions, if one side detects a protocol violation or cryptographic failure, it will attempt to tell the other side *why* it is disconnecting by sending a `PKT_ERROR` packet before closing the socket.
 
 #### Payload Layout (3 bytes)
 
 * **Byte `0` (1 byte)**: `code` — The error code integer.
 * **Bytes `1..2` (2 bytes)**: `detail` — Optional supplementary details (u16 little-endian, such as the sequence number that caused a mismatch).
 
-### Standardized Error Codes
+### Standardized Error Codes (Reserved)
 
 | Code | Name | What it means |
 |:---|:---|:---|
@@ -33,30 +37,27 @@ Here is exactly how the client and server react to various protocol violations:
 
 | Scenario | State Machine Action | Rationale |
 |:---|:---|:---|
-| **Bad Magic Bytes** | Discard frame. Close connection instantly *without* sending `PKT_ERROR`. | If a client sends bad magic bytes, it's either a random port scanner or a corrupted stream. Sending an error frame back could help an attacker map our service. |
-| **CRC Check Mismatch** | Discard frame. Close connection instantly *without* sending `PKT_ERROR`. | Protects against line noise or packet tampering. |
-| **Wrong Protocol Version** | Send `PKT_ERROR(ERR_VERSION)` and close connection. | Helps developer debug configuration mismatch. |
-| **HMAC Signatures Mismatch** | Send `PKT_ERROR(ERR_AUTH)` and close connection. | Indicates incorrect PSK or a brute-force authentication attempt. |
-| **Sequence Number Mismatch** | Send `PKT_ERROR(ERR_SEQ)` and close connection. | Protects against replayed messages. |
-| **AES-GCM Decryption Fails** | Send `PKT_ERROR(ERR_CRYPTO)` and close connection. | Indicates key mismatch, corrupted data, or active tampering. |
-| **Timeout (No keepalives)** | Send `PKT_ERROR(ERR_TIMEOUT)` (if socket is alive) and close connection. | Clean up dead connections to free device resources. |
-| **Control Packet during Fragmentation** | Send `PKT_ERROR(ERR_SEQ)` and close connection. | Interleaving standard packets while reassembling a fragmented payload is a protocol violation. |
-| **Max Fragments Exceeded** | Send `PKT_ERROR(ERR_BAD_FRAME)` and close connection. | Plaintext payloads are capped at 452 bytes per frame, up to a maximum of 4 frames. |
+| **Bad Magic Bytes** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | If a client sends bad magic bytes, it's either a random port scanner or a corrupted stream. Sending an error frame back could help an attacker map our service. |
+| **CRC Check Mismatch** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Protects against line noise or packet tampering. |
+| **Wrong Protocol Version** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Protects against version mismatch or scan attempts. |
+| **HMAC Signatures Mismatch** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Indicates incorrect PSK or a brute-force authentication attempt. |
+| **Sequence Number Mismatch** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Protects against replayed messages. |
+| **AES-GCM Decryption Fails** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Indicates key mismatch, corrupted data, or active tampering. |
+| **Timeout (No keepalives)** | Close connection instantly without sending `PKT_ERROR`. | Clean up dead connections to free device resources. |
+| **Control Packet during Fragmentation** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Interleaving standard packets while reassembling a fragmented payload is a protocol violation. |
+| **Max Fragments Exceeded** | Discard frame. Close connection instantly without sending `PKT_ERROR`. | Plaintext payloads are capped at 452 bytes per frame, up to a maximum of 4 frames. |
 
 ## Developer Implementation
 
 ### C Client Library (ESP-IDF & Arduino)
 
-On the microcontroller, USMP logs the error code and tears down the local session context:
+On the microcontroller, USMP logs the error description and tears down the local session context:
 
 ```c
 if (pkt.seq != ctx->rx_seq) {
     USMP_LOGE(TAG, "Sequence mismatch detected!");
     
-    // Send a PKT_ERROR frame to let the server know why we are leaving
-    send_control(ctx, USMP_TYPE_ERROR);
-    
-    // Invalidate the session
+    // Invalidate the session locally; transport is closed by usmp_recv returning error
     ctx->established = false;
     return -1;
 }

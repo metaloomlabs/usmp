@@ -76,6 +76,8 @@ async def server_handshake(
                 raise HandshakeError("Device ID not registered")
         elif callable(psk):
             resolved_psk = psk(device_id)
+            if asyncio.iscoroutine(resolved_psk):
+                resolved_psk = await resolved_psk
         else:
             resolved_psk = psk
 
@@ -193,7 +195,7 @@ async def client_handshake(
     hmac_client = _compute_hmac(psk, nonce, device_id, pub_c, pub_s)
     await write_frame(writer, PacketType.HELLO_ACK, hmac_client)
 
-    # ── Step 4: Receive SESSION_OK [session_id(4) || hmac_server(32)] ────────
+    # ── Step 4: Receive SESSION_OK [session_id(16) || hmac_server(32)] ────────
     try:
         frame = await read_frame(reader, verify_crc=False)
     except asyncio.IncompleteReadError as e:

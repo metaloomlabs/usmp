@@ -38,6 +38,9 @@ void usmp_port_log(char level, const char *tag, const char *msg) {
   case 'E':
     ESP_LOGE(tag, "%s", msg);
     break;
+  case 'D':
+    ESP_LOGD(tag, "%s", msg);
+    break;
   default:
     ESP_LOGI(tag, "%s", msg);
     break;

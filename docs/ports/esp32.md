@@ -49,13 +49,14 @@ if (usmp_connect(&ctx, &transport) == 0) {
 
 ## Memory Footprint & Stack Allocation
 
-USMP is designed from the ground up for embedded environments with strict memory constraints. It requires **zero heap allocations** at runtime!
+USMP is designed from the ground up for embedded environments with strict memory constraints. It requires **zero heap allocations** once the session is established! (The handshake phase uses transient heap memory for negotiation buffers and mbedTLS contexts, which are completely freed before the handshake returns.)
 
 | Context / Phase | RAM Consumption | Lifetime |
 |:---|:---|:---|
 | **`usmp_t` Session Context** | ~108 bytes | Persistent (lives as long as the session is open). |
 | **Transmit & Receive Buffers** | ~1 KB | Temporary stack memory (allocated only during send/recv functions). |
-| **mbedTLS Handshake Tasks** | ~4 KB | Temporary stack memory (allocated during key exchange and freed immediately after). |
+| **Handshake Buffers (malloc)** | ~1 KB | Transient heap memory (allocated only during handshake, freed immediately). |
+| **mbedTLS Handshake Tasks** | ~2 KB – 4 KB | Transient heap/stack memory (allocated during key exchange and freed immediately after). |
 
 > [!IMPORTANT]
 > **Task Stack Configurations**

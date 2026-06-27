@@ -38,7 +38,7 @@ To keep overhead low, USMP uses a simple 1-byte packet type identifier. Handshak
 | `0x07` | `PKT_PONG` | Both | Yes | Keepalive replies. "Yep, still here!" |
 | `0x08` | `PKT_BYE` | Both | Yes | Graceful disconnect. "I'm heading offline now, goodbye." |
 | `0x09` | `PKT_DATA_FRAG` | Both | Yes | Initial fragments of a payload larger than 452 bytes. |
-| `0xFF` | `PKT_ERROR` | Both | No | Safety valve. "Something went wrong, tearing down the session." |
+| `0xFF` | `PKT_ERROR` | Both | No | Reserved (unused diagnostic telemetry). |
 
 ## Connection Lifecycle
 

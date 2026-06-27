@@ -2,7 +2,7 @@
 
 Welcome! If you are looking to run USMP on a new microcontroller, RTOS, or custom hardware platform, you are in the right place.
 
-One of USMP's core design values is **extreme portability**. The entire cryptographic state machine and framing engine live in a pure C core (`core/`) with **zero system dependencies**. It doesn't allocate memory on the heap, and it doesn't make direct OS calls.
+One of USMP's core design values is **extreme portability**. The entire cryptographic state machine and framing engine live in a pure C core (`core/`) with **zero system dependencies**. Once a session is established, it does not allocate memory on the heap, and it does not make direct OS calls (transient heap buffers are used only during the handshake phase).
 
 To bring USMP to your target platform, you only need to build two things:
 

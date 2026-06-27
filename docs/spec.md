@@ -46,7 +46,7 @@ Every USMP packet is serialized into a single binary frame. The header occupies 
 ### Field Reference
 
 * **`magic`** *(u16, offset 0)*: Frame boundary marker. Must always be `0xABCD`. If a receiver parses a packet starting with any other value, it must drop the transport connection immediately.
-* **`version`** *(u8, offset 2)*: Protocol version. Currently `0x01`. If a receiver gets an unsupported version, it sends a `PKT_ERROR` (code `ERR_VERSION`) and disconnects.
+* **`version`** *(u8, offset 2)*: Protocol version. Currently `0x01`. If a receiver gets an unsupported version, it terminates the connection immediately.
 * **`type`** *(u8, offset 3)*: Packet identifier. Determines the payload structure and processing rules (see Section 4).
 * **`seq`** *(u32, offset 4)*: Monotonic sequence number. Starts at `0` for the first post-handshake packet and increments by 1 per frame. Handshake packets always carry `seq = 0`. If a receiver receives an out-of-order sequence number, it terminates the session.
 * **`length`** *(u16, offset 8)*: Byte length of the variable `payload` field (maximum `480`).
@@ -67,7 +67,7 @@ Every USMP packet is serialized into a single binary frame. The header occupies 
 | `0x07` | `PKT_PONG` | Both | Yes | Keepalive response. |
 | `0x08` | `PKT_BYE` | Both | Yes | Graceful connection exit. |
 | `0x09` | `PKT_DATA_FRAG` | Both | Yes | Payload fragment (initial/middle chunks). |
-| `0xFF` | `PKT_ERROR` | Both | No | Session termination flag containing error details. |
+| `0xFF` | `PKT_ERROR` | Both | No | Reserved (unused diagnostic telemetry). |
 
 ## 5. The Handshake Sequence
 
@@ -118,7 +118,7 @@ $$\text{session\_key} = \text{HKDF-SHA256}(\text{ikm}=\text{shared}, \text{salt}
 * **Payload Length**: 32 bytes
 * **Structure**:
   * `0..31` (32 bytes): `hmac_client` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{device\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
-* *Validation*: The server computes the expected HMAC. If it fails to match (checked using constant-time comparison), the server returns `PKT_ERROR` (code `ERR_AUTH`) and disconnects.
+* *Validation*: The server computes the expected HMAC. If it fails to match (checked using constant-time comparison), the server immediately closes the connection.
 
 ### 5.5 `PKT_SESSION_OK` (0x04)
 
@@ -176,9 +176,11 @@ USMP uses asymmetrical timers to verify connections:
 * **Client Keepalive (TX-driven)**: The client monitors its own **transmit inactivity** (time elapsed since the client last sent a frame). It sends a `PKT_PING` frame every 30 seconds if it has been idle. **Incoming packets do not reset this timer.**
 * **Server Watchdog (RX-driven)**: The server tracks **receive inactivity** (time elapsed since the server last received a packet from the client). If a client fails to transmit a packet (telemetry or PING) within the configured session timeout (default 60 seconds), the server closes the session. **Outgoing packets sent to the client do not reset this timer.**
 
-## 9. Error Reference
+## 9. Error Reference (Reserved)
 
-When a session terminates due to an error, a `PKT_ERROR` frame is sent carrying a 1-byte code and a 2-byte details field:
+*Note: The PKT_ERROR frame and error codes are reserved for future diagnostics. In the current reference implementation, errors result in immediate socket teardown without sending diagnostic frames.*
+
+When a session terminates due to an error, a `PKT_ERROR` frame is defined to carry a 1-byte code and a 2-byte details field:
 
 | Code | Name | Description / Trigger |
 |:---|:---|:---|
