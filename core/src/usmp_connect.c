@@ -132,4 +132,4 @@ void usmp_close(usmp_t* ctx) {
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "0.4.7"; }
+const char* usmp_get_version(void) { return "0.5.1"; }
