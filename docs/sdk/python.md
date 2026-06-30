@@ -91,7 +91,7 @@ Here is how the concepts map between the two platforms:
     void onMessage(const uint8_t *data, size_t len) {
         Serial.printf("Received message: %.*s\n", len, data);
     }
-    
+
     void setup() {
         usmp.onMessage(onMessage);
         usmp.begin(USMP::TCP("192.168.1.100"));

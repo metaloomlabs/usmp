@@ -6,7 +6,7 @@ When moving from a local breadboard prototype to a production environment, you m
 
 ## 1. Secure Credential Management (No Hardcoded PSKs)
 
-Hardcoding Pre-Shared Keys directly in your firmware binary makes them vulnerable to reverse engineering and extraction. 
+Hardcoding Pre-Shared Keys directly in your firmware binary makes them vulnerable to reverse engineering and extraction.
 
 ### ESP32: Loading PSK from Non-Volatile Storage (NVS)
 
@@ -72,11 +72,14 @@ void initialize_usmp_context(usmp_t *ctx) {
 
 A network connection can drop silently without closing the underlying socket (the "half-open" state). To detect this, USMP provides keepalive heartbeats (`PING` / `PONG`).
 
-*   **ESP-IDF**: You configure the keepalive interval directly on the context:
+* **ESP-IDF**: You configure the keepalive interval directly on the context:
+
     ```c
     ctx.keepalive_ms = 15000; // Send a PING frame if no data is sent for 15 seconds
     ```
-*   **Arduino**: Set the interval using the helper method **after** `begin()`:
+
+* **Arduino**: Set the interval using the helper method **after** `begin()`:
+
     ```cpp
     usmp.keepalive(15000); // 15 seconds
     ```
@@ -136,7 +139,7 @@ void app_main(void) {
 
 ### Arduino Callback-Driven Reconnections
 
-The Arduino `USMPClient` automatically handles keepalive ticks and exponential backoff loops inside the background `usmp.maintain()` task. 
+The Arduino `USMPClient` automatically handles keepalive ticks and exponential backoff loops inside the background `usmp.maintain()` task.
 
 However, you should register callbacks to update your application state (such as flashing an LED or pausing sensor polling while offline):
 
@@ -186,6 +189,6 @@ void loop() {
 
 The Python gateway server contains built-in protections against denial-of-service (DoS) and brute-force handshake attempts:
 
-*   **Failed Handshake Lockout**: If a device IP fails the handshake process (due to an incorrect PSK or protocol violation) multiple times in a row, the server locks out that IP address for **60 seconds**, dropping any incoming packets immediately.
-*   **Concurrent Handshake Limits**: To prevent resource exhaustion, the server limits any single IP address to **3 concurrent handshakes** in progress.
-*   **Watchdog Task**: The server runs an asynchronous watchdog task on every session. If a connected device stops sending data or keepalive pings for the duration of the `session_timeout` (default: 60 seconds), the server closes the session socket and frees its resources.
+* **Failed Handshake Lockout**: If a device IP fails the handshake process (due to an incorrect PSK or protocol violation) multiple times in a row, the server locks out that IP address for **60 seconds**, dropping any incoming packets immediately.
+* **Concurrent Handshake Limits**: To prevent resource exhaustion, the server limits any single IP address to **3 concurrent handshakes** in progress.
+* **Watchdog Task**: The server runs an asynchronous watchdog task on every session. If a connected device stops sending data or keepalive pings for the duration of the `session_timeout` (default: 60 seconds), the server closes the session socket and frees its resources.

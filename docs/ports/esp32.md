@@ -20,11 +20,11 @@ This registers USMP as a project dependency. The ESP-IDF build system automatica
 
 Once installed, the component exposes the following file structure:
 
-*   `port/`
-    *   `usmp_port_esp32.c` — Connects USMP's hardware hooks to Espressif's APIs (RNG, timers, logging, and Wi-Fi MAC reading).
-*   `transport/`
-    *   `usmp_transport_tcp.c` — Implements secure, non-blocking streams over lwIP TCP sockets.
-    *   `usmp_transport_udp.c` — Implements secure, low-overhead communication over lwIP UDP sockets with USMP reliability mechanisms.
+* `port/`
+  * `usmp_port_esp32.c` — Connects USMP's hardware hooks to Espressif's APIs (RNG, timers, logging, and Wi-Fi MAC reading).
+* `transport/`
+  * `usmp_transport_tcp.c` — Implements secure, non-blocking streams over lwIP TCP sockets.
+  * `usmp_transport_udp.c` — Implements secure, low-overhead communication over lwIP UDP sockets with USMP reliability mechanisms.
 
 ---
 
@@ -45,6 +45,7 @@ USMP is designed to be completely platform-agnostic. The core state machine requ
 ## Transport Adaptors
 
 ### 1. TCP Transport
+
 The TCP transport uses native BSD sockets provided by lwIP. To minimize handshake round-trip times and telemetry latency, we configure the socket with the `TCP_NODELAY` flag enabled.
 
 ```c
@@ -53,6 +54,7 @@ usmp_transport_tcp_init(&transport, "192.168.1.100", 9000);
 ```
 
 ### 2. UDP Transport
+
 The UDP transport is connectionless and lightweight. It binds a local socket and routes packets to the target IP. USMP automatically handles sequence numbers, reliability, and frame validation.
 
 ```c
@@ -64,7 +66,7 @@ usmp_transport_udp_init(&transport, "192.168.1.100", 9000);
 
 ## Memory Footprint & Stack Allocation
 
-USMP is optimized for resource-constrained environments. Once a session is active, it performs **zero heap allocations**! 
+USMP is optimized for resource-constrained environments. Once a session is active, it performs **zero heap allocations**!
 
 | Context / Phase | RAM Consumption | Lifetime |
 | :--- | :--- | :--- |
@@ -77,13 +79,15 @@ USMP is optimized for resource-constrained environments. Once a session is activ
 > **Task Stack Configurations**
 > Because the cryptographic handshake performs Curve25519 calculations and HMAC signing, it allocates transient variables on the stack.
 > To prevent stack overflows, ensure the task calling `usmp_connect()` has **at least 8 KB (8192 bytes)** of stack space allocated.
-> 
+>
 > If calling from the main task, increase the stack size in `sdkconfig`:
+>
 > ```ini
 > CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 > ```
-> 
+>
 > If creating a custom FreeRTOS task:
+>
 > ```c
 > xTaskCreate(usmp_task, "usmp_task", 8192, NULL, 5, NULL);
 > ```
@@ -94,7 +98,6 @@ USMP is optimized for resource-constrained environments. Once a session is activ
 
 This component supports any Espressif silicon variant running ESP-IDF v5+:
 
-*   **ESP32** (Classic)
-*   **ESP32-S2** / **ESP32-S3**
-*   **ESP32-C3** / **ESP32-C6** / **ESP32-H2**
-
+* **ESP32** (Classic)
+* **ESP32-S2** / **ESP32-S3**
+* **ESP32-C3** / **ESP32-C6** / **ESP32-H2**

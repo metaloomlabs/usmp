@@ -1,6 +1,6 @@
 # Tutorial 2: Going Connectionless (UDP)
 
-In this tutorial, you will learn how to configure USMP to operate over a connectionless UDP transport layer. 
+In this tutorial, you will learn how to configure USMP to operate over a connectionless UDP transport layer.
 
 Although UDP is inherently unreliable (packets can be dropped or arrive out of order), USMP builds a lightweight reliability wrapper on top of it. You receive the speed and battery efficiency of UDP, combined with transport-level packet ordering, duplicate discard, and secure frame validation.
 
@@ -50,9 +50,11 @@ if __name__ == "__main__":
 ```
 
 Run the server in your terminal:
+
 ```bash
 python server_udp.py
 ```
+
 It will block and output:
 `[+] Starting USMP UDP Server on port 9000...`
 
@@ -127,6 +129,7 @@ void app_main(void)
 ```
 
 Build, flash, and run the monitor:
+
 ```bash
 idf.py build flash monitor
 ```
@@ -186,4 +189,5 @@ Upload the sketch to your board and open the **Serial Monitor** at `115200` baud
 ## Next Steps
 
 Now that you have successfully mastered both TCP and UDP transports, you are ready to prepare your application for a real-world deployment. Proceed to the hardening guide:
-*   **[Tutorial 3: Production Hardening](production-hardening.md)** — Learn how to load credentials securely from storage, handle network drops, perform keepalives, and manage reconnection loops.
+
+* **[Tutorial 3: Production Hardening](production-hardening.md)** — Learn how to load credentials securely from storage, handle network drops, perform keepalives, and manage reconnection loops.

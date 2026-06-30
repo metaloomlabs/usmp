@@ -33,21 +33,21 @@ Historically, connecting embedded microcontrollers securely meant choosing betwe
 
 USMP does not support an "insecure mode." Every session is strictly hardened out of the box:
 
-*   **Mutual Authentication**: Both client (device) and server (gateway) prove their identity using a Pre-Shared Key (PSK) and HMAC-SHA256 proofs before exchanging payload data.
-*   **Perfect Forward Secrecy**: An ephemeral X25519 Diffie-Hellman key exchange is performed for every session. Even if the Pre-Shared Key is compromised in the future, past captured traffic cannot be decrypted.
-*   **Mandatory Encryption**: All session data frames are encrypted using AES-256-GCM, ensuring absolute confidentiality and tamper-proof message integrity.
-*   **Replay Protection**: Strict, monotonic 32-bit sequence numbers and deterministic nonces prevent attackers from capturing and replaying packets.
+* **Mutual Authentication**: Both client (device) and server (gateway) prove their identity using a Pre-Shared Key (PSK) and HMAC-SHA256 proofs before exchanging payload data.
+* **Perfect Forward Secrecy**: An ephemeral X25519 Diffie-Hellman key exchange is performed for every session. Even if the Pre-Shared Key is compromised in the future, past captured traffic cannot be decrypted.
+* **Mandatory Encryption**: All session data frames are encrypted using AES-256-GCM, ensuring absolute confidentiality and tamper-proof message integrity.
+* **Replay Protection**: Strict, monotonic 32-bit sequence numbers and deterministic nonces prevent attackers from capturing and replaying packets.
 
 ---
 
 ## Supported Transports & Roadmap
 
-USMP is designed to separate the cryptographic session state machine from the underlying transport medium. 
+USMP is designed to separate the cryptographic session state machine from the underlying transport medium.
 
-*   **TCP**: Production-ready. Best for reliable Wi-Fi or Ethernet streams.
-*   **UDP**: Production-ready. Optimized for constrained, lossy networks with built-in packet-level acknowledgment and reliability mechanisms.
-*   **Serial UART (with COBS & Sliding Window)**: 🟡 Coming soon.
-*   **BLE (Bluetooth Low Energy)**: 🟡 Coming soon.
+* **TCP**: Production-ready. Best for reliable Wi-Fi or Ethernet streams.
+* **UDP**: Production-ready. Optimized for constrained, lossy networks with built-in packet-level acknowledgment and reliability mechanisms.
+* **Serial UART (with COBS & Sliding Window)**: 🟡 Coming soon.
+* **BLE (Bluetooth Low Energy)**: 🟡 Coming soon.
 
 ---
 
@@ -69,7 +69,7 @@ USMP is packaged and published directly to official package managers, keeping yo
 
 === "Arduino Library"
     Available as a packaged offline ZIP archive (`usmp-0.5.1-arduino.zip`) for import into Arduino IDE or PlatformIO.
-    
+
     1. Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
     2. Select the packaged ZIP archive.
 
@@ -79,7 +79,7 @@ USMP is packaged and published directly to official package managers, keeping yo
 
 Ready to dive in? Follow our step-by-step tutorials:
 
-1.  **[Installation & Setup](getting-started/installation.md)**: Prepare your environment and generate secure Pre-Shared Keys.
-2.  **[Your First TCP Tunnel](getting-started/tutorial-tcp.md)**: Establish a secure session over TCP.
-3.  **[Going Connectionless (UDP)](getting-started/tutorial-udp.md)**: Secure your communications over UDP.
-4.  **[Production Hardening](getting-started/production-hardening.md)**: Learn about credential management, NVS storage, keepalives, and automatic reconnection loops.
+1. **[Installation & Setup](getting-started/installation.md)**: Prepare your environment and generate secure Pre-Shared Keys.
+2. **[Your First TCP Tunnel](getting-started/tutorial-tcp.md)**: Establish a secure session over TCP.
+3. **[Going Connectionless (UDP)](getting-started/tutorial-udp.md)**: Secure your communications over UDP.
+4. **[Production Hardening](getting-started/production-hardening.md)**: Learn about credential management, NVS storage, keepalives, and automatic reconnection loops.

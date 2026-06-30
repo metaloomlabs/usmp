@@ -36,6 +36,7 @@ server = USMPServer(
     async def handle_timeout(device_id: str, session_id: str):
         print(f"Device {device_id} went quiet. Session {session_id} expired.")
     ```
+
 * **`protocol`** *(USMPProtocol | str, optional)*: The transport protocol to run (default is `"tcp"` or `USMPProtocol.TCP`):
   * `"tcp"` (or `USMPProtocol.TCP`): Spawns a standard asyncio TCP listener.
   * `"udp"` (or `USMPProtocol.UDP`): Spawns an asyncio datagram endpoint, managing multiple UDP clients on the same port using their IP/port addresses.

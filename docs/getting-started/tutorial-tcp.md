@@ -50,9 +50,11 @@ if __name__ == "__main__":
 ```
 
 Run the server in your terminal:
+
 ```bash
 python server_tcp.py
 ```
+
 It will block and wait for incoming device handshakes:
 `[+] Starting USMP TCP Server on port 9000...`
 
@@ -63,9 +65,11 @@ It will block and wait for incoming device handshakes:
 Next, let's configure a native C client to connect to your gateway.
 
 ### Step A: Configure Project Dependencies
+
 Ensure `metaloomlabs/usmp` is registered in your `main/idf_component.yml` (as detailed in the Installation guide).
 
 ### Step B: Write your application code
+
 Create or update `main/app.c` with the following code. Replace `[GATEWAY_IP_ADDRESS]` with the IP address of your gateway machine.
 
 ```c
@@ -131,6 +135,7 @@ void app_main(void)
 ```
 
 Build, flash, and run the serial monitor:
+
 ```bash
 idf.py build flash monitor
 ```
@@ -190,4 +195,5 @@ Upload the sketch to your board and open the **Serial Monitor** at `115200` baud
 ## Next Steps
 
 Now that you have a secure TCP connection up and running, let's explore connectionless transmission:
-*   **[Tutorial 2: Going Connectionless (UDP)](tutorial-udp.md)** — Transition to a UDP transport while maintaining the exact same security guarantees.
+
+* **[Tutorial 2: Going Connectionless (UDP)](tutorial-udp.md)** — Transition to a UDP transport while maintaining the exact same security guarantees.
