@@ -4,7 +4,7 @@ import os
 
 from ._handshake import client_handshake
 from ._session import USMPSession
-from .types import USMP_DEVICE_ID_LEN
+from .types import USMP_DEVICE_ID_LEN, USMPProtocol
 
 logger = logging.getLogger("usmp.client")
 
@@ -28,14 +28,14 @@ class USMPClient:
         port: int,
         psk: bytes,
         device_id: bytes | None = None,
-        protocol: str = "tcp",
+        protocol: USMPProtocol | str = USMPProtocol.TCP,
     ):
         self._host = host
         self._port = port
         self._psk = psk
         self._device_id = device_id or os.urandom(USMP_DEVICE_ID_LEN)
         self._session: USMPSession | None = None
-        self._protocol = protocol.lower()
+        self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
         if self._protocol not in ("tcp", "udp"):
             raise ValueError("Protocol must be 'tcp' or 'udp'")
 

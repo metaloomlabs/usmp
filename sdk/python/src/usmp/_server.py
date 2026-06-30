@@ -8,6 +8,7 @@ from typing import Awaitable, Callable
 from ._handshake import server_handshake
 from ._session import USMPSession
 from .errors import HandshakeError, USMPError
+from .types import USMPProtocol
 
 logger = logging.getLogger("usmp")
 
@@ -41,7 +42,7 @@ class USMPServer:
         handshake_timeout: float = 10.0,
         session_timeout: float = 60.0,
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
-        protocol: str = "tcp",
+        protocol: USMPProtocol | str = USMPProtocol.TCP,
     ):
         self._host = host
         self._port = port
@@ -50,7 +51,7 @@ class USMPServer:
         self._session_timeout = session_timeout
         self._on_timeout = on_timeout
         self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
-        self._protocol = protocol.lower()
+        self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
         if self._protocol not in ("tcp", "udp"):
             raise ValueError("Protocol must be 'tcp' or 'udp'")
         self._udp_sessions: dict[tuple[str, int], getattr] = {}

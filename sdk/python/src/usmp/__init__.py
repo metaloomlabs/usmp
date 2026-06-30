@@ -18,7 +18,7 @@ from .errors import (
     USMPError,
     VersionError,
 )
-from .types import ErrorCode, PacketType, SessionInfo, USMPFrame
+from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
 __all__ = [
     # Types
@@ -26,6 +26,7 @@ __all__ = [
     "SessionInfo",
     "PacketType",
     "ErrorCode",
+    "USMPProtocol",
     # Errors
     "USMPError",
     "FrameError",
