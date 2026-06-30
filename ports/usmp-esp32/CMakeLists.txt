@@ -9,6 +9,7 @@ idf_component_register(
         "../../core/src/usmp_connect.c"
         "port/usmp_port_esp32.c"
         "transport/usmp_transport_tcp.c"
+        "transport/usmp_transport_udp.c"
     INCLUDE_DIRS
         "../../core/include"
     PRIV_INCLUDE_DIRS

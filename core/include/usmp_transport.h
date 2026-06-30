@@ -20,6 +20,8 @@ typedef struct usmp_transport_s {
 
 int usmp_transport_tcp_init(usmp_transport_t *t, const char *server_ip,
                             int port);
+int usmp_transport_udp_init(usmp_transport_t *t, const char *server_ip,
+                            int port);
 
 #ifdef __cplusplus
 }
