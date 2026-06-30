@@ -2,9 +2,9 @@
 
 Secure, encrypted communication for ESP32, Arduino, and IoT devices.
 
-USMP sits between raw TCP (no security) and full TLS (too heavy for microcontrollers) - giving any constrained device a fully encrypted, mutually authenticated session in three function calls.
+USMP sits between raw sockets (no security) and full TLS/DTLS (too heavy for microcontrollers) - giving any constrained device a fully encrypted, mutually authenticated session in three function calls.
 
-```python
+```bash
 pip install usmp
 ```
 
@@ -14,6 +14,7 @@ pip install usmp
 - **Forward secrecy** - X25519 ephemeral key exchange, new keys every session
 - **Encryption** - AES-256-GCM, mandatory, no plaintext mode
 - **Replay protection** - monotonic sequence numbers
+- **Multiple Transports** - Production-ready support for both TCP and UDP streams.
 
 ## Quickstart
 
@@ -23,7 +24,8 @@ pip install usmp
 import asyncio
 from usmp import USMPServer, USMPSession, ConnectionClosedError
 
-server = USMPServer(host="0.0.0.0", port=9000, psk=b"your-psk-here")
+# Initialize server (protocol="tcp" or protocol="udp")
+server = USMPServer(host="0.0.0.0", port=9000, psk=b"your-psk-here", protocol="tcp")
 
 @server.on_session
 async def handle(session: USMPSession):
@@ -36,26 +38,35 @@ async def handle(session: USMPSession):
     except ConnectionClosedError:
         print(f"Device disconnected: {session.device_id}")
 
-asyncio.run(server.serve())
+async def main():
+    await server.serve()
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Client (Python)
 
 ```python
 import asyncio
-from usmp import USMPClient, ConnectionClosedError
+from usmp import USMPClient
 
 async def main():
-    client = USMPClient(host="127.0.0.1", port=9000, psk=b"your-psk-here")
-    async with client.connect() as session:
-        await session.send(b"hello")
-        reply = await session.recv()
-        print(f"RX: {reply}")
+    # Initialize client (protocol="tcp" or protocol="udp")
+    client = USMPClient(host="127.0.0.1", port=9000, psk=b"your-psk-here", protocol="tcp")
+    await client.connect()
+    
+    await client.send(b"hello")
+    reply = await client.recv()
+    print(f"RX: {reply}")
+    
+    await client.disconnect()
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-### Client (ESP32 / Arduino)
+### Client (Arduino ESP32)
 
 ```cpp
 #include <USMP.h>
@@ -63,6 +74,7 @@ asyncio.run(main())
 USMPClient usmp("your-psk-here");
 
 void setup() {
+    // Connect using TCP or UDP
     usmp.begin(USMP::TCP("192.168.1.100").wifi("SSID", "password"));
     usmp.send("hello from esp32");
 }
@@ -93,7 +105,7 @@ Device                        Server
 
 ## Installation
 
-```
+```bash
 pip install usmp
 ```
 
@@ -101,9 +113,10 @@ Requires Python 3.11+.
 
 ## ESP32 / Arduino library
 
-The Arduino library and ESP-IDF component are available at [github.com/metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
+The Arduino library and ESP-IDF component are available directly through their respective package registries:
+*   **ESP-IDF Component**: Add as a dependency by running `idf.py add-dependency "metaloomlabs/usmp"` in your project directory.
+*   **Arduino Library**: Import the packaged release ZIP archive `usmp-X.Y.Z-arduino.zip` via **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
 
 <p align="center">
-  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong><br>
-  Copyright &copy; 2026 <strong><a href="https://github.com/winterx64">Akhil B Xavier (winterx64)</a></strong>
+  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong>
 </p>
