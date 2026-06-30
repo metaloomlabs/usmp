@@ -23,7 +23,7 @@ extern "C" {
  * @param len  Length of out buffer (minimum 6 bytes)
  * @return     0 on success, -1 on failure
  */
-int usmp_port_get_device_id(uint8_t *out, size_t len);
+int usmp_port_get_device_id(uint8_t* out, size_t len);
 
 /**
  * Fill buffer with cryptographically random bytes.
@@ -35,7 +35,7 @@ int usmp_port_get_device_id(uint8_t *out, size_t len);
  * @param len  Number of random bytes to generate
  * @return     0 on success, -1 on failure
  */
-int usmp_port_random(uint8_t *out, size_t len);
+int usmp_port_random(uint8_t* out, size_t len);
 
 /**
  * Delay for a given number of milliseconds.
@@ -68,7 +68,7 @@ uint32_t usmp_port_millis(void);
  * @param tag    Module tag string
  * @param msg    Message string
  */
-void usmp_port_log(char level, const char *tag, const char *msg);
+void usmp_port_log(char level, const char* tag, const char* msg);
 
 // Convenience macros ────────────────────────────────────────────────────────
 #define USMP_LOGI(tag, msg) usmp_port_log('I', tag, msg)

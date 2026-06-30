@@ -1,4 +1,10 @@
 #include "usmp_handshake.h"
+
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include "mbedtls/constant_time.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/ecdh.h"
@@ -9,52 +15,57 @@
 #include "usmp.h"
 #include "usmp_frame.h"
 #include "usmp_port.h"
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
-static const char *TAG = "USMP_HS";
+static const char* TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
 
-static int derive_session_key(const uint8_t *shared_secret, size_t secret_len,
-                               const uint8_t *nonce, size_t nonce_len,
-                               const uint8_t *pub_c, const uint8_t *pub_s,
-                               uint8_t *out, size_t out_len) {
-  const mbedtls_md_info_t *md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  if (!md)
-    return -1;
+static int derive_session_key(const uint8_t* shared_secret, size_t secret_len, const uint8_t* nonce,
+                              size_t nonce_len, const uint8_t* pub_c, const uint8_t* pub_s,
+                              uint8_t* out, size_t out_len) {
+  const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!md) return -1;
 
   uint8_t info[7 + PUB_KEY_LEN + PUB_KEY_LEN];
   memcpy(info, "usmp-v1", 7);
   memcpy(info + 7, pub_c, PUB_KEY_LEN);
   memcpy(info + 7 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
 
-  return mbedtls_hkdf(md, nonce, nonce_len, shared_secret, secret_len, info,
-                      sizeof(info), out, out_len);
+  return mbedtls_hkdf(md, nonce, nonce_len, shared_secret, secret_len, info, sizeof(info), out,
+                      out_len);
 }
 
-static int compute_hmac(const uint8_t *psk, size_t psk_len, const uint8_t *data,
-                         size_t data_len, uint8_t *out) {
+static int compute_hmac(const uint8_t* psk, size_t psk_len, const uint8_t* data, size_t data_len,
+                        uint8_t* out) {
   mbedtls_md_context_t ctx;
   mbedtls_md_init(&ctx);
 
-  const mbedtls_md_info_t *info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-  if (!info)
-    return -1;
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!info) return -1;
 
   int ret = 0;
-  if (mbedtls_md_setup(&ctx, info, 1) != 0) { ret = -1; goto done; }
-  if (mbedtls_md_hmac_starts(&ctx, psk, psk_len) != 0) { ret = -1; goto done; }
-  if (mbedtls_md_hmac_update(&ctx, data, data_len) != 0) { ret = -1; goto done; }
-  if (mbedtls_md_hmac_finish(&ctx, out) != 0) { ret = -1; goto done; }
+  if (mbedtls_md_setup(&ctx, info, 1) != 0) {
+    ret = -1;
+    goto done;
+  }
+  if (mbedtls_md_hmac_starts(&ctx, psk, psk_len) != 0) {
+    ret = -1;
+    goto done;
+  }
+  if (mbedtls_md_hmac_update(&ctx, data, data_len) != 0) {
+    ret = -1;
+    goto done;
+  }
+  if (mbedtls_md_hmac_finish(&ctx, out) != 0) {
+    ret = -1;
+    goto done;
+  }
 done:
   mbedtls_md_free(&ctx);
   return ret;
 }
 
-int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
+int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   int ret = -1;
   char _msg[128];
 
@@ -66,8 +77,8 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     USMP_LOGE(TAG, "No PSK configured — set ctx.psk and ctx.psk_len before connecting");
     return -1;
   }
-  const uint8_t *psk = session->psk;
-  size_t psk_len     = session->psk_len;
+  const uint8_t* psk = session->psk;
+  size_t psk_len = session->psk_len;
 
   mbedtls_ecdh_context ecdh;
   mbedtls_entropy_context entropy;
@@ -83,8 +94,8 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
    * total stack). Even on ESP32, the combined mbedtls context + two 512-byte
    * buffers exceeds comfortable stack limits for nested tasks.
    */
-  uint8_t *tx_buf = (uint8_t *)malloc(512);
-  uint8_t *rx_buf = (uint8_t *)malloc(512);
+  uint8_t* tx_buf = (uint8_t*)malloc(512);
+  uint8_t* rx_buf = (uint8_t*)malloc(512);
   if (!tx_buf || !rx_buf) {
     USMP_LOGE(TAG, "Out of memory for handshake buffers");
     free(tx_buf);
@@ -107,8 +118,7 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   }
   memcpy(pers + USMP_DEVICE_ID_LEN, "usmp-v1\x00", 8);
 
-  if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy,
-                             pers, sizeof(pers)) != 0) {
+  if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, pers, sizeof(pers)) != 0) {
     USMP_LOGE(TAG, "RNG seed failed");
     goto cleanup;
   }
@@ -123,7 +133,7 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   uint8_t pub_buf[65];
   size_t pub_buf_len = 0;
   if (mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf),
-                                mbedtls_ctr_drbg_random, &ctr_drbg) != 0) {
+                               mbedtls_ctr_drbg_random, &ctr_drbg) != 0) {
     USMP_LOGE(TAG, "ECDH make_public failed");
     goto cleanup;
   }
@@ -132,7 +142,7 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     USMP_LOGE(TAG, "Generated public key length is too short");
     goto cleanup;
   }
-  uint8_t *pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
+  uint8_t* pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
 
   // Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
   if (usmp_port_get_device_id(session->device_id, USMP_DEVICE_ID_LEN) != 0) {
@@ -141,10 +151,10 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   }
 
   memset(&pkt, 0, sizeof(pkt));
-  pkt.magic  = USMP_MAGIC;
+  pkt.magic = USMP_MAGIC;
   pkt.version = 1;
-  pkt.type   = USMP_TYPE_HELLO;
-  pkt.seq    = 0;
+  pkt.type = USMP_TYPE_HELLO;
+  pkt.seq = 0;
   pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN;
   memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
   memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
@@ -164,11 +174,9 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     goto cleanup;
   }
 
-  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 ||
-      pkt.type != USMP_TYPE_CHALLENGE ||
+  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_CHALLENGE ||
       pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN) {
-    snprintf(_msg, sizeof(_msg), "Bad CHALLENGE frame (type=0x%02x len=%u)",
-             pkt.type, pkt.length);
+    snprintf(_msg, sizeof(_msg), "Bad CHALLENGE frame (type=0x%02x len=%u)", pkt.type, pkt.length);
     USMP_LOGE(TAG, _msg);
     goto cleanup;
   }
@@ -192,18 +200,16 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
 
   uint8_t shared_secret[PUB_KEY_LEN];
   size_t shared_len = 0;
-  if (mbedtls_ecdh_calc_secret(&ecdh, &shared_len, shared_secret,
-                                sizeof(shared_secret), mbedtls_ctr_drbg_random,
-                                &ctr_drbg) != 0) {
+  if (mbedtls_ecdh_calc_secret(&ecdh, &shared_len, shared_secret, sizeof(shared_secret),
+                               mbedtls_ctr_drbg_random, &ctr_drbg) != 0) {
     USMP_LOGE(TAG, "X25519 shared secret failed");
     goto cleanup;
   }
   USMP_LOGI(TAG, "X25519 shared secret computed");
 
   // Derive session key ────────────────────────────────────────────────────
-  if (derive_session_key(shared_secret, shared_len, nonce, USMP_NONCE_LEN,
-                          pub_c, pub_s, session->session_key,
-                          USMP_SESSION_KEY_LEN) != 0) {
+  if (derive_session_key(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s,
+                         session->session_key, USMP_SESSION_KEY_LEN) != 0) {
     USMP_LOGE(TAG, "HKDF failed");
     goto cleanup;
   }
@@ -224,11 +230,11 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
   }
 
   memset(&pkt, 0, sizeof(pkt));
-  pkt.magic   = USMP_MAGIC;
+  pkt.magic = USMP_MAGIC;
   pkt.version = 1;
-  pkt.type    = USMP_TYPE_HELLO_ACK;
-  pkt.seq     = 0;
-  pkt.length  = USMP_HMAC_LEN;
+  pkt.type = USMP_TYPE_HELLO_ACK;
+  pkt.seq = 0;
+  pkt.length = USMP_HMAC_LEN;
   memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
 
   len = usmp_build_packet(&pkt, tx_buf, NULL);
@@ -245,11 +251,9 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     goto cleanup;
   }
 
-  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 ||
-      pkt.type != USMP_TYPE_SESSION_OK ||
+  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_SESSION_OK ||
       pkt.length != USMP_SESSION_ID_LEN + USMP_HMAC_LEN) {
-    snprintf(_msg, sizeof(_msg), "Bad SESSION_OK frame (type=0x%02x len=%u)",
-             pkt.type, pkt.length);
+    snprintf(_msg, sizeof(_msg), "Bad SESSION_OK frame (type=0x%02x len=%u)", pkt.type, pkt.length);
     USMP_LOGE(TAG, _msg);
     goto cleanup;
   }
@@ -266,15 +270,13 @@ int usmp_handshake(usmp_transport_t *transport, usmp_t *session) {
     memcpy(input + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
     memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN, pub_c, PUB_KEY_LEN);
     memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
-    if (compute_hmac(psk, psk_len, input, sizeof(input),
-                     hmac_server_expected) != 0) {
+    if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected) != 0) {
       USMP_LOGE(TAG, "Server HMAC computation failed");
       goto cleanup;
     }
   }
 
-  if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected,
-                         USMP_HMAC_LEN) != 0) {
+  if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, USMP_HMAC_LEN) != 0) {
     USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
     goto cleanup;
   }
@@ -302,8 +304,14 @@ cleanup:
   mbedtls_entropy_free(&entropy);
   mbedtls_ctr_drbg_free(&ctr_drbg);
 
-  if (tx_buf) { mbedtls_platform_zeroize(tx_buf, 512); free(tx_buf); }
-  if (rx_buf) { mbedtls_platform_zeroize(rx_buf, 512); free(rx_buf); }
+  if (tx_buf) {
+    mbedtls_platform_zeroize(tx_buf, 512);
+    free(tx_buf);
+  }
+  if (rx_buf) {
+    mbedtls_platform_zeroize(rx_buf, 512);
+    free(rx_buf);
+  }
 
   return ret;
 }

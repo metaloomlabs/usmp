@@ -1,8 +1,10 @@
 #include "usmp_crypto.h"
-#include "usmp_port.h"
-#include "mbedtls/gcm.h"
-#include "mbedtls/constant_time.h"
+
 #include <string.h>
+
+#include "mbedtls/constant_time.h"
+#include "mbedtls/gcm.h"
+#include "usmp_port.h"
 
 /*
  * AES-256-GCM encrypt.
@@ -13,35 +15,27 @@
  * guaranteeing that the (key, nonce) pair is never reused regardless of
  * sequence number, session length, or key material.
  */
-int usmp_gcm_encrypt(const uint8_t *key,
-                     const uint8_t *nonce,
-                     const uint8_t *aad, size_t aad_len,
-                     const uint8_t *plaintext, size_t plain_len,
-                     uint8_t *out, size_t *out_len) {
+int usmp_gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
 
   int ret = -1;
 
-  if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0)
-    goto done;
+  if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0) goto done;
 
   /* Layout: out = nonce || ciphertext || tag */
-  uint8_t *ct_out  = out + USMP_GCM_NONCE_LEN;
-  uint8_t *tag_out = ct_out + plain_len;
+  uint8_t* ct_out = out + USMP_GCM_NONCE_LEN;
+  uint8_t* tag_out = ct_out + plain_len;
 
-  const uint8_t *in_ptr = plaintext;
+  const uint8_t* in_ptr = plaintext;
   uint8_t dummy_in[1] = {0};
   if (in_ptr == NULL) {
     in_ptr = dummy_in;
   }
 
-  if (mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT,
-                                 plain_len,
-                                 nonce, USMP_GCM_NONCE_LEN,
-                                 aad, aad_len,
-                                 in_ptr, ct_out,
-                                 USMP_GCM_TAG_LEN, tag_out) != 0)
+  if (mbedtls_gcm_crypt_and_tag(&gcm, MBEDTLS_GCM_ENCRYPT, plain_len, nonce, USMP_GCM_NONCE_LEN,
+                                aad, aad_len, in_ptr, ct_out, USMP_GCM_TAG_LEN, tag_out) != 0)
     goto done;
 
   /* Prepend nonce so receiver can extract it */
@@ -62,33 +56,27 @@ done:
  * Extracts the nonce from the first 12 bytes of nonce_ct_tag.
  * Returns -1 if authentication tag does not match (tampered or wrong key).
  */
-int usmp_gcm_decrypt(const uint8_t *key,
-                     const uint8_t *nonce,
-                     const uint8_t *aad, size_t aad_len,
-                     const uint8_t *nonce_ct_tag, size_t nct_len,
-                     uint8_t *out, size_t *out_len) {
+int usmp_gcm_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len) {
   /* Must have at least nonce + tag, even with empty plaintext */
-  if (nct_len < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN)
-    return -1;
+  if (nct_len < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN) return -1;
 
   /* Verify nonce matches expected deterministic nonce */
-  if (mbedtls_ct_memcmp(nonce_ct_tag, nonce, USMP_GCM_NONCE_LEN) != 0)
-    return -1;
+  if (mbedtls_ct_memcmp(nonce_ct_tag, nonce, USMP_GCM_NONCE_LEN) != 0) return -1;
 
-  const uint8_t *ciphertext = nonce_ct_tag + USMP_GCM_NONCE_LEN;
-  size_t cipher_len         = nct_len - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
-  const uint8_t *tag        = ciphertext + cipher_len;
+  const uint8_t* ciphertext = nonce_ct_tag + USMP_GCM_NONCE_LEN;
+  size_t cipher_len = nct_len - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
+  const uint8_t* tag = ciphertext + cipher_len;
 
   mbedtls_gcm_context gcm;
   mbedtls_gcm_init(&gcm);
 
   int ret = -1;
 
-  if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0)
-    goto done;
+  if (mbedtls_gcm_setkey(&gcm, MBEDTLS_CIPHER_ID_AES, key, 256) != 0) goto done;
 
-  const uint8_t *ct_ptr = ciphertext;
-  uint8_t *out_ptr = out;
+  const uint8_t* ct_ptr = ciphertext;
+  uint8_t* out_ptr = out;
   uint8_t dummy[1] = {0};
   if (ct_ptr == NULL) {
     ct_ptr = dummy;
@@ -97,11 +85,8 @@ int usmp_gcm_decrypt(const uint8_t *key,
     out_ptr = dummy;
   }
 
-  if (mbedtls_gcm_auth_decrypt(&gcm, cipher_len,
-                                nonce_ct_tag, USMP_GCM_NONCE_LEN,
-                                aad, aad_len,
-                                tag, USMP_GCM_TAG_LEN,
-                                ct_ptr, out_ptr) != 0)
+  if (mbedtls_gcm_auth_decrypt(&gcm, cipher_len, nonce_ct_tag, USMP_GCM_NONCE_LEN, aad, aad_len,
+                               tag, USMP_GCM_TAG_LEN, ct_ptr, out_ptr) != 0)
     goto done;
 
   *out_len = cipher_len;

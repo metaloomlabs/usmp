@@ -1,10 +1,11 @@
 #pragma once
 
-#include "usmp_frame.h"
-#include "usmp_transport.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "usmp_frame.h"
+#include "usmp_transport.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -34,7 +35,8 @@ const char* usmp_get_version(void);
  * Load your PSK from secure storage, NVS, EEPROM, or a secure element.
  */
 #ifdef USMP_PSK
-#  error "USMP_PSK compile-time PSK is no longer supported. " \
+#error \
+    "USMP_PSK compile-time PSK is no longer supported. " \
          "Pass the PSK to USMPClient() at runtime instead."
 #endif
 
@@ -55,8 +57,8 @@ const char* usmp_get_version(void);
 #endif
 
 // Constants ─────────────────────────────────────────────────────────────────
-#define USMP_DEVICE_ID_LEN   6
-#define USMP_SESSION_ID_LEN  16   // Upgraded from 4 → 16 bytes (128-bit)
+#define USMP_DEVICE_ID_LEN 6
+#define USMP_SESSION_ID_LEN 16  // Upgraded from 4 → 16 bytes (128-bit)
 #define USMP_SESSION_KEY_LEN 32
 
 /*
@@ -76,7 +78,7 @@ typedef struct {
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
-  const uint8_t *psk;
+  const uint8_t* psk;
   size_t psk_len;
 } usmp_t;
 
@@ -86,46 +88,44 @@ typedef struct {
  * Connect using a transport and perform USMP handshake.
  * ctx->psk and ctx->psk_len must be set before calling.
  */
-int usmp_connect(usmp_t *ctx, usmp_transport_t *transport);
+int usmp_connect(usmp_t* ctx, usmp_transport_t* transport);
 
 /**
  * Reconnect — re-dials transport and performs full handshake.
  * Resets tx_seq and rx_seq.
  */
-int usmp_reconnect(usmp_t *ctx);
+int usmp_reconnect(usmp_t* ctx);
 
 /**
  * Close the USMP session gracefully.
  */
-void usmp_close(usmp_t *ctx);
+void usmp_close(usmp_t* ctx);
 
 /**
  * Check if session is established.
  */
-static inline bool usmp_is_connected(const usmp_t *ctx) {
-  return ctx && ctx->established;
-}
+static inline bool usmp_is_connected(const usmp_t* ctx) { return ctx && ctx->established; }
 
 // Data API ──────────────────────────────────────────────────────────────────
 
 /**
  * Send encrypted data. Max len: USMP_MAX_DATA_LEN (452) bytes.
  */
-int usmp_send(usmp_t *ctx, const uint8_t *data, uint16_t len);
+int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len);
 
 /**
  * Receive and decrypt data. Handles inbound PING/PONG transparently.
  * Returns byte count on success, -1 on failure.
  */
-int usmp_recv(usmp_t *ctx, uint8_t *out, uint16_t max_len);
+int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len);
 
 // Keepalive API ─────────────────────────────────────────────────────────────
 
 /** Send an encrypted PING frame. */
-int usmp_ping(usmp_t *ctx);
+int usmp_ping(usmp_t* ctx);
 
 /** Send PING if keepalive_ms has elapsed since last tx. No-op if keepalive_ms==0. */
-int usmp_keepalive_tick(usmp_t *ctx);
+int usmp_keepalive_tick(usmp_t* ctx);
 
 #ifdef __cplusplus
 }

@@ -19,11 +19,11 @@ extern "C" {
 #define USMP_TYPE_PONG 0x07
 #define USMP_TYPE_BYE 0x08
 #define USMP_TYPE_DATA_FRAG 0x09
-#define USMP_TYPE_ERROR 0xFF // Unused (reserved for future error reporting)
+#define USMP_TYPE_ERROR 0xFF  // Unused (reserved for future error reporting)
 
 // Frame sizes
 #define USMP_HEADER_SIZE 12
-#define USMP_MAX_PAYLOAD 480 // matches Python SDK
+#define USMP_MAX_PAYLOAD 480  // matches Python SDK
 #define USMP_MAX_FRAMES 4
 #define USMP_GCM_TAG_LEN 16
 
@@ -39,9 +39,9 @@ typedef struct __attribute__((packed)) {
 } usmp_packet_t;
 
 // Functions
-uint16_t usmp_crc16(const uint8_t *data, uint16_t len);
-int usmp_build_packet(usmp_packet_t *pkt, uint8_t *out, uint16_t *out_len);
-int usmp_parse_packet(uint8_t *data, int len, usmp_packet_t *pkt);
+uint16_t usmp_crc16(const uint8_t* data, uint16_t len);
+int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len);
+int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt);
 
 #ifdef __cplusplus
 }
