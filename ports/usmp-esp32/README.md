@@ -4,7 +4,7 @@ Lightweight, mutually authenticated, AES-256-GCM encrypted communication for ESP
 No TLS stack. No certificates. Three function calls.
 
 ```bash
-idf_component_manager add metaloomlabs/usmp
+idf.py add-dependency "metaloomlabs/usmp"
 ```
 
 ## Why USMP
@@ -40,9 +40,7 @@ idf.py add-dependency "metaloomlabs/usmp"
 
 No extra Kconfig entries required. USMP uses standard ESP-IDF `esp_wifi`, `lwip`, and `mbedtls` (only for AES-GCM and SHA-256 primitives — no TLS handshake).
 
-### 2. Implement the five port hooks in your project
-
-Create `usmp_port_impl.c`:
+*Note: The `metaloomlabs/usmp` component already provides the default implementations of these hooks dynamically. You do not need to define them yourself. For reference (or STM32/custom ports), their correct signatures are:*
 
 ```c
 #include "usmp_port.h"
@@ -53,12 +51,15 @@ Create `usmp_port_impl.c`:
 
 static const uint8_t DEVICE_ID[6] = {0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01};
 
-void usmp_port_get_device_id(uint8_t out[6]) {
+int usmp_port_get_device_id(uint8_t *out, size_t len) {
+    if (len < 6) return -1;
     memcpy(out, DEVICE_ID, 6);
+    return 0;
 }
 
-void usmp_port_random(uint8_t *buf, size_t len) {
+int usmp_port_random(uint8_t *buf, size_t len) {
     esp_fill_random(buf, len);
+    return 0;
 }
 
 void usmp_port_delay_ms(uint32_t ms) {
@@ -69,8 +70,8 @@ uint32_t usmp_port_millis(void) {
     return (uint32_t)(esp_timer_get_time() / 1000ULL);
 }
 
-void usmp_port_log(const char *msg) {
-    ESP_LOGI("USMP", "%s", msg);
+void usmp_port_log(char level, const char *tag, const char *msg) {
+    ESP_LOGI(tag, "%s", msg);
 }
 ```
 
@@ -78,25 +79,29 @@ void usmp_port_log(const char *msg) {
 
 ```c
 #include "usmp.h"
-#include "usmp_transport.h"   // TCP transport
+#include "usmp_transport.h"   // TCP/UDP transport
 
 static const char PSK[] = "usmp-dev-psk-change-me-before-prod";
 
 void app_main(void) {
     // ... WiFi connect ...
 
-    usmp_transport_t transport;
-    usmp_tcp_transport_init(&transport, "192.168.1.100", 9000);
+    usmp_t ctx = {0};
+    usmp_transport_t transport = {0};
 
-    usmp_ctx_t ctx;
-    usmp_config_t cfg = {
-        .psk      = (const uint8_t *)PSK,
-        .psk_len  = strlen(PSK),
-        .keepalive_ms = 5000,
-    };
+    // Set credentials and configuration on context
+    ctx.psk = (const uint8_t *)PSK;
+    ctx.psk_len = strlen(PSK);
+    ctx.keepalive_ms = 15000; // PING every 15s when idle
 
-    if (usmp_connect(&ctx, &transport, &cfg) != USMP_OK) {
-        ESP_LOGE("APP", "Handshake failed");
+    // Initialize TCP transport
+    if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
+        ESP_LOGE("APP", "Failed to connect TCP transport");
+        return;
+    }
+
+    if (usmp_connect(&ctx, &transport) != 0) {
+        ESP_LOGE("APP", "USMP handshake failed");
         return;
     }
 
@@ -104,17 +109,23 @@ void app_main(void) {
     uint8_t msg[] = "hello";
     usmp_send(&ctx, msg, sizeof(msg) - 1);
 
-    // Receive (blocking, with timeout)
+    // Receive
     uint8_t buf[256];
-    int n = usmp_recv(&ctx, buf, sizeof(buf), 3000);
+    int n = usmp_recv(&ctx, buf, sizeof(buf));
     if (n > 0) {
         ESP_LOGI("APP", "Got %d bytes", n);
     }
 
     // Keepalive / reconnect loop
     while (true) {
-        usmp_keepalive_tick(&ctx);
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        
+        if (usmp_keepalive_tick(&ctx) != 0) {
+            ESP_LOGW("APP", "Connection lost! Reconnecting...");
+            while (usmp_reconnect(&ctx) != 0) {
+                vTaskDelay(pdMS_TO_TICKS(2000));
+            }
+        }
     }
 }
 ```
@@ -186,15 +197,16 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 
 ## Roadmap
 
-| Version | Feature |
-|---------|---------|
-| v0.2.x  | TCP/Wi-Fi, mutual auth, AES-256-GCM, Python SDK, 61 tests |
-| v0.3.0  | ESP-IDF Component Registry + PlatformIO publish |
-| v0.4.0  | UART transport (COBS framing) |
-| v0.5.0  | Discovery CLI + mDNS |
-| v0.6.0  | OTA firmware (Ed25519 signed, atomic swap) |
-| v1.0.0  | Cloud bridge, Arduino Library Manager |
+| Version | Feature | Status |
+|---------|---------|--------|
+| v0.2.0  | Core protocol, Keepalive mechanism, and Arduino Port | Released |
+| v0.3.0  | Python SDK published on PyPI | Released |
+| v0.4.0  | UART Transport layer with COBS framing & sliding window | Released |
+| v0.4.7  | Hardening (Deterministic Nonces, Rate Limiting, Fragmentation) | Released |
+| v0.5.0  | UDP transport support fully complete and production-ready | Released |
+| v0.5.5  | CLI tools and auto-discovery (mDNS / UDP) | Planned |
+| v0.6.0  | Secure OTA firmware updates with Ed25519 signatures | Planned |
 
 ## License
 
-MIT — see [LICENSE](https://github.com/metaloomlabs/usmp/blob/main/LICENSE)
+Apache-2.0 — see [LICENSE](https://github.com/metaloomlabs/usmp/blob/main/LICENSE)

@@ -24,7 +24,7 @@ client = USMPClient(
 * **`port`** *(int)*: Target port number (default is `9000`).
 * **`psk`** *(bytes)*: Pre-Shared Key (PSK). This must match the key expected by the server for this device!
 * **`device_id`** *(bytes, optional)*: A unique 6-byte hardware identity. If you omit this parameter, the client automatically generates a random 6-byte identifier at runtime using `os.urandom(6)`.
-* **`protocol`** *(USMPProtocol | str, optional)*: The transport protocol to use:
+* **`protocol`** *(USMPProtocol | str, optional)*: The transport protocol to use (default is `"tcp"` or `USMPProtocol.TCP`):
   * `"tcp"` (or `USMPProtocol.TCP`): Connect over standard TCP socket.
   * `"udp"` (or `USMPProtocol.UDP`): Connect over UDP socket with USMP reliability wrapper.
 
@@ -59,7 +59,6 @@ Gracefully sends a `PKT_BYE` frame to notify the server and closes the underlyin
 ## Properties
 
 * **`client.session_id`** *(str | None)*: Once the handshake completes successfully, this returns the active Session ID as a 32-character hexadecimal string. Returns `None` if the client is not connected.
-* **`client.device_id`** *(bytes)*: The 6-byte device identifier currently used by this client.
 
 ## Complete Client Example
 

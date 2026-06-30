@@ -1,6 +1,6 @@
-# USMP Specification | Protocol Version v0.4.7
+# USMP Technical Specification | Version v0.5.1
 
-Welcome to the official technical specification for the **Unified Secure Multi-transport Protocol (USMP) v0.4.7**.
+Welcome to the official technical specification for the **Unified Secure Multi-transport Protocol (USMP) v0.5.1**.
 
 This document serves as the canonical reference for developers implementing USMP client libraries, server SDKs, or alternative transport adapters. It covers frame layouts, cryptographic sequences, state machine rules, and resource limits.
 
@@ -200,9 +200,9 @@ USMP uses **zero heap allocations** once a session is established.
   * *32-bit (ESP32)*: **~108 bytes** of persistent RAM.
   * *64-bit*: **~160–180 bytes** of persistent RAM.
 * **Stack Bounding**:
-  * Standard `usmp_send` or `usmp_recv` calls use **~1 KB** of stack space.
+  * Standard `usmp_send` or `usmp_recv` calls allocate transient frame buffers (~492 bytes each) on the stack, consuming up to ~1 KB of stack space.
 * **Handshake Peak Memory**:
   * Peak stack allocation: **~1 KB** stack inside the handshake runner.
   * Dynamic Heap Allocations (freed and zeroed immediately after handshake):
-    * Transient local buffers: **1 KB** (two 512-byte buffers to avoid stack bloat on microcontrollers).
+    * Transient local buffers: **1 KB** (two 512-byte heap-allocated buffers to prevent stack overflows during the expensive key exchange phase).
     * mbedTLS contexts: **~2 KB to 4 KB** dynamic memory for ECDH arithmetic, seeds, and key negotiation.

@@ -11,9 +11,9 @@
  *
  * Wire format of output:  nonce(12) || ciphertext(plain_len) || tag(16)
  *
- * The 12-byte nonce is generated fresh by usmp_port_random() for every call,
- * guaranteeing that the (key, nonce) pair is never reused regardless of
- * sequence number, session length, or key material.
+ * The 12-byte nonce is constructed deterministically from the 32-bit sequence
+ * number and the session ID, guaranteeing that the (key, nonce) pair is never
+ * reused regardless of sequence number or session length.
  */
 int usmp_gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
                      const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {

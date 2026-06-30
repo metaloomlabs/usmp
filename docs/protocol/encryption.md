@@ -134,7 +134,7 @@ When a packet is received, the receiver doesn't just decrypt it—it performs **
 
     # 2. Extract and verify received nonce
     received_nonce = nonce_ct_tag[:12]
-    if not hmac.compare_digest(received_nonce, expected_nonce):
+    if received_nonce != expected_nonce:
         raise CryptoError("Nonce mismatch")
 
     # 3. Decrypt and verify tag
