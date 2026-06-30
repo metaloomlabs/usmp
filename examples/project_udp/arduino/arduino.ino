@@ -1,4 +1,3 @@
-// examples/project_udp/arduino/arduino.ino
 #include <USMP.h>
 
 // ── Config

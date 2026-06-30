@@ -11,7 +11,7 @@
 #include "nvs_flash.h"
 
 #define WIFI_SSID "connecting....."
-#define WIFI_PASS "YOUR_WIFI_PASSWORD"
+#define WIFI_PASS "your_pass"
 #define STATIC_IP "192.168.1.10"
 #define STATIC_GW "192.168.1.1"
 #define STATIC_NETMASK "255.255.255.0"

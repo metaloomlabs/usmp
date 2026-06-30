@@ -1,4 +1,3 @@
-// examples/project_udp/esp32/main/wifi.c
 #include <string.h>
 
 #include "esp_event.h"
@@ -11,7 +10,7 @@
 #include "nvs_flash.h"
 
 #define WIFI_SSID "connecting....."
-#define WIFI_PASS "YOUR_WIFI_PASSWORD"
+#define WIFI_PASS "your_pass"
 
 static const char* TAG = "WIFI";
 static EventGroupHandle_t s_wifi_event_group;

@@ -17,8 +17,8 @@ void app_main(void) {
     return;
   }
 
-  const char* server_ip = "192.168.1.100";
-  const int port = USMP_DEFAULT_PORT;
+  const char* server_ip = "[IP_ADDRESS]";
+  const int port = 9000;
 
   usmp_t ctx = {0};
   usmp_transport_t transport = {0};
