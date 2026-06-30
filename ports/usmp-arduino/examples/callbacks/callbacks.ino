@@ -40,7 +40,12 @@ void setup() {
   usmp.onReconnect(onReconnect);
   usmp.onMessage(onMessage);
 
-  if (usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
+  // Connect WiFi + Transport + handshake in one call
+  // Choose either TCP or UDP (uncomment the one you want to use)
+  auto transport = USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
+  // auto transport = USMP::UDP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
+
+  if (usmp.begin(transport)) {
     usmp.keepalive(15000); // PING every 15s — must be called after begin()
   }
 

@@ -15,8 +15,12 @@ USMPClient usmp(PSK);
 void setup() {
   Serial.begin(115200);
 
-  // Connect WiFi + TCP + handshake in one call
-  if (!usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
+  // Connect WiFi + Transport + handshake in one call
+  // Choose either TCP or UDP (uncomment the one you want to use)
+  auto transport = USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
+  // auto transport = USMP::UDP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
+
+  if (!usmp.begin(transport)) {
     Serial.println("USMP connect failed — check server and PSK");
     return;
   }
