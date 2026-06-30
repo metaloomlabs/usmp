@@ -22,10 +22,10 @@ pip install usmp
 
 ```python
 import asyncio
-from usmp import USMPServer, USMPSession, ConnectionClosedError
+from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
-# Initialize server (protocol="tcp" or protocol="udp")
-server = USMPServer(host="0.0.0.0", port=9000, psk=b"your-psk-here", protocol="tcp")
+# Initialize server
+server = USMPServer(host="0.0.0.0", port=9000, psk=b"your-psk-here", protocol=USMPProtocol.TCP)
 
 @server.on_session
 async def handle(session: USMPSession):
@@ -49,11 +49,11 @@ if __name__ == "__main__":
 
 ```python
 import asyncio
-from usmp import USMPClient
+from usmp import USMPClient, USMPProtocol
 
 async def main():
-    # Initialize client (protocol="tcp" or protocol="udp")
-    client = USMPClient(host="127.0.0.1", port=9000, psk=b"your-psk-here", protocol="tcp")
+    # Initialize client
+    client = USMPClient(host="127.0.0.1", port=9000, psk=b"your-psk-here", protocol=USMPProtocol.TCP)
     await client.connect()
     
     await client.send(b"hello")

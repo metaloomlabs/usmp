@@ -12,14 +12,14 @@ Create a file named `server_tcp.py` on your gateway/laptop:
 
 ```python
 import asyncio
-from usmp import USMPServer, USMPSession, ConnectionClosedError
+from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
 # Use the secure PSK generated during the installation phase
 # (For testing, you can use a development string)
 PSK = b"usmp-dev-psk-change-me-before-prod"
 
 # Initialize the server to listen on TCP port 9000
-server = USMPServer(host="0.0.0.0", port=9000, psk=PSK)
+server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol=USMPProtocol.TCP)
 
 @server.on_session
 async def handle_device(session: USMPSession):

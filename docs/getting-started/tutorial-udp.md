@@ -14,12 +14,12 @@ Create `server_udp.py`:
 
 ```python
 import asyncio
-from usmp import USMPServer, USMPSession, ConnectionClosedError
+from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 
 # Initialize the server over UDP
-server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol="udp")
+server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol=USMPProtocol.UDP)
 
 @server.on_session
 async def handle_device(session: USMPSession):

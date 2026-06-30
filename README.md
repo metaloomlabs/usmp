@@ -70,12 +70,12 @@ Run `pip install usmp` and launch this async gateway server:
 
 ```python
 import asyncio
-from usmp import USMPServer, USMPSession, ConnectionClosedError
+from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 
-# Initialize TCP (default) or UDP server (use protocol="udp")
-server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol="tcp")
+# Initialize TCP or UDP server
+server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol=USMPProtocol.TCP)
 
 @server.on_session
 async def handle_device(session: USMPSession):
