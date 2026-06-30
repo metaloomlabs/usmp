@@ -12,6 +12,7 @@ public:
   explicit USMPClient(const char *psk);
   ~USMPClient();
   bool begin(USMPTCPTransport transport);
+  bool begin(USMPUDPTransport transport);
   bool send(const char *str);
   bool send(const String &str);
   bool send(const uint8_t *data, size_t len);

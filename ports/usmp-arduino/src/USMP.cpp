@@ -66,6 +66,45 @@ bool USMPClient::begin(USMPTCPTransport transport) {
   return true;
 }
 
+bool USMPClient::begin(USMPUDPTransport transport) {
+
+  // WiFi
+  if (transport._ssid) {
+    Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
+    if (!transport.connectWiFi()) {
+      Serial.println("[USMP] WiFi connect failed");
+      return false;
+    }
+    Serial.printf("[USMP] WiFi connected — IP: %s\n",
+                  WiFi.localIP().toString().c_str());
+  }
+
+  // UDP transport init ────────────────────────────────────────────────────
+  memset(&_transport, 0, sizeof(_transport));
+  if (!transport.init(&_transport)) {
+    Serial.println("[USMP] UDP connect failed");
+    return false;
+  }
+
+  // USMP handshake ─────────────────────────────────────────────────────────
+  memset(&_ctx, 0, sizeof(_ctx));
+  _apply_psk();
+  _ctx.keepalive_ms = 30000; // 30s default
+
+  if (usmp_connect(&_ctx, &_transport) != 0) {
+    Serial.println("[USMP] Handshake failed");
+    return false;
+  }
+
+  _initialized = true;
+  _backoff_ms = 2000;
+  _last_attempt_ms = 0;
+
+  if (_on_connect)
+    _on_connect();
+  return true;
+}
+
 // send ──────────────────────────────────────────────────────────────────────
 
 bool USMPClient::send(const char *str) {
