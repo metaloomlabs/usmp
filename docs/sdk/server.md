@@ -15,14 +15,15 @@ server = USMPServer(
     psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes] = b"",
     handshake_timeout: float = 10.0,
     session_timeout: float = 60.0,
-    on_timeout: Callable[[str, str], Awaitable[None]] | None = None
+    on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
+    protocol: USMPProtocol | str = USMPProtocol.TCP
 )
 ```
 
 ### Parameter Details
 
 * **`host`** *(str)*: The IP address to bind to. Use `"0.0.0.0"` to listen on all network interfaces.
-* **`port`** *(int)*: The TCP port to open. Defaults to `9000`.
+* **`port`** *(int)*: The network port to open. Defaults to `9000`.
 * **`psk`** *(bytes | dict | Callable)*: The Pre-Shared Key configuration. This parameter is highly flexible:
   * **Single Key (`bytes`)**: All connecting devices share the exact same key. Great for simple setups.
   * **Registry Map (`dict`)**: A dictionary mapping individual device IDs (`bytes`) to unique PSKs.
@@ -35,6 +36,9 @@ server = USMPServer(
     async def handle_timeout(device_id: str, session_id: str):
         print(f"Device {device_id} went quiet. Session {session_id} expired.")
     ```
+* **`protocol`** *(USMPProtocol | str)*: The transport protocol to run:
+  * `"tcp"` (or `USMPProtocol.TCP`): Spawns a standard asyncio TCP listener.
+  * `"udp"` (or `USMPProtocol.UDP`): Spawns an asyncio datagram endpoint, managing multiple UDP clients on the same port using their IP/port addresses.
 
 ## The `@on_session` Decorator
 

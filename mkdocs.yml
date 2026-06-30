@@ -65,42 +65,39 @@ markdown_extensions:
       permalink: true
 
 nav:
-  - Home: index.md
-  - Getting Started:
-      - What is USMP?: getting-started/what-is-usmp.md
-      - Quick Start (ESP32): getting-started/quickstart-esp32.md
-      - Quick Start (Arduino): getting-started/quickstart-arduino.md
-      - Quick Start (Python): getting-started/quickstart-python.md
-      - Installation: getting-started/installation.md
-  - Protocol:
+  - Welcome: index.md
+  - Tutorials:
+      - Introduction: getting-started/what-is-usmp.md
+      - Installation & Setup: getting-started/installation.md
+      - 1. Your First TCP Tunnel: getting-started/tutorial-tcp.md
+      - 2. Going Connectionless (UDP): getting-started/tutorial-udp.md
+      - 3. Production Hardening: getting-started/production-hardening.md
+  - Porting & Custom Transports:
+      - ESP-IDF Port: ports/esp32.md
+      - Arduino Library: ports/arduino.md
+      - Porting Guide: ports/porting-guide.md
+  - Python SDK Reference:
+      - Overview: sdk/python.md
+      - USMPServer: sdk/server.md
+      - USMPClient: sdk/client.md
+      - USMPSession: sdk/session.md
+  - Protocol Specification:
       - Overview: protocol/overview.md
-      - Frame Format: protocol/frame-format.md
-      - Handshake: protocol/handshake.md
-      - Encryption: protocol/encryption.md
+      - Wire Format: protocol/frame-format.md
+      - Handshake Mechanics: protocol/handshake.md
+      - Cryptographic Details: protocol/encryption.md
       - Sequence Numbers: protocol/sequence-numbers.md
       - Error Handling: protocol/error-handling.md
-  - Ports:
-      - ESP32: ports/esp32.md
-      - Arduino: ports/arduino.md
-      - Porting Guide: ports/porting-guide.md
-  - SDK:
-      - Python SDK:
-          - Overview: sdk/python.md
-          - USMPServer: sdk/server.md
-          - USMPClient: sdk/client.md
-          - USMPSession: sdk/session.md
+  - Security Model:
+      - Architecture: security/model.md
+      - Key Management: security/psk.md
+      - Threat Analysis: security/threat-model.md
   - Tools:
-      - CLI (coming soon): tools/cli.md
-  - Security:
-      - Security Model: security/model.md
-      - PSK Management: security/psk.md
-      - Threat Model: security/threat-model.md
-  - Examples:
-      - ESP32 + Python Server: examples/esp32-python.md
-      - D2D (coming soon): examples/d2d.md
-  - Troubleshooting: troubleshooting.md
-  - Debugging: debugging.md
-  - Spec: spec.md
+      - CLI Tools (coming soon): tools/cli.md
+  - Troubleshooting:
+      - Diagnostic Guides: troubleshooting.md
+      - Debugging & Trace: debugging.md
+  - Specifications: spec.md
 
 extra:
   social:

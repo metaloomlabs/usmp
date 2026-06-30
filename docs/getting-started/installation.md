@@ -1,98 +1,16 @@
-# Installing USMP
+# Installation & Environment Setup
 
-USMP is built in two primary parts: a **pure C core** (for embedded devices) and a **Python asyncio SDK** (for gateways, servers, and testing).
+This tutorial guides you through installing the USMP development libraries and generating the Pre-Shared Keys (PSK) required to secure your devices.
 
-Below you will find the setup instructions for each platform.
+USMP has two primary components:
+1.  **Pure C Core**: Compiled on the microcontrollers (available via the ESP Component Registry and a pre-packaged Arduino ZIP).
+2.  **Python asyncio SDK**: Runs on your gateway or server (available via PyPI).
 
-## Option 1: ESP32 (ESP-IDF Component)
+---
 
-If you are developing native applications using the Espressif IoT Development Framework (ESP-IDF), USMP is designed to drop in as a standard component.
+## 1. Install the Python asyncio SDK (Gateway / Server)
 
-### What You'll Need
-
-* **ESP-IDF** (v5.0 or later recommended).
-* **CMake** (v3.16 or later).
-
-### Setup Instructions
-
-1. **Clone the USMP repository** into your project's components folder, or clone it elsewhere and refer to it:
-
-   ```bash
-   git clone https://github.com/metaloomlabs/usmp.git
-   ```
-
-2. **Configure your Project's `CMakeLists.txt`** to declare the component path:
-
-   ```cmake
-   cmake_minimum_required(VERSION 3.16)
-
-   # Tell CMake where to find the USMP component
-   set(EXTRA_COMPONENT_DIRS
-       "/path/to/usmp/ports/usmp-esp32"
-   )
-
-   include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-   project(your_project)
-   ```
-
-3. **Declare Dependency** inside your application's `main/CMakeLists.txt`:
-
-   ```cmake
-   idf_component_register(
-       SRCS "app.c"
-       INCLUDE_DIRS "."
-       REQUIRES usmp-esp32
-   )
-   ```
-
-4. **Include the Headers** in your application code:
-
-   ```c
-   #include "usmp.h"
-   #include "usmp_transport.h"
-   ```
-
-## Option 2: Arduino IDE (ESP32 Cores)
-
-If you prefer building within the Arduino environment, USMP is packaged as a standard Arduino library.
-
-### What You'll Need
-
-* **Arduino IDE** (v2.0 or later) or PlatformIO.
-* **ESP32 Arduino Core** (v2.0 or later) installed inside your IDE.
-
-### Setup Instructions
-
-=== "Import via ZIP (Recommended)"
-    1. Find the pre-packaged zip archive (e.g., `usmp-0.4.7-arduino.zip`) in the root of your local repository copy.
-    2. Open the Arduino IDE.
-    3. Click on **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
-    4. Select the zip file.
-
-=== "Manual Copy"
-    1. Copy the `ports/usmp-arduino/` folder.
-    2. Paste it directly into your local Arduino libraries folder:
-       ***Windows**: `Documents/Arduino/libraries/USMP`
-       * **macOS / Linux**: `~/Arduino/libraries/USMP`
-    3. Restart your Arduino IDE to trigger a refresh.
-
-### Include the Library
-
-In your sketch, include the main header file:
-
-```cpp
-#include <USMP.h>
-```
-
-## Option 3: Python SDK (Gateways & Tools)
-
-The Python SDK is async-driven, making it perfect for writing gateways, backend integrations, or test scripts.
-
-### What You'll Need
-
-* **Python** (v3.11 or later).
-
-### Setup Instructions
+The Python SDK manages the server gateways, registers connected devices, and performs the heavy lifting for decryption and key management. It requires **Python 3.11 or later**.
 
 === "Using pip"
     ```bash
@@ -104,67 +22,64 @@ The Python SDK is async-driven, making it perfect for writing gateways, backend 
     uv add usmp
     ```
 
-=== "From Source (Editable Mode)"
-    If you want to edit or develop the Python SDK yourself:
-    ```bash
-    git clone https://github.com/metaloomlabs/usmp.git
-    cd usmp
-    uv add --editable sdk/python
-    ```
+To verify the installation succeeded:
+```bash
+python -c "import usmp; print(usmp.__version__)"
+```
 
-## Configuring Your Credentials
+---
 
-### 1. The Pre-Shared Key (PSK)
+## 2. Install the ESP32 Component (ESP-IDF)
 
-For security, USMP does **not** support hardcoded compile-time keys. You must load and apply your PSK at runtime.
+For native C development on Espressif chips using ESP-IDF (v5.0 or later), USMP is published directly in the Espressif Component Registry.
 
-=== "ESP32 (ESP-IDF)"
-    ```c
-    usmp_t ctx = {0};
+Open your ESP-IDF project terminal and run:
+```bash
+idf.py add-dependency "metaloomlabs/usmp"
+```
 
-    // We recommend loading the PSK from secure NVS storage
-    static const uint8_t secret_psk[] = "your-secret-key-here";
-    ctx.psk     = secret_psk;
-    ctx.psk_len = sizeof(secret_psk) - 1; // Exclude null terminator
-    ```
+This will automatically download and append USMP to your project's `main/idf_component.yml` dependency declaration. When you next run `idf.py build`, the compiler will automatically fetch and compile the component.
 
-=== "Arduino"
-    ```cpp
-    // Pass the PSK directly into the client constructor
-    USMPClient usmp("your-secret-key-here");
-    ```
+---
 
-=== "Python"
-    ```python
-    # Pass the key to the Server or Client instance
-    PSK = b"your-secret-key-here"
-    server = USMPServer(host="0.0.0.0", port=9000, psk=PSK)
-    ```
+## 3. Install the Arduino Library (ESP32 Cores)
+
+For Arduino C++ development, the USMP library is packaged as an offline ZIP archive.
+
+1.  Locate the pre-built ZIP package: `usmp-0.5.1-arduino.zip` (found in your workspace artifacts/releases folder).
+2.  Open the **Arduino IDE** (v2.0 or later).
+3.  Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
+4.  Navigate to and select the `usmp-0.5.1-arduino.zip` file.
+5.  Click **Open** to import the library.
+
+To verify installation, you can inspect your libraries folder. The IDE will now recognize the `#include <USMP.h>` header.
+
+---
+
+## 4. Generate a Secure Pre-Shared Key (PSK)
+
+USMP requires both the client device and the server to share a Pre-Shared Key (PSK) to establish the initial handshake trust. 
 
 > [!WARNING]
-> Never deploy with default or public development keys in production.
-> To generate a cryptographically strong random key for your production environment:
->
-> ```bash
-> python -c "import secrets; print(secrets.token_hex(32))"
-> ```
+> **Never use generic or weak keys (such as `123456` or `my-psk`) in production.** 
+> Use cryptographically strong random bytes.
 
-### 2. Custom Port Bindings
+You can quickly generate a secure 32-byte (256-bit) hexadecimal key using Python's built-in `secrets` module:
 
-USMP defaults to port `9000`. You can easily adjust this if port conflicts occur:
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
 
-=== "ESP32 (ESP-IDF)"
-    ```c
-    usmp_transport_tcp_init(&transport, "192.168.1.100", 8888);
-    ```
+This will output a 64-character hexadecimal string, for example:
+`2a8d56b3e410ff02ad84620ea1901a88b50df3651c4a0910bc4f794d21e8e4bc`
 
-=== "Arduino"
-    ```cpp
-    // Pass custom port as the second parameter to USMP::TCP (default is 9000)
-    usmp.begin(USMP::TCP("192.168.1.100", 8888).wifi("SSID", "PASS"));
-    ```
+Keep this key secure. You will pass it to both your gateway server and your microcontrollers in the next tutorials.
 
-=== "Python"
-    ```python
-    server = USMPServer(host="0.0.0.0", port=8888, psk=PSK)
-    ```
+---
+
+## Next Steps
+
+Now that your tools are installed and you have a secure PSK, proceed to build your first connection:
+*   **[Tutorial 1: Your First TCP Tunnel](tutorial-tcp.md)** — Connect your ESP32 or Arduino to a Python server using TCP sockets.
+*   **[Tutorial 2: Going Connectionless (UDP)](tutorial-udp.md)** — Learn how to set up and run USMP over UDP.
+

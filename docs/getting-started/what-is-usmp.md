@@ -1,69 +1,87 @@
-# Welcome to USMP: Unified Secure Multi-transport Protocol
+# Introduction to USMP
 
-Secure communication for IoT devices shouldn't be hard. Yet today, developers are forced to choose between two extremes:
-* **Raw TCP (Simple but completely insecure)**: Your packets are sent in plain text, open to eavesdropping and manipulation.
-* **Full TLS (Secure but incredibly heavy)**: Demands massive CPU cycles, eats up heap memory, requires managing complex public-key infrastructure (PKI) certificates, and is generally a headache to debug on constrained microcontrollers.
+Secure communication for IoT devices shouldn't be complex. Yet today, developers are forced to choose between two extremes:
+*   **Raw Sockets (Simple but insecure)**: Packets are sent in plaintext, vulnerable to eavesdropping, manipulation, and spoofing.
+*   **Full TLS / DTLS (Secure but heavy)**: Requires extensive RAM and flash storage, calls for complex public-key infrastructure (PKI) certificates, involves slow handshakes, and is difficult to compile and debug on constrained microcontrollers.
 
-**USMP fills this gap.** It gives your hardware production-grade security (mutual authentication, forward secrecy, and AES-256-GCM encryption) with the ease of three simple function calls.
+**USMP (Unified Secure Multi-transport Protocol) bridges this gap.** It gives your hardware production-grade security (mutual authentication, perfect forward secrecy, and AES-256-GCM encryption) with zero-configuration runtime setup.
 
-## What USMP Is (and What It Isn't)
+---
 
-To understand how USMP fits into your project, it's helpful to see what it is built for:
+## Architecture Overview
 
-### What USMP Is
-* **A Session Protocol**: It creates a secure, authenticated bridge (a session) between two endpoints.
-* **Transport Agnostic**: It does not care how bytes move. It runs beautifully over TCP sockets, serial UART wires, UDP, or BLE.
-* **Lightweight & Binary**: Designed from the ground up for microcontrollers. There is no JSON parser, XML parsing, or heavy certificate checking—just tight, efficient binary frames.
-* **Secure by Default**: There is no "insecure mode." Every single byte sent post-handshake is encrypted and verified.
+USMP operates as a lightweight session layer. It wraps your application-level payloads (like JSON sensor readings or binary control logs) inside a secure, encrypted envelope, which is then serialized and passed down to an underlying transport layer.
 
-### What USMP Is Not
-* **An Application Protocol**: USMP is not a replacement for MQTT or HTTP. It handles the **device-to-gateway** security layer. Your app payloads (like JSON sensor readings or binary control logs) sit *inside* the secure USMP envelope.
-* **A Wireless Protocol**: It runs on top of whatever network layer you already have configured (WiFi, cellular, serial).
-* **A Cloud Broker**: It does not require any cloud infrastructure. It runs entirely on your own local gateway and end-device hardware.
-
-## The Three-Function Developer API
-
-Integrating USMP into your C application takes only a few lines of code:
-
-```c
-// 1. Set up the transport and connect
-usmp_transport_t transport = {0};
-usmp_transport_tcp_init(&transport, "192.168.1.100", 9000);
-
-usmp_t ctx = {0};
-static const uint8_t psk[] = "your-secret-key";
-ctx.psk     = psk;
-ctx.psk_len = sizeof(psk);
-
-if (usmp_connect(&ctx, &transport) == 0) {
-    // 2. Send secure, encrypted data
-    usmp_send(&ctx, (const uint8_t *)"Hello Gateway", 13);
-    
-    // 3. Receive secure, decrypted data
-    uint8_t buffer[256];
-    int len = usmp_recv(&ctx, buffer, sizeof(buffer));
-}
+```text
++---------------------------------------+
+|        Your Application Data          |  <-- JSON, logs, bytes, telemetry
++---------------------------------------+
+                   |
+                   v
++---------------------------------------+
+|          USMP Session Layer           |  <-- Handles handshake, AES-256-GCM,
+|       (Mutual Auth & Encryption)      |      and sequence tracking
++---------------------------------------+
+                   |
+                   v
++---------------------------------------+
+|        Transport Abstraction          |  <-- Stream-like interface
++---------------------------------------+
+                   |
+       +-----------+-----------+
+       |                       |
+       v                       v
++-------------+         +-------------+
+| TCP Sockets |         | UDP Sockets |    <-- Physical networking layers
++-------------+         +-------------+
 ```
 
-That is the entire API surface you need for 90% of your usage.
+---
 
-## Security Checklist: How USMP Protects You
+## Core Guarantees: How USMP Protects Your Data
 
-Here is a quick look at the cryptographic armor USMP wraps around your device's traffic:
+Every USMP session provides five critical security guarantees:
 
-| Security Goal | How USMP Achieves It |
-|---|---|
-| **Identity Verification** | **HMAC-SHA256 with a Pre-Shared Key (PSK)**. Both the device and the gateway prove to each other that they know the secret key without sending the key over the air. |
-| **Confidentiality (Secrecy)** | **AES-256-GCM**. All session data is fully encrypted. Anyone sniffing the network sees only random-looking noise. |
-| **Data Integrity** | **AES-GCM Authenticated Tag**. If an attacker tampers with even a single bit of a frame in transit, decryption fails instantly and the session is dropped. |
-| **Forward Secrecy** | **X25519 Ephemeral Key Exchange**. Ephemeral keys are generated fresh for every session and thrown away. If your PSK leaks in the future, past session traffic remains completely secure. |
-| **Replay Protection** | **Deterministic Nonces + Monotonic Sequence Numbers**. Prevents attackers from capturing valid packets and re-sending them later to mimic commands. |
-| **Key Derivation** | **HKDF-SHA256**. Generates cryptographic-grade session keys from the key exchange secrets. |
+1.  **Identity Verification**: Mutual authentication is achieved using a Pre-Shared Key (PSK). During the handshake, both the client and the gateway prove knowledge of the PSK using HMAC-SHA256 proofs without sending the key over the air.
+2.  **Ephemereal Confidentiality**: All data is encrypted using AES-256-GCM. An eavesdropper sniffing the network will see only randomized ciphertext.
+3.  **Data Integrity & Authenticity**: The AES-GCM tag ensures that if any part of the frame is modified in transit, decryption fails instantly and the session drops immediately.
+4.  **Perfect Forward Secrecy (PFS)**: An ephemeral X25519 key exchange occurs during the initial handshake. Once the session ends, the temporary keys are discarded. If the master Pre-Shared Key is leaked in the future, past recorded sessions remain completely secure.
+5.  **Replay and Collision Protection**: Strict, monotonic 32-bit sequence numbers prevent attackers from capturing and replaying valid command frames. Under the hood, AES-GCM nonces are constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate any risks of nonce collisions.
 
-## Where to Go Next?
+---
 
-Ready to build? Dive into the quickstarts:
-* [Quick Start (ESP-IDF)](quickstart-esp32.md) — Get running on ESP32 native C.
-* [Quick Start (Arduino)](quickstart-arduino.md) — Build using the C++ Arduino client.
-* [Quick Start (Python)](quickstart-python.md) — Launch your Python gateway server.
-* [Protocol Specifications](../protocol/overview.md) — Peek under the hood.
+## The Handshake Sequence
+
+USMP establishes secure sessions using a 4-message handshake:
+
+```text
+Device (Client)                                          Gateway (Server)
+       │                                                         │
+       │ ─── 1. HELLO (device_id, pub_C) ──────────────────────> │
+       │                                                         │
+       │ <── 2. CHALLENGE (nonce, pub_S) ─────────────────────── │
+       │                                                         │ [Derive Shared Secret X25519]
+       │                                                         │ [Derive HKDF Session Keys]
+       │ ─── 3. HELLO_ACK (HMAC_client) ───────────────────────> │
+       │                                                         │ [Verify Client HMAC]
+       │ <── 4. SESSION_OK (session_id, HMAC_server) ─────────── │
+       │                                                         │
+       ├────────────────── Secure Session Active ────────────────┤
+       │                                                         │
+       │ ═══ DATA Frame (AES-256-GCM encrypted) ═══════════════> │
+```
+
+1.  **`HELLO`**: The client initiates by sending its unique Hardware ID alongside its ephemeral X25519 public key (`pub_C`).
+2.  **`CHALLENGE`**: The gateway responds with a random salt (`nonce`) and its own ephemeral X25519 public key (`pub_S`).
+3.  **`HELLO_ACK`**: Both endpoints calculate the X25519 shared secret. Using HKDF-SHA256, they derive temporary keys. The client then calculates an HMAC using the Pre-Shared Key (PSK), cryptographically binding `pub_C` and `pub_S` to prove identity and prevent Man-in-the-Middle (MITM) key-swapping.
+4.  **`SESSION_OK`**: The gateway verifies the client's proof, computes its own binding HMAC, and returns a unique Session ID.
+
+From this point forward, both sides communicate using symmetric AES-256-GCM session keys. The master PSK was never sent over the transport layer!
+
+---
+
+## Next Steps
+
+Now that you understand the concepts, let's install the libraries:
+*   **[Installation & Setup](installation.md)** — Install the Python, ESP32, or Arduino SDKs.
+

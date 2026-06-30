@@ -13,7 +13,8 @@ client = USMPClient(
     host: str,
     port: int,
     psk: bytes,
-    device_id: bytes | None = None
+    device_id: bytes | None = None,
+    protocol: USMPProtocol | str = USMPProtocol.TCP
 )
 ```
 
@@ -23,6 +24,9 @@ client = USMPClient(
 * **`port`** *(int)*: Target port number (default is `9000`).
 * **`psk`** *(bytes)*: Pre-Shared Key (PSK). This must match the key expected by the server for this device!
 * **`device_id`** *(bytes, optional)*: A unique 6-byte hardware identity. If you omit this parameter, the client automatically generates a random 6-byte identifier at runtime using `os.urandom(6)`.
+* **`protocol`** *(USMPProtocol | str, optional)*: The transport protocol to use:
+  * `"tcp"` (or `USMPProtocol.TCP`): Connect over standard TCP socket.
+  * `"udp"` (or `USMPProtocol.UDP`): Connect over UDP socket with USMP reliability wrapper.
 
 ## Interface Methods
 
@@ -106,6 +110,42 @@ async def run_client():
         logger.error(f"USMP Protocol error: {e}")
     except Exception as e:
         logger.error(f"System error: {e}")
+
+## 5. Robust Reconnection Loop
+
+Unlike the Arduino wrapper which includes a background reconnection engine, a Python client script typically handles reconnects explicitly using an outer retry loop. Here is the recommended pattern:
+
+```python
+async def resilient_client():
+    client = USMPClient(
+        host="127.0.0.1",
+        port=9000,
+        psk=b"usmp-dev-psk-change-me-before-prod",
+        protocol="udp" # Or "tcp"
+    )
+
+    backoff = 2.0
+    while True:
+        try:
+            logger.info("Attempting connection...")
+            await client.connect()
+            logger.info("Connected!")
+            backoff = 2.0 # Reset backoff on successful connect
+
+            # Keep reading telemetry in a loop
+            while True:
+                data = await client.recv()
+                logger.info(f"Received: {data}")
+
+        except (USMPError, ConnectionResetError, OSError) as e:
+            logger.warning(f"Connection lost ({e}). Retrying in {backoff}s...")
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, 60.0) # Exponential backoff capped at 60s
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     asyncio.run(run_client())
