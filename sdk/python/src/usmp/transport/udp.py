@@ -25,6 +25,7 @@ class UDPStream:
         self._data_event = asyncio.Event()
 
         self._last_rx_seq = -1
+        self._last_rx_type = -1
         self._pending_send_data: bytes | None = None
         self._pending_send_seq: int | None = None
         self._pending_send_type: int | None = None
@@ -59,8 +60,19 @@ class UDPStream:
         utack = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
         self._transport.sendto(utack, self._remote_addr)
 
+        # Duplicate detection for handshake packets (types 1-4)
+        if type_val < 5:
+            if self._last_rx_type != -1 and type_val <= self._last_rx_type:
+                logger.debug(
+                    "UDP Duplicate handshake packet discarded: type=%d (last_rx=%d)",
+                    type_val,
+                    self._last_rx_type,
+                )
+                return
+            self._last_rx_type = type_val
+
         # Duplicate detection (only for active sessions, types >= 5)
-        if type_val >= 5:
+        else:
             if self._last_rx_seq != -1 and seq_val <= self._last_rx_seq:
                 logger.debug(
                     "UDP Duplicate packet discarded: seq=%d (last_rx=%d)",
@@ -106,12 +118,12 @@ class UDPStream:
             self._transport.sendto(data, self._remote_addr)
             return
 
-        # Stop-and-wait ARQ: retry up to 5 times with 100ms timeout
+        # Stop-and-wait ARQ: retry up to 5 times with 500ms timeout
         self._ack_received_event.clear()
         for attempt in range(5):
             self._transport.sendto(data, self._remote_addr)
             try:
-                await asyncio.wait_for(self._ack_received_event.wait(), timeout=0.1)
+                await asyncio.wait_for(self._ack_received_event.wait(), timeout=0.5)
                 return  # Success, ACK received!
             except asyncio.TimeoutError:
                 logger.debug(

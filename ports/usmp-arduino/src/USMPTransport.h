@@ -4,7 +4,6 @@
 #include <WiFiClient.h>
 #include <WiFiUdp.h>
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -25,25 +24,25 @@ struct USMPArduinoTcpCtx {
 
 // TCP transport factory ─────────────────────────────────────────────────────
 class USMPTCPTransport {
-public:
-  USMPTCPTransport(const char *host, uint16_t port)
+ public:
+  USMPTCPTransport(const char* host, uint16_t port)
       : _host(host), _port(port), _ssid(nullptr), _password(nullptr) {}
 
   // Optional: let USMP manage WiFi — usmp.begin(USMP::TCP(...).wifi("SSID",
   // "pass"))
-  USMPTCPTransport &wifi(const char *ssid, const char *password) {
+  USMPTCPTransport& wifi(const char* ssid, const char* password) {
     _ssid = ssid;
     _password = password;
     return *this;
   }
 
   bool connectWiFi() const;
-  bool init(usmp_transport_t *t) const;
+  bool init(usmp_transport_t* t) const;
 
-  const char *_host;
+  const char* _host;
   uint16_t _port;
-  const char *_ssid;
-  const char *_password;
+  const char* _ssid;
+  const char* _password;
 };
 
 // Internal UDP context ──────────────────────────────────────────────────────
@@ -55,35 +54,36 @@ struct USMPArduinoUdpCtx {
   int rx_len;
   uint32_t last_rx_seq;
   bool last_rx_seq_set;
+  uint8_t last_rx_type;
 };
 
 // UDP transport factory ─────────────────────────────────────────────────────
 class USMPUDPTransport {
-public:
-  USMPUDPTransport(const char *host, uint16_t port)
+ public:
+  USMPUDPTransport(const char* host, uint16_t port)
       : _host(host), _port(port), _ssid(nullptr), _password(nullptr) {}
 
-  USMPUDPTransport &wifi(const char *ssid, const char *password) {
+  USMPUDPTransport& wifi(const char* ssid, const char* password) {
     _ssid = ssid;
     _password = password;
     return *this;
   }
 
   bool connectWiFi() const;
-  bool init(usmp_transport_t *t) const;
+  bool init(usmp_transport_t* t) const;
 
-  const char *_host;
+  const char* _host;
   uint16_t _port;
-  const char *_ssid;
-  const char *_password;
+  const char* _ssid;
+  const char* _password;
 };
 
 // Ergonomic namespace: USMP::TCP("ip", port).wifi("ssid", "pass")
 namespace USMP {
-inline USMPTCPTransport TCP(const char *host, uint16_t port = 9000) {
+inline USMPTCPTransport TCP(const char* host, uint16_t port = 9000) {
   return USMPTCPTransport(host, port);
 }
-inline USMPUDPTransport UDP(const char *host, uint16_t port = 9000) {
+inline USMPUDPTransport UDP(const char* host, uint16_t port = 9000) {
   return USMPUDPTransport(host, port);
 }
-} // namespace USMP
+}  // namespace USMP

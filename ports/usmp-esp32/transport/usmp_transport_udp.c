@@ -1,7 +1,7 @@
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
 
 #include "lwip/err.h"
 #include "lwip/netdb.h"
@@ -21,6 +21,7 @@ typedef struct {
   int rx_len;
   uint32_t last_rx_seq;
   bool last_rx_seq_set;
+  uint8_t last_rx_type;
 } usmp_udp_ctx_t;
 
 static int udp_dial(usmp_udp_ctx_t* udp) {
@@ -49,6 +50,11 @@ static int udp_dial(usmp_udp_ctx_t* udp) {
   udp->sock = sock;
   return 0;
 }
+static int is_transient_error(int err) {
+  return err == EAGAIN || err == EWOULDBLOCK || err == EINTR ||
+         err == ECONNREFUSED || err == EHOSTUNREACH || err == ENETUNREACH ||
+         err == ECONNRESET;
+}
 
 static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
@@ -65,22 +71,19 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   }
 
   if (!expect_ack) {
-    if (send(udp->sock, data, len, 0) < 0) return -1;
+    send(udp->sock, data, len, 0);
     return 0;
   }
 
   // Stop-and-wait ARQ
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
   for (int attempt = 0; attempt < 5; attempt++) {
-    if (send(udp->sock, data, len, 0) < 0) return -1;
+    send(udp->sock, data, len, 0);
 
     uint32_t start_ms = usmp_port_millis();
-    while (usmp_port_millis() - start_ms < 100) {
+    while (usmp_port_millis() - start_ms < 500) {
       ssize_t n = recv(udp->sock, temp, sizeof(temp), 0);
       if (n < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-          return -1; // Fatal socket error
-        }
         usmp_port_delay_ms(5);
         continue;
       }
@@ -90,7 +93,7 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
         uint8_t ack_type = temp[2];
         uint32_t ack_seq = temp[3] | (temp[4] << 8) | (temp[5] << 16) | (temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
-          return 0; // Success! ACK received
+          return 0;  // Success! ACK received
         }
         continue;
       }
@@ -103,7 +106,7 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
     }
   }
 
-  return -1; // Retries exhausted
+  return -1;  // Retries exhausted
 }
 
 static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
@@ -121,8 +124,8 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     } else {
       n = recv(udp->sock, temp, sizeof(temp), 0);
       if (n < 0) {
-        if (errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-          return -1; // Fatal error
+        if (!is_transient_error(errno)) {
+          return -1;  // Truly fatal error (e.g. EBADF, ENOTSOCK)
         }
         usmp_port_delay_ms(5);
         continue;
@@ -143,13 +146,19 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     uint32_t seq = temp[4] | (temp[5] << 8) | (temp[6] << 16) | (temp[7] << 24);
 
     // Send UTACK back immediately
-    uint8_t utack[7] = {0xAC, 0xAC, type, seq & 0xFF, (seq >> 8) & 0xFF, (seq >> 16) & 0xFF, (seq >> 24) & 0xFF};
+    uint8_t utack[7] = {
+        0xAC, 0xAC, type, seq & 0xFF, (seq >> 8) & 0xFF, (seq >> 16) & 0xFF, (seq >> 24) & 0xFF};
     send(udp->sock, utack, sizeof(utack), 0);
 
-    // Duplicate detection (only for active sessions, type >= 5)
-    if (type >= 5) {
+    // Duplicate detection
+    if (type < 5) {
+      if (udp->last_rx_type > 0 && type <= udp->last_rx_type) {
+        continue;  // Discard duplicate/old handshake packet
+      }
+      udp->last_rx_type = type;
+    } else {
       if (udp->last_rx_seq_set && seq <= udp->last_rx_seq) {
-        continue; // Discard duplicate
+        continue;  // Discard duplicate
       }
       udp->last_rx_seq = seq;
       udp->last_rx_seq_set = true;
@@ -191,6 +200,7 @@ static int usmp_udp_reconnect(usmp_transport_t* t) {
 
   udp->rx_len = 0;
   udp->last_rx_seq_set = false;
+  udp->last_rx_type = 0;
   return udp_dial(udp);
 }
 
