@@ -13,6 +13,7 @@ typedef struct usmp_transport_s {
   int (*reconnect)(struct usmp_transport_s* t);
   int (*available)(struct usmp_transport_s* t);  // ← new: bytes waiting, 0=none, NULL=unsupported
   void (*destroy)(struct usmp_transport_s* t);
+  void (*confirm_authenticated)(struct usmp_transport_s* t, uint32_t seq);
   void* ctx;
 } usmp_transport_t;
 

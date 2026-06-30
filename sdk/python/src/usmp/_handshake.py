@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Callable
+from typing import Any, Callable
 
 from ._crypto import derive_session_key, generate_keypair
 from ._frame import read_frame, write_frame
@@ -30,8 +30,8 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
 
 
 async def server_handshake(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+    reader: Any,
+    writer: Any,
     psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes],
 ) -> SessionInfo:
     """
@@ -74,12 +74,16 @@ async def server_handshake(
             resolved_psk = psk.get(device_id) or psk.get(b"")
             if resolved_psk is None:
                 raise HandshakeError("Device ID not registered")
+        elif isinstance(psk, bytes):
+            resolved_psk = psk
         elif callable(psk):
             resolved_psk = psk(device_id)
             if asyncio.iscoroutine(resolved_psk):
                 resolved_psk = await resolved_psk
         else:
-            resolved_psk = psk
+            raise HandshakeError("Invalid PSK type")
+
+        assert isinstance(resolved_psk, bytes)
 
         # ── Generate server keypair ───────────────────────────────────────────────
         priv_s, pub_s = generate_keypair()
@@ -158,8 +162,8 @@ async def server_handshake(
 
 
 async def client_handshake(
-    reader: asyncio.StreamReader,
-    writer: asyncio.StreamWriter,
+    reader: Any,
+    writer: Any,
     psk: bytes,
     device_id: bytes,
 ) -> SessionInfo:

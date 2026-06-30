@@ -122,6 +122,14 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       n = udp->rx_len;
       udp->rx_len = 0;
     } else {
+      fd_set rfds;
+      FD_ZERO(&rfds);
+      FD_SET(udp->sock, &rfds);
+      int select_ret = select(udp->sock + 1, &rfds, NULL, NULL, NULL);
+      if (select_ret < 0) {
+        if (errno == EINTR) continue;
+        return -1;
+      }
       n = recv(udp->sock, temp, sizeof(temp), 0);
       if (n < 0) {
         if (!is_transient_error(errno)) {
@@ -160,8 +168,6 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       if (udp->last_rx_seq_set && seq <= udp->last_rx_seq) {
         continue;  // Discard duplicate
       }
-      udp->last_rx_seq = seq;
-      udp->last_rx_seq_set = true;
     }
 
     if ((size_t)n > max_len) return -1;
@@ -222,6 +228,14 @@ static int usmp_udp_available(usmp_transport_t* t) {
   return (ret > 0 && FD_ISSET(udp->sock, &rfds)) ? 1 : 0;
 }
 
+static void usmp_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
+  usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
+  if (udp) {
+    udp->last_rx_seq = seq;
+    udp->last_rx_seq_set = true;
+  }
+}
+
 int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port) {
   usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)malloc(sizeof(usmp_udp_ctx_t));
   if (!udp) return -1;
@@ -243,6 +257,7 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   t->reconnect = usmp_udp_reconnect;
   t->available = usmp_udp_available;
   t->destroy = usmp_udp_destroy;
+  t->confirm_authenticated = usmp_udp_confirm_authenticated;
   t->ctx = udp;
 
   return 0;

@@ -39,7 +39,7 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   int ret = 0;
   if (usmp_handshake(&ctx->transport, &hs) != 0) {
     USMP_LOGE(TAG, "Handshake failed");
-    ctx->transport.close(&ctx->transport);
+    if (ctx->transport.close) ctx->transport.close(&ctx->transport);
     ret = -1;
     goto cleanup;
   }
@@ -70,6 +70,9 @@ cleanup:
 int usmp_reconnect(usmp_t* ctx) {
   if (!ctx) return -1;
 
+  /* Zeroise the old session key immediately on entering reconnect */
+  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+
   if (!ctx->transport.reconnect) {
     USMP_LOGE(TAG, "Transport does not support reconnect");
     return -1;
@@ -92,13 +95,10 @@ int usmp_reconnect(usmp_t* ctx) {
   int ret = 0;
   if (usmp_handshake(&ctx->transport, &hs) != 0) {
     USMP_LOGE(TAG, "Handshake failed after reconnect");
-    ctx->transport.close(&ctx->transport);
+    if (ctx->transport.close) ctx->transport.close(&ctx->transport);
     ret = -1;
     goto cleanup;
   }
-
-  /* Zeroize the old session key before overwriting with the new one */
-  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
 
   // device_id comes from hardware — unchanged between sessions
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);

@@ -80,6 +80,12 @@ static int send_control(usmp_t* ctx, uint8_t type) {
 int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (!ctx || !ctx->established) return -1;
 
+  if (ctx->tx_seq >= 0xFFFFFFFF) {
+    USMP_LOGE(TAG, "TX sequence overflowed");
+    ctx->established = false;
+    return -1;
+  }
+
   if (len > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES) {
     USMP_LOGE(TAG, "Payload too large for fragmentation limits");
     return -1;
@@ -171,13 +177,6 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       return -1;
     }
 
-    if (pkt.seq != ctx->rx_seq) {
-      snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu", (unsigned long)ctx->rx_seq,
-               (unsigned long)pkt.seq);
-      USMP_LOGE(TAG, _msg);
-      return -1;
-    }
-
     /* Choose output buffer and max length for decryption */
     uint8_t* dec_dest = NULL;
     uint16_t dec_max = 0;
@@ -227,10 +226,30 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     if (usmp_gcm_decrypt(ctx->session_key, expected_nonce, aad, sizeof(aad), pkt.payload,
                          pkt.length, dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
+      if (ctx->transport.confirm_authenticated) {
+        continue;  // UDP: drop unauthenticated packet and continue reading
+      }
+      return -1;
+    }
+
+    if (ctx->rx_seq >= 0xFFFFFFFF) {
+      USMP_LOGE(TAG, "RX sequence overflowed");
+      ctx->established = false;
+      return -1;
+    }
+
+    if (pkt.seq != ctx->rx_seq) {
+      snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu", (unsigned long)ctx->rx_seq,
+               (unsigned long)pkt.seq);
+      USMP_LOGE(TAG, _msg);
       return -1;
     }
 
     ctx->rx_seq++;
+
+    if (ctx->transport.confirm_authenticated) {
+      ctx->transport.confirm_authenticated(&ctx->transport, pkt.seq);
+    }
 
     /* Handle control frames and loop back for the next frame */
     if (pkt.type == USMP_TYPE_PONG) {

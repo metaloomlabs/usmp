@@ -3,7 +3,9 @@
 import asyncio
 import logging
 import struct
-from ..types import PacketType, USMP_HEADER_SIZE
+import typing
+
+from ..types import USMP_HEADER_SIZE
 
 logger = logging.getLogger("usmp.transport.udp")
 
@@ -16,7 +18,12 @@ class UDPStream:
     Implements a stop-and-wait ARQ reliability layer with UTACKs.
     """
 
-    def __init__(self, transport: asyncio.DatagramTransport, remote_addr: tuple[str, int], is_server: bool = False):
+    def __init__(
+        self,
+        transport: asyncio.DatagramTransport,
+        remote_addr: tuple[str, int],
+        is_server: bool = False,
+    ):
         self._transport = transport
         self._remote_addr = remote_addr
         self._is_server = is_server
@@ -80,10 +87,12 @@ class UDPStream:
                     self._last_rx_seq,
                 )
                 return
-            self._last_rx_seq = seq_val
 
         self._read_buffer.extend(data)
         self._data_event.set()
+
+    def confirm_authenticated(self, seq: int) -> None:
+        self._last_rx_seq = seq
 
     async def readexactly(self, n: int) -> bytes:
         while len(self._read_buffer) < n:
@@ -134,7 +143,8 @@ class UDPStream:
                 continue
 
         raise OSError(
-            f"UDP transmission failed. Peer {self._remote_addr} did not ACK seq={self._pending_send_seq} type={self._pending_send_type}"
+            f"UDP transmission failed. Peer {self._remote_addr} did not ACK "
+            f"seq={self._pending_send_seq} type={self._pending_send_type}"
         )
 
     def close(self) -> None:
@@ -146,14 +156,14 @@ class UDPStream:
     async def wait_closed(self) -> None:
         pass
 
-    def get_extra_info(self, name: str) -> getattr:
+    def get_extra_info(self, name: str) -> typing.Any:
         if name == "peername":
             return self._remote_addr
-        return None
+        return self._transport.get_extra_info(name)
 
 
 class ClientUDPProtocol(asyncio.DatagramProtocol):
-    def __init__(self, stream_future: asyncio.Future):
+    def __init__(self, stream_future: asyncio.Future["UDPStream"]):
         self.stream_future = stream_future
         self.stream: UDPStream | None = None
 
@@ -177,7 +187,7 @@ class ClientUDPProtocol(asyncio.DatagramProtocol):
 
 
 class ServerUDPProtocol(asyncio.DatagramProtocol):
-    def __init__(self, server: getattr):
+    def __init__(self, server: typing.Any):
         self.server = server
         self.transport: asyncio.DatagramTransport | None = None
 
