@@ -127,20 +127,28 @@ pip install usmp
 
 ```python
 import asyncio
-from usmp import USMPServer
+from usmp import USMPServer, USMPSession, ConnectionClosedError
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 
-async def on_data(session, data):
-    print(f"[{session.session_id.hex()}] got: {data}")
-    await session.send(data)          # echo back
+server = USMPServer(host="0.0.0.0", port=9000, psk=PSK)
+
+@server.on_session
+async def handle_device(session: USMPSession):
+    print(f"Device connected: {session.device_id}")
+    try:
+        while True:
+            data = await session.recv()
+            print(f"Got: {data}")
+            await session.send(data)  # echo back
+    except ConnectionClosedError:
+        print(f"Device disconnected: {session.device_id}")
 
 async def main():
-    server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, on_data=on_data)
-    await server.start()
-    await asyncio.Event().wait()
+    await server.serve()
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Handshake overview
