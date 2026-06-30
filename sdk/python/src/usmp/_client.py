@@ -28,18 +28,34 @@ class USMPClient:
         port: int,
         psk: bytes,
         device_id: bytes | None = None,
+        protocol: str = "tcp",
     ):
         self._host = host
         self._port = port
         self._psk = psk
         self._device_id = device_id or os.urandom(USMP_DEVICE_ID_LEN)
         self._session: USMPSession | None = None
+        self._protocol = protocol.lower()
+        if self._protocol not in ("tcp", "udp"):
+            raise ValueError("Protocol must be 'tcp' or 'udp'")
 
     async def connect(self) -> None:
         """Connect to a USMP server and complete the handshake."""
-        reader, writer = await asyncio.open_connection(self._host, self._port)
-        info = await client_handshake(reader, writer, self._psk, self._device_id)
-        self._session = USMPSession(reader, writer, info)
+        if self._protocol == "udp":
+            from .transport.udp import ClientUDPProtocol
+            loop = asyncio.get_running_loop()
+            stream_future = loop.create_future()
+            transport, protocol = await loop.create_datagram_endpoint(
+                lambda: ClientUDPProtocol(stream_future),
+                remote_addr=(self._host, self._port),
+            )
+            stream = await stream_future
+            info = await client_handshake(stream, stream, self._psk, self._device_id)
+            self._session = USMPSession(stream, stream, info)
+        else:
+            reader, writer = await asyncio.open_connection(self._host, self._port)
+            info = await client_handshake(reader, writer, self._psk, self._device_id)
+            self._session = USMPSession(reader, writer, info)
         logger.info(
             f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}"
         )
