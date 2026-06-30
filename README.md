@@ -12,6 +12,7 @@
 ## Why USMP?
 
 In the world of IoT, developers are often forced to make a frustrating choice when connecting devices:
+
 1. **Raw TCP / UDP**: Fast and lightweight, but completely open to eavesdropping, spoofing, and tampering.
 2. **Full TLS / DTLS**: Rock-solid, but extremely heavy, slow to handshake, and resource-prohibitive for smaller microcontrollers.
 
@@ -29,25 +30,27 @@ usmp_send(&ctx, data, len);
 ```
 
 ### Cryptographic Guarantees (No "Insecure Mode")
+
 Every single session is hardened:
-*   **Mutual Authentication**: Both sides verify identity using HMAC-SHA256 and a Pre-Shared Key (PSK) before exchanging payloads.
-*   **Perfect Forward Secrecy**: An ephemeral X25519 key exchange occurs with every session, protecting past traffic even if keys are compromised later.
-*   **Mandatory Encryption**: All payload data is encrypted using AES-256-GCM.
-*   **Replay Protection**: Strict, monotonic 32-bit sequence numbers are verified for every frame.
-*   **Deterministic Nonces**: Under the hood, AES-GCM nonces are constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate nonce collision risks.
+
+* **Mutual Authentication**: Both sides verify identity using HMAC-SHA256 and a Pre-Shared Key (PSK) before exchanging payloads.
+* **Perfect Forward Secrecy**: An ephemeral X25519 key exchange occurs with every session, protecting past traffic even if keys are compromised later.
+* **Mandatory Encryption**: All payload data is encrypted using AES-256-GCM.
+* **Replay Protection**: Strict, monotonic 32-bit sequence numbers are verified for every frame.
+* **Deterministic Nonces**: Under the hood, AES-GCM nonces are constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate nonce collision risks.
 
 ---
 
 ## Key Features
 
-*   **Multi-Transport Support**: Production-ready support for **TCP** and **UDP** (with transport-level reliability overlays), with UART and BLE coming soon!
-*   **Platform Agnostic Core**: A pure C core with only 5 platform hooks to implement for any new platform.
-*   **Dynamic Payload Fragmentation**: Automatically fragments payloads up to ~1.8 KB into multiple frames (plaintext capacity of 452 bytes per frame) and transparently reassembles them at the receiver.
-*   **Built-in Rate Limiting**: The Python server locks out offending IPs for 60 seconds after consecutive handshake failures to prevent brute-force attacks.
-*   **Registry-Based Distribution**:
-    *   **Python**: Fully async SDK available on **PyPI** (`pip install usmp`).
-    *   **ESP-IDF**: Native component on the **ESP Component Registry** (`metaloomlabs/usmp`).
-    *   **Arduino**: Standard packaged offline ZIP library (`usmp-X.Y.Z-arduino.zip`).
+* **Multi-Transport Support**: Production-ready support for **TCP** and **UDP** (with transport-level reliability overlays), with UART and BLE coming soon!
+* **Platform Agnostic Core**: A pure C core with only 5 platform hooks to implement for any new platform.
+* **Dynamic Payload Fragmentation**: Automatically fragments payloads up to ~1.8 KB into multiple frames (plaintext capacity of 452 bytes per frame) and transparently reassembles them at the receiver.
+* **Built-in Rate Limiting**: The Python server locks out offending IPs for 60 seconds after consecutive handshake failures to prevent brute-force attacks.
+* **Registry-Based Distribution**:
+  * **Python**: Fully async SDK available on **PyPI** (`pip install usmp`).
+  * **ESP-IDF**: Native component on the **ESP Component Registry** (`metaloomlabs/usmp`).
+  * **Arduino**: Standard packaged offline ZIP library (`usmp-X.Y.Z-arduino.zip`).
 
 ---
 
@@ -66,6 +69,7 @@ Every single session is hardened:
 ## Quick Start (TCP or UDP)
 
 ### 1. Python Gateway Server
+
 Run `pip install usmp` and launch this async gateway server:
 
 ```python
@@ -100,6 +104,7 @@ if __name__ == "__main__":
 ```
 
 ### 2. ESP32 - ESP-IDF Client (C)
+
 Import `metaloomlabs/usmp` in your project component dependencies and write:
 
 ```c
@@ -139,6 +144,7 @@ void app_main(void) {
 ```
 
 ### 3. ESP32 - Arduino Client (C++)
+
 Add the offline ZIP library and upload:
 
 ```cpp
@@ -180,22 +186,23 @@ void loop() {
 ## Detailed Documentation
 
 To view the complete, tutorial-based guide covering installation, TCP, UDP, and production hardening, build the MkDocs site locally or view the docs folder:
-*   [Installation & Setup](docs/getting-started/installation.md)
-*   [Your First TCP Tunnel](docs/getting-started/tutorial-tcp.md)
-*   [Going Connectionless (UDP)](docs/getting-started/tutorial-udp.md)
-*   [Production Hardening Guide](docs/getting-started/production-hardening.md)
+
+* [Installation & Setup](docs/getting-started/installation.md)
+* [Your First TCP Tunnel](docs/getting-started/tutorial-tcp.md)
+* [Going Connectionless (UDP)](docs/getting-started/tutorial-udp.md)
+* [Production Hardening Guide](docs/getting-started/production-hardening.md)
 
 ---
 
 ## Roadmap
 
-*   [x] **v0.2.0**: Core protocol, Keepalive mechanism, and Arduino Port.
-*   [x] **v0.3.0**: Python SDK published on PyPI.
-*   [x] **v0.4.0**: UART Transport layer with COBS framing & sliding window.
-*   [x] **v0.4.7**: Security hardening (Deterministic Nonces, Lockout Rate Limiting, Dynamic Fragmentation).
-*   [x] **v0.5.0**: UDP transport support fully complete and production-ready.
-*   [ ] **v0.5.5**: CLI tools and auto-discovery (mDNS / UDP).
-*   [ ] **v0.6.0**: Secure OTA firmware updates with Ed25519 signatures.
+* [x] **v0.2.0**: Core protocol, Keepalive mechanism, and Arduino Port.
+* [x] **v0.3.0**: TCP transport support and initial Python SDK.
+* [x] **v0.4.0**: Published on ESP Component Registry and PyPI, making it stable.
+* [x] **v0.4.7**: Security hardening (Deterministic Nonces, Lockout Rate Limiting, Dynamic Fragmentation).
+* [x] **v0.5.0**: UDP transport support fully complete and production-ready.
+* [ ] **v0.5.5**: CLI tools and auto-discovery (mDNS / UDP).
+* [ ] **v0.6.0**: Secure OTA firmware updates with Ed25519 signatures.
 
 ---
 

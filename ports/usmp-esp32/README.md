@@ -200,8 +200,8 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 | Version | Feature | Status |
 |---------|---------|--------|
 | v0.2.0  | Core protocol, Keepalive mechanism, and Arduino Port | Released |
-| v0.3.0  | Python SDK published on PyPI | Released |
-| v0.4.0  | UART Transport layer with COBS framing & sliding window | Released |
+| v0.3.0  | TCP transport support and initial Python SDK | Released |
+| v0.4.0  | Published on ESP Component Registry and PyPI, making it stable | Released |
 | v0.4.7  | Hardening (Deterministic Nonces, Rate Limiting, Fragmentation) | Released |
 | v0.5.0  | UDP transport support fully complete and production-ready | Released |
 | v0.5.5  | CLI tools and auto-discovery (mDNS / UDP) | Planned |
