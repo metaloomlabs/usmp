@@ -1,4 +1,4 @@
-// examples/project_1/arduino/arduino.ino
+// examples/project_tcp/arduino/arduino.ino
 #include <USMP.h>
 
 // ── Config

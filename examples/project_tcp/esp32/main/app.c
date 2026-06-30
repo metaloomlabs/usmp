@@ -1,4 +1,4 @@
-// examples/project_1/esp32/main/app.c
+// examples/project_tcp/esp32/main/app.c
 #include <string.h>
 
 #include "esp_log.h"

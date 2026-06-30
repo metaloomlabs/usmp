@@ -1,4 +1,4 @@
-# Project 1: Multi-Platform USMP Echo Demo
+# Project TCP: Multi-Platform USMP Echo Demo
 
 This project provides a complete plug-and-play echo application running across three environments:
 
@@ -31,7 +31,7 @@ We'll start the server first so that our microcontrollers can connect to it imme
 
    ```bash
    cd sdk/python
-   uv run python ../../examples/project_1/server/server.py
+   uv run python ../../examples/project_tcp/server/server.py
    ```
 
    You should see:
@@ -74,7 +74,7 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
 1. Navigate to the ESP32 project directory:
 
    ```bash
-   cd examples/project_1/esp32
+   cd examples/project_tcp/esp32
    ```
 
 2. Open the application code [app.c](esp32/main/app.c).

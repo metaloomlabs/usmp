@@ -1,4 +1,4 @@
-# examples/project_1/esp32/CMakeLists.txt
+# examples/project_tcp/esp32/CMakeLists.txt
 cmake_minimum_required(VERSION 3.16)
 
 set(EXTRA_COMPONENT_DIRS
@@ -6,4 +6,4 @@ set(EXTRA_COMPONENT_DIRS
 )
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(project_1_esp32)
+project(project_tcp_esp32)

@@ -1,4 +1,4 @@
-// examples/project_1/esp32/main/wifi.h
+// examples/project_tcp/esp32/main/wifi.h
 #pragma once
 #include <stdbool.h>
 
