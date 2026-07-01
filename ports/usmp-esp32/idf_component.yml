@@ -2,11 +2,11 @@ version: "0.5.1"
 description: >
   USMP — Unified Secure Multi-transport Protocol. Mutually authenticated,
   AES-256-GCM encrypted sessions for ESP32 over TCP. No TLS stack required.
-url: "https://github.com/metaloomlabs/usmp"
+url: "https://usmp.metaloom.in"
 repository: "https://github.com/metaloomlabs/usmp"
 issues: "https://github.com/metaloomlabs/usmp/issues"
-documentation: "https://github.com/metaloomlabs/usmp"
-license: "MIT"
+documentation: "https://usmp.metaloom.in"
+license: "Apache-2.0"
 
 targets:
   - esp32

@@ -18,7 +18,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/metaloomlabs/usmp"
+Homepage = "https://usmp.metaloom.in"
 Repository = "https://github.com/metaloomlabs/usmp"
 
 [build-system]
