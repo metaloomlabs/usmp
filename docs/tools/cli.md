@@ -27,7 +27,7 @@ usmp monitor
 
 ## Planned output
 
-```
+```bash
 $ usmp scan
 Scanning LAN for USMP devices...
   aa:bb:cc:dd:ee:ff  192.168.1.60  ESP32  USMP v0.1  online

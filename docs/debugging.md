@@ -20,14 +20,14 @@ This will output details about frame transitions, socket operations, and handsha
 
 ### 1.2 C Core (ESP32 / Arduino / C App)
 
-Define the `USMP_DEBUG` preprocessor macro during compilation. This enables the debug log macros like `USMP_LOGD`.
+Debug log macros (like `USMP_LOGD`) are **enabled by default**. To disable them for production release builds to reduce code footprint and execution overhead, define the `USMP_DISABLE_DEBUG` preprocessor macro during compilation.
 
-In your `usmp_port.h` implementation, ensure your `usmp_port_log` maps `'D'` (Debug) levels to your output terminal (e.g. `Serial.print` or `ESP_LOGD`).
+In your platform's `usmp_port_log` implementation, map `'D'` (Debug) levels to your output log engine (e.g. `ESP_LOGD` or `Serial.print`).
 
-Example CMake flag:
+Example CMake flag to disable debug logging:
 
 ```cmake
-target_compile_definitions(${PROJECT_NAME} PRIVATE -DUSMP_DEBUG)
+target_compile_definitions(${PROJECT_NAME} PRIVATE -DUSMP_DISABLE_DEBUG)
 ```
 
 ## 2. Analyzing Frames on the Wire

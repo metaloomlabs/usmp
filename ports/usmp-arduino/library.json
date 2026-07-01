@@ -1,6 +1,6 @@
 {
   "name": "USMP",
-  "version": "0.4.7",
+  "version": "0.5.1",
   "description": "Secure, lightweight, encrypted device communication protocol. X25519 + AES-256-GCM + HMAC-SHA256.",
   "keywords": ["iot", "security", "encryption", "esp32", "protocol"],
   "repository": {
@@ -30,6 +30,16 @@
       "name": "callbacks",
       "base": "examples/callbacks",
       "files": ["callbacks.ino"]
+    },
+    {
+      "name": "publish_sensor",
+      "base": "examples/publish_sensor",
+      "files": ["publish_sensor.ino"]
+    },
+    {
+      "name": "remote_control",
+      "base": "examples/remote_control",
+      "files": ["remote_control.ino"]
     }
   ]
 }

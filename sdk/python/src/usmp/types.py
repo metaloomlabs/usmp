@@ -1,7 +1,10 @@
-# src/usmp/types.py
-
 from dataclasses import dataclass
-from enum import IntEnum
+from enum import Enum, IntEnum
+
+
+class USMPProtocol(str, Enum):
+    TCP = "tcp"
+    UDP = "udp"
 
 
 class PacketType(IntEnum):

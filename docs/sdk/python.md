@@ -71,7 +71,49 @@ async def handle_session(session: USMPSession):
 asyncio.run(server.serve())
 ```
 
-## 4. API Reference Deep-Dives
+## 4. Event Model: Arduino Callbacks vs. Python Async Loops
+
+If you are coming from the Arduino framework, you are likely familiar with registered event callbacks (`onMessage`, `onConnect`, `onDisconnect`). In the Python SDK, these events are handled using structured `asyncio` loop flows.
+
+Here is how the concepts map between the two platforms:
+
+| Arduino Callback | Python Async Equivalent | Description |
+| :--- | :--- | :--- |
+| **`onConnect`** | Code executing immediately after `await client.connect()` or at the start of `@server.on_session`. | Runs once the cryptographic handshake succeeds and keys are negotiated. |
+| **`onMessage`** | Reading data from `data = await session.recv()`. | Fired whenever a new decrypted payload is reassembled and verified. |
+| **`onDisconnect`** | Catching `ConnectionClosedError` (or socket exception) in a `try/except` block. | Triggers when the client or server terminates the session or keepalives time out. |
+| **`onReconnect`** | Catching a disconnection exception, pausing, and calling `connect()` again in a loop. | Re-establishes a fresh secure session with new ephemeral keys. |
+
+### Comparison Example: Message Handlers
+
+=== "Arduino Callbacks"
+    ```cpp
+    void onMessage(const uint8_t *data, size_t len) {
+        Serial.printf("Received message: %.*s\n", len, data);
+    }
+
+    void setup() {
+        usmp.onMessage(onMessage);
+        usmp.begin(USMP::TCP("192.168.1.100"));
+    }
+    ```
+
+=== "Python Async Loops"
+    ```python
+    # Inside your session handler or client runner
+    try:
+        while True:
+            # Replaces onMessage callback
+            data = await session.recv()
+            print(f"Received message: {data.decode()}")
+    except ConnectionClosedError:
+        # Replaces onDisconnect callback
+        print("Session disconnected.")
+    ```
+
+---
+
+## 5. API Reference Deep-Dives
 
 * [USMPServer](server.md) — Accepts and manages multiple concurrent device connections.
 * [USMPClient](client.md) — Establishes client connections to a USMP gateway.

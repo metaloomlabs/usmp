@@ -1,88 +1,85 @@
-# USMP — Unified Secure Multi-transport Protocol
+# USMP: Unified Secure Multi-transport Protocol
 
-> Secure, lightweight, transport-agnostic communication for embedded devices.
+> **Bridging the IoT Security Gap with zero-friction, end-to-end encrypted tunnels.**
 
-USMP is a binary application-layer protocol that gives your ESP32 (or any embedded device) a **secure, authenticated, encrypted session** with a gateway — with three function calls.
+USMP is a lightweight, transport-agnostic binary session protocol designed for resource-constrained embedded microcontrollers (ESP32, Arduino) and gateways (Python). It provides iron-clad mutual authentication and AES-256-GCM encryption with just three function calls.
 
 ```c
-usmp_transport_tcp_init(&transport, "192.168.137.1", 9000);
+// 1. Initialize your choice of transport (TCP or UDP)
+usmp_transport_udp_init(&transport, "192.168.1.100", 9000);
+
+// 2. Perform mutual handshake and establish keys
 usmp_connect(&ctx, &transport);
+
+// 3. Send securely encrypted payloads
 usmp_send(&ctx, data, len);
 ```
 
+---
+
 ## Why USMP?
 
-Most IoT protocols make you choose between **simple** and **secure**:
+Historically, connecting embedded microcontrollers securely meant choosing between insecure raw sockets or heavy, resource-exhausting TLS/DTLS stacks. **USMP fills this gap** by offering a lightweight alternative that implements strict security guarantees without the footprint of full PKI.
 
-| Protocol | Simple | Secure | Embedded-friendly |
-|---|---|---|---|
-| Raw TCP | Yes | No | Yes |
-| MQTT | Yes | Needs TLS | Partial |
-| TLS | No | Yes | Heavy |
-| CoAP | Yes | Needs DTLS | Yes |
-| **USMP** | **Yes** | **Yes** | **Yes** |
+| Protocol / Standard | Light on RAM/Flash | Forward Secrecy | Mutual Authentication | Transport Agnostic |
+| :--- | :---: | :---: | :---: | :---: |
+| **Raw TCP / UDP** | 🟢 Yes | 🔴 No | 🔴 No | 🔴 No |
+| **Full TLS / DTLS** | 🔴 No | 🟢 Yes | 🟡 Optional | 🔴 No |
+| **USMP** | 🟢 **Yes** | 🟢 **Yes** | 🟢 **Yes** | 🟢 **Yes** |
 
-USMP is **secure by default**. There is no insecure mode. Every session is:
+---
 
-- **Mutually authenticated** — both device and gateway verify each other
-- **Encrypted** — AES-256-GCM, mandatory
-- **Forward secret** — X25519 ephemeral keys, new per session
-- **Replay protected** — nonces + monotonic sequence numbers
+## Core Security Guarantees
 
-## How it works
+USMP does not support an "insecure mode." Every session is strictly hardened out of the box:
 
-```txt
-ESP32                          Gateway
-  │                                │
-  │──── HELLO ────────────────────▶│  "I'm device AA:BB:CC:DD:EE:FF"
-  │◀─── CHALLENGE ─────────────────│  "Prove it. Here's a nonce."
-  │──── HELLO_ACK ────────────────▶│  HMAC proof (PSK)
-  │◀─── SESSION_OK ────────────────│  HMAC proof (PSK) + session ID
-  │                                │
-  │════ AES-256-GCM frames ════════│  encrypted, sequenced, authenticated
-```
+* **Mutual Authentication**: Both client (device) and server (gateway) prove their identity using a Pre-Shared Key (PSK) and HMAC-SHA256 proofs before exchanging payload data.
+* **Perfect Forward Secrecy**: An ephemeral X25519 Diffie-Hellman key exchange is performed for every session. Even if the Pre-Shared Key is compromised in the future, past captured traffic cannot be decrypted.
+* **Mandatory Encryption**: All session data frames are encrypted using AES-256-GCM, ensuring absolute confidentiality and tamper-proof message integrity.
+* **Replay Protection**: Strict, monotonic 32-bit sequence numbers and deterministic nonces prevent attackers from capturing and replaying packets.
 
-The handshake takes **~200ms** on ESP32. After that, sending a frame takes **<5ms**.
+---
 
-## Features
+## Supported Transports & Roadmap
 
-- **Mutual authentication** — PSK-based HMAC, both sides verified
-- **Forward secrecy** — X25519 ephemeral key exchange per session
-- **AES-256-GCM encryption** — mandatory, authenticated
-- **Replay protection** — per-session nonces + sequence numbers
-- **Payload fragmentation** — automatically fragments and reassembles payloads up to ~1.8 KB (4 frames of 452 bytes)
-- **Transport agnostic** — TCP now, UART and BLE planned
-- **Simple API** — connect, send, recv, close
-- **Cross-platform** — ESP32 (ESP-IDF), Arduino (ESP32 cores), STM32 planned
-- **Python SDK** — asyncio server, client, and session manager
+USMP is designed to separate the cryptographic session state machine from the underlying transport medium.
 
-## Status
+* **TCP**: Production-ready. Best for reliable Wi-Fi or Ethernet streams.
+* **UDP**: Production-ready. Optimized for constrained, lossy networks with built-in packet-level acknowledgment and reliability mechanisms.
+* **Serial UART (with COBS & Sliding Window)**: 🟡 Coming soon.
+* **BLE (Bluetooth Low Energy)**: 🟡 Coming soon.
 
-**Active Development — v0.4.7**
+---
 
-| Component | Status |
-|---|---|
-| Protocol spec | Complete |
-| Frame layer & fragmentation | Working |
-| Handshake & MITM mitigation | Working |
-| AES-256-GCM encryption | Working (deterministic nonces) |
-| Mutual authentication | Working |
-| ESP32 port | Working |
-| Arduino port | Working |
-| Python SDK | Working (with rate limiting / DoS lockout) |
-| Transport abstraction | Working |
-| Multi-device management | Working |
-| UART transport | In Progress |
-| CLI tool | In Progress |
-| mDNS discovery | In Progress |
+## Direct Distribution Registries
 
-| Cloud bridge | Planned |
+USMP is packaged and published directly to official package managers, keeping your builds clean and independent of private source structures:
 
-## Quick links
+=== "Python SDK"
+    Available on **PyPI** for gateways, servers, and backends.
+    ```bash
+    pip install usmp
+    ```
 
-- [Quick Start (ESP32)](getting-started/quickstart-esp32.md)
-- [Quick Start (Arduino)](getting-started/quickstart-arduino.md)
-- [Quick Start (Python)](getting-started/quickstart-python.md)
-- [Protocol Specification](spec.md)
-- [Security Model](security/model.md)
-- [GitHub](https://github.com/metaloomlabs/usmp)
+=== "ESP32 Component"
+    Available on the **ESP Component Registry** for ESP-IDF v5+.
+    ```bash
+    idf.py add-dependency "metaloomlabs/usmp"
+    ```
+
+=== "Arduino Library"
+    Available as a packaged offline ZIP archive (`usmp-0.5.1-arduino.zip`) for import into Arduino IDE or PlatformIO.
+
+    1. Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
+    2. Select the packaged ZIP archive.
+
+---
+
+## Navigation & Quick Start
+
+Ready to dive in? Follow our step-by-step tutorials:
+
+1. **[Installation & Setup](getting-started/installation.md)**: Prepare your environment and generate secure Pre-Shared Keys.
+2. **[Your First TCP Tunnel](getting-started/tutorial-tcp.md)**: Establish a secure session over TCP.
+3. **[Going Connectionless (UDP)](getting-started/tutorial-udp.md)**: Secure your communications over UDP.
+4. **[Production Hardening](getting-started/production-hardening.md)**: Learn about credential management, NVS storage, keepalives, and automatic reconnection loops.

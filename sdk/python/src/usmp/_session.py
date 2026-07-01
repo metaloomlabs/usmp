@@ -3,6 +3,7 @@
 import asyncio
 import struct
 import time
+from typing import Any
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
@@ -26,8 +27,8 @@ class USMPSession:
 
     def __init__(
         self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
+        reader: Any,
+        writer: Any,
         info: SessionInfo,
         recv_timeout: float | None = None,
     ):
@@ -60,6 +61,8 @@ class USMPSession:
             packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
 
             seq = self._info.tx_seq
+            if seq >= 0xFFFFFFFF:
+                raise SequenceError("TX sequence overflowed")
             nonce = struct.pack("<I", seq) + self._info.session_id[:8]
             ciphertext = encrypt(
                 key=self._info.session_key,
@@ -90,23 +93,36 @@ class USMPSession:
                 frame = await read_frame(self._reader)
                 self._last_recv = time.monotonic()
 
+                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
+                try:
+                    plaintext = decrypt(
+                        key=self._info.session_key,
+                        nonce=nonce,
+                        seq=frame.seq,
+                        type_=int(frame.type),
+                        version=frame.version,
+                        magic=frame.magic,
+                        length=frame.length,
+                        nonce_ct_tag=frame.payload,
+                    )
+                except Exception:
+                    if getattr(self._reader, "confirm_authenticated", None) is not None:
+                        # UDP: drop unauthenticated packet and continue reading
+                        continue
+                    raise
+
                 if frame.seq != self._info.rx_seq:
                     raise SequenceError(
                         f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
                     )
 
-                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
-                plaintext = decrypt(
-                    key=self._info.session_key,
-                    nonce=nonce,
-                    seq=frame.seq,
-                    type_=int(frame.type),
-                    version=frame.version,
-                    magic=frame.magic,
-                    length=frame.length,
-                    nonce_ct_tag=frame.payload,
-                )
+                if self._info.rx_seq >= 0xFFFFFFFF:
+                    raise SequenceError("RX sequence overflowed")
+
                 self._info.rx_seq += 1
+                confirm = getattr(self._reader, "confirm_authenticated", None)
+                if confirm is not None:
+                    confirm(frame.seq)
 
                 if frame.type == PacketType.BYE:
                     if len(assembled_payload) > 0:

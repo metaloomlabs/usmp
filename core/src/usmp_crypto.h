@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 #define USMP_GCM_NONCE_LEN 12
-#define USMP_GCM_TAG_LEN   16
+#define USMP_GCM_TAG_LEN 16
 
 /**
  * Encrypt plaintext with AES-256-GCM.
@@ -17,15 +17,13 @@
  * @param aad_len    Length of AAD
  * @param plaintext  Data to encrypt
  * @param plain_len  Length of plaintext (0 is valid — produces tag only)
- * @param out        Output buffer: must hold plain_len + USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN bytes
+ * @param out        Output buffer: must hold plain_len + USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN
+ * bytes
  * @param out_len    Set to actual output length on success
  * @return           0 on success, -1 on failure
  */
-int usmp_gcm_encrypt(const uint8_t *key,
-                     const uint8_t *nonce,
-                     const uint8_t *aad, size_t aad_len,
-                     const uint8_t *plaintext, size_t plain_len,
-                     uint8_t *out, size_t *out_len);
+int usmp_gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len);
 
 /**
  * Decrypt and authenticate an AES-256-GCM frame.
@@ -42,8 +40,5 @@ int usmp_gcm_encrypt(const uint8_t *key,
  * @param out_len              Set to plaintext length on success
  * @return                     0 on success, -1 on authentication failure or error
  */
-int usmp_gcm_decrypt(const uint8_t *key,
-                     const uint8_t *nonce,
-                     const uint8_t *aad, size_t aad_len,
-                     const uint8_t *nonce_ct_tag, size_t nct_len,
-                     uint8_t *out, size_t *out_len);
+int usmp_gcm_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                     const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len);

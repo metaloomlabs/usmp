@@ -1,6 +1,6 @@
 [project]
 name = "usmp"
-version = "0.4.7"
+version = "0.5.1"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 authors = [
@@ -18,7 +18,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/metaloomlabs/usmp"
+Homepage = "https://usmp.metaloom.in"
 Repository = "https://github.com/metaloomlabs/usmp"
 
 [build-system]

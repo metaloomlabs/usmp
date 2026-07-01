@@ -26,12 +26,12 @@ python3 -c "import secrets; print(secrets.token_hex(32))"
 === "ESP32 (ESP-IDF production)"
     Store in NVS (Non-Volatile Storage) with flash encryption enabled:
     ```c
-    // Read PSK from NVS at runtime
+    // Read PSK blob from NVS at runtime
     nvs_handle_t handle;
-    nvs_open("usmp", NVS_READONLY, &handle);
-    size_t len = 64;
-    char psk[64];
-    nvs_get_str(handle, "psk", psk, &len);
+    nvs_open("storage", NVS_READONLY, &handle);
+    size_t len = 32; // size of binary PSK key
+    uint8_t psk[32];
+    nvs_get_blob(handle, "usmp_psk", psk, &len);
     nvs_close(handle);
     ```
 

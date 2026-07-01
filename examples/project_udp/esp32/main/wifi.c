@@ -1,4 +1,3 @@
-// examples/project_1/esp32/main/wifi.c
 #include <string.h>
 
 #include "esp_event.h"
@@ -11,10 +10,7 @@
 #include "nvs_flash.h"
 
 #define WIFI_SSID "connecting....."
-#define WIFI_PASS "YOUR_WIFI_PASSWORD"
-#define STATIC_IP "192.168.1.10"
-#define STATIC_GW "192.168.1.1"
-#define STATIC_NETMASK "255.255.255.0"
+#define WIFI_PASS "your_pass"
 
 static const char* TAG = "WIFI";
 static EventGroupHandle_t s_wifi_event_group;
@@ -51,7 +47,7 @@ bool wifi_init(void) {
   ESP_ERROR_CHECK(esp_netif_init());
   ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-  esp_netif_t* netif = esp_netif_create_default_wifi_sta();
+  esp_netif_create_default_wifi_sta();
 
   wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
   ESP_ERROR_CHECK(esp_wifi_init(&cfg));
@@ -78,17 +74,6 @@ bool wifi_init(void) {
 
   ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
   ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-
-  // Switched from static IP to DHCP for dynamic network compatibility
-  /*
-  ESP_ERROR_CHECK(esp_netif_dhcpc_stop(netif));
-  esp_netif_ip_info_t ip_info;
-  memset(&ip_info, 0, sizeof(ip_info));
-  ip4addr_aton(STATIC_IP, (ip4_addr_t *)&ip_info.ip);
-  ip4addr_aton(STATIC_GW, (ip4_addr_t *)&ip_info.gw);
-  ip4addr_aton(STATIC_NETMASK, (ip4_addr_t *)&ip_info.netmask);
-  ESP_ERROR_CHECK(esp_netif_set_ip_info(netif, &ip_info));
-  */
 
   ESP_ERROR_CHECK(esp_wifi_start());
 

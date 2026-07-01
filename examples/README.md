@@ -6,21 +6,32 @@ Welcome to the Unified Secure Multi-transport Protocol (USMP) examples directory
 
 ```text
 examples/
-├── project_1/           ← Unified Multi-Platform Demo (Python Server + Arduino & ESP-IDF Clients)
+├── project_tcp/         ← Unified Multi-Platform TCP Demo (Python Server + Arduino & ESP-IDF Clients)
+├── project_udp/         ← Unified Multi-Platform UDP Demo (Python Server + Arduino & ESP-IDF Clients)
 ├── secure_telemetry/    ← Dynamic JSON Sensor Telemetry Simulation (Python Client/Server)
 ├── python_client/       ← Minimal Python Asyncio Client implementation
 └── python_server/       ← Minimal Python Asyncio Server implementation
 ```
 
-## 1. Unified Multi-Platform Demo (`project_1`)
+## 1. Unified TCP Demo (`project_tcp`)
 
-This is the recommended starting point for testing different target hardware. It contains:
+This contains a full plug-and-play USMP implementation over TCP:
 
 * A python gateway/echo server.
 * An ESP-IDF (ESP32) application that registers wifi and communicates.
 * An Arduino (ESP32) sketch using the Arduino wrapper client.
 
-**Get Started:** Follow the detailed setup instructions in [project_1/README.md](project_1/README.md).
+**Get Started:** Follow the detailed setup instructions in [project_tcp/README.md](project_tcp/README.md).
+
+## 2. Unified UDP Demo (`project_udp`)
+
+This contains a full plug-and-play USMP implementation over UDP (with transport-level reliability):
+
+* A python gateway/echo server.
+* An ESP-IDF (ESP32) application that registers wifi and communicates.
+* An Arduino (ESP32) sketch using the Arduino wrapper client.
+
+**Get Started:** Follow the detailed setup instructions in [project_udp/README.md](project_udp/README.md).
 
 ## 2. Secure Telemetry Demo (`secure_telemetry`)
 
