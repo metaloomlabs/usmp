@@ -197,8 +197,8 @@ When a session terminates due to an error, a `PKT_ERROR` frame is defined to car
 USMP uses **zero heap allocations** once a session is established.
 
 * **Session Context (`usmp_t`)**:
-  * *32-bit (ESP32)*: **~108 bytes** of persistent RAM.
-  * *64-bit*: **~160–180 bytes** of persistent RAM.
+  * *32-bit (ESP32)*: **~112 bytes** of persistent RAM.
+  * *64-bit*: **~152 bytes** of persistent RAM.
 * **Stack Bounding**:
   * Standard `usmp_send` or `usmp_recv` calls allocate transient frame buffers (~492 bytes each) on the stack, consuming up to ~1 KB of stack space.
 * **Handshake Peak Memory**:

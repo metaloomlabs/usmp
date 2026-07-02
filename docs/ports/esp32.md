@@ -70,7 +70,7 @@ USMP is optimized for resource-constrained environments. Once a session is activ
 
 | Context / Phase | RAM Consumption | Lifetime |
 | :--- | :--- | :--- |
-| **`usmp_t` Session Context** | ~108 bytes | Persistent (lives as long as the session is open). |
+| **`usmp_t` Session Context** | ~112 bytes | Persistent (lives as long as the session is open). |
 | **Transmit & Receive Buffers** | ~1 KB | Temporary stack memory (allocated only during send/recv calls). |
 | **Handshake Buffers** | ~1 KB | Transient heap memory (freed immediately after handshake completes). |
 | **mbedTLS Handshake Tasks** | ~2 KB – 4 KB | Transient stack memory (allocated during key exchange and signing). |
