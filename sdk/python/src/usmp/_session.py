@@ -65,7 +65,7 @@ class USMPSession:
                 raise SequenceError("TX sequence overflowed")
             nonce = struct.pack("<I", seq) + self._info.session_id[:8]
             ciphertext = encrypt(
-                key=self._info.session_key,
+                key=self._info.tx_key,
                 nonce=nonce,
                 seq=seq,
                 type_=int(packet_type),
@@ -96,7 +96,7 @@ class USMPSession:
                 nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                 try:
                     plaintext = decrypt(
-                        key=self._info.session_key,
+                        key=self._info.rx_key,
                         nonce=nonce,
                         seq=frame.seq,
                         type_=int(frame.type),
@@ -175,7 +175,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PING),
@@ -191,7 +191,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.BYE),
@@ -207,7 +207,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PONG),

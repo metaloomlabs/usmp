@@ -7,7 +7,7 @@ extern "C" {
 
 // Magic
 #define USMP_MAGIC 0xABCD
-#define USMP_VERSION 0x01
+#define USMP_VERSION 0x02
 
 // Packet types
 #define USMP_TYPE_HELLO 0x01

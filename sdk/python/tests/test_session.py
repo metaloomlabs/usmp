@@ -99,7 +99,7 @@ async def test_control_frame_during_fragmentation():
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]
     ciphertext = encrypt(
-        key=client_session._info.session_key,
+        key=client_session._info.tx_key,
         nonce=nonce,
         seq=seq,
         type_=int(PacketType.DATA_FRAG),
@@ -114,7 +114,7 @@ async def test_control_frame_during_fragmentation():
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]
     ciphertext = encrypt(
-        key=client_session._info.session_key,
+        key=client_session._info.tx_key,
         nonce=nonce,
         seq=seq,
         type_=int(PacketType.PING),

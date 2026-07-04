@@ -3,7 +3,7 @@ import pytest
 from usmp._crypto import (
     build_aad,
     decrypt,
-    derive_session_key,
+    derive_session_keys,
     encrypt,
     generate_keypair,
 )
@@ -17,26 +17,38 @@ def test_keypair_generation():
 
 
 def test_x25519_shared_secret_matches():
-    # Both sides derive the same session key
+    # Both sides derive the same key pair
     priv_c, pub_c = generate_keypair()
     priv_s, pub_s = generate_keypair()
     nonce = b"\x01" * 32
 
-    key_c = derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
-    key_s = derive_session_key(priv_s, pub_c, nonce, pub_c, pub_s)
+    k_c2s_c, k_s2c_c = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
+    k_c2s_s, k_s2c_s = derive_session_keys(priv_s, pub_c, nonce, pub_c, pub_s)
 
-    assert key_c == key_s
-    assert len(key_c) == 32
+    assert k_c2s_c == k_c2s_s
+    assert k_s2c_c == k_s2c_s
+    assert len(k_c2s_c) == 32
+    assert len(k_s2c_c) == 32
+
+
+def test_directional_keys_are_distinct():
+    # k_c2s and k_s2c must be different
+    priv_c, pub_c = generate_keypair()
+    priv_s, pub_s = generate_keypair()
+    nonce = b"\x01" * 32
+
+    k_c2s, k_s2c = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
+    assert k_c2s != k_s2c
 
 
 def test_session_key_changes_with_nonce():
     priv_c, pub_c = generate_keypair()
     priv_s, pub_s = generate_keypair()
 
-    key1 = derive_session_key(priv_c, pub_s, b"\x01" * 32, pub_c, pub_s)
-    key2 = derive_session_key(priv_c, pub_s, b"\x02" * 32, pub_c, pub_s)
+    k1_c2s, _ = derive_session_keys(priv_c, pub_s, b"\x01" * 32, pub_c, pub_s)
+    k2_c2s, _ = derive_session_keys(priv_c, pub_s, b"\x02" * 32, pub_c, pub_s)
 
-    assert key1 != key2
+    assert k1_c2s != k2_c2s
 
 
 def test_gcm_nonce_construction():

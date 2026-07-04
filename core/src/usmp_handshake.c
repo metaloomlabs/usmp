@@ -20,19 +20,27 @@ static const char* TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
 
-static int derive_session_key(const uint8_t* shared_secret, size_t secret_len, const uint8_t* nonce,
-                              size_t nonce_len, const uint8_t* pub_c, const uint8_t* pub_s,
-                              uint8_t* out, size_t out_len) {
+static int derive_session_keys(const uint8_t* shared_secret, size_t secret_len, const uint8_t* nonce,
+                               size_t nonce_len, const uint8_t* pub_c, const uint8_t* pub_s,
+                               uint8_t* out_c2s, uint8_t* out_s2c) {
   const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (!md) return -1;
 
   uint8_t info[7 + PUB_KEY_LEN + PUB_KEY_LEN];
-  memcpy(info, "usmp-v1", 7);
+  memcpy(info, "usmp-v2", 7);
   memcpy(info + 7, pub_c, PUB_KEY_LEN);
   memcpy(info + 7 + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
 
-  return mbedtls_hkdf(md, nonce, nonce_len, shared_secret, secret_len, info, sizeof(info), out,
-                      out_len);
+  /* Derive 64 bytes: first 32 = k_c2s, last 32 = k_s2c */
+  uint8_t key_material[USMP_SESSION_KEY_LEN * 2];
+  int ret = mbedtls_hkdf(md, nonce, nonce_len, shared_secret, secret_len, info, sizeof(info),
+                         key_material, sizeof(key_material));
+  if (ret == 0) {
+    memcpy(out_c2s, key_material, USMP_SESSION_KEY_LEN);
+    memcpy(out_s2c, key_material + USMP_SESSION_KEY_LEN, USMP_SESSION_KEY_LEN);
+  }
+  mbedtls_platform_zeroize(key_material, sizeof(key_material));
+  return ret;
 }
 
 static int compute_hmac(const uint8_t* psk, size_t psk_len, const uint8_t* data, size_t data_len,
@@ -68,6 +76,8 @@ done:
 int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   int ret = -1;
   char _msg[128];
+  uint8_t k_c2s[USMP_SESSION_KEY_LEN] = {0};
+  uint8_t k_s2c[USMP_SESSION_KEY_LEN] = {0};
 
   /*
    * Require an explicitly configured PSK — no compile-time fallback.
@@ -152,7 +162,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
 
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
-  pkt.version = 1;
+  pkt.version = USMP_VERSION;
   pkt.type = USMP_TYPE_HELLO;
   pkt.seq = 0;
   pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN;
@@ -207,13 +217,25 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   }
   USMP_LOGI(TAG, "X25519 shared secret computed");
 
-  // Derive session key ────────────────────────────────────────────────────
-  if (derive_session_key(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s,
-                         session->session_key, USMP_SESSION_KEY_LEN) != 0) {
+  // L1 fix: reject all-zero shared secret (low-order point)
+  {
+    uint8_t zero_buf[PUB_KEY_LEN] = {0};
+    if (mbedtls_ct_memcmp(shared_secret, zero_buf, shared_len) == 0) {
+      USMP_LOGE(TAG, "X25519 produced all-zero shared secret (low-order point)");
+      goto cleanup;
+    }
+  }
+
+  // Derive directional session keys ────────────────────────────────────────
+  if (derive_session_keys(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s,
+                          k_c2s, k_s2c) != 0) {
     USMP_LOGE(TAG, "HKDF failed");
     goto cleanup;
   }
-  USMP_LOGI(TAG, "Session key derived");
+  /* Client: encrypts with k_c2s, decrypts with k_s2c */
+  memcpy(session->tx_key, k_c2s, USMP_SESSION_KEY_LEN);
+  memcpy(session->rx_key, k_s2c, USMP_SESSION_KEY_LEN);
+  USMP_LOGI(TAG, "Directional session keys derived");
 
   // Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
   uint8_t hmac_client[USMP_HMAC_LEN];
@@ -231,7 +253,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
 
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
-  pkt.version = 1;
+  pkt.version = USMP_VERSION;
   pkt.type = USMP_TYPE_HELLO_ACK;
   pkt.seq = 0;
   pkt.length = USMP_HMAC_LEN;
@@ -299,6 +321,13 @@ cleanup:
   mbedtls_platform_zeroize(hmac_server_received, sizeof(hmac_server_received));
   mbedtls_platform_zeroize(nonce, sizeof(nonce));
   mbedtls_platform_zeroize(pers, sizeof(pers));
+  mbedtls_platform_zeroize(k_c2s, sizeof(k_c2s));
+  mbedtls_platform_zeroize(k_s2c, sizeof(k_s2c));
+  if (ret != 0) {
+    /* Only wipe derived keys on failure — on success they're needed */
+    mbedtls_platform_zeroize(session->tx_key, sizeof(session->tx_key));
+    mbedtls_platform_zeroize(session->rx_key, sizeof(session->rx_key));
+  }
 
   mbedtls_ecdh_free(&ecdh);
   mbedtls_entropy_free(&entropy);

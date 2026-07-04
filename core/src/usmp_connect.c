@@ -46,7 +46,8 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
 
   memcpy(ctx->device_id, hs.device_id, USMP_DEVICE_ID_LEN);
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
-  memcpy(ctx->session_key, hs.session_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->tx_key, hs.tx_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->rx_key, hs.rx_key, USMP_SESSION_KEY_LEN);
   ctx->established = true;
   ctx->tx_seq = 0;
   ctx->rx_seq = 0;
@@ -71,7 +72,8 @@ int usmp_reconnect(usmp_t* ctx) {
   if (!ctx) return -1;
 
   /* Zeroise the old session key immediately on entering reconnect */
-  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+  mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
+  mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
 
   if (!ctx->transport.reconnect) {
     USMP_LOGE(TAG, "Transport does not support reconnect");
@@ -102,7 +104,8 @@ int usmp_reconnect(usmp_t* ctx) {
 
   // device_id comes from hardware — unchanged between sessions
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
-  memcpy(ctx->session_key, hs.session_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->tx_key, hs.tx_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->rx_key, hs.rx_key, USMP_SESSION_KEY_LEN);
   ctx->established = true;
   ctx->tx_seq = 0;
   ctx->rx_seq = 0;
@@ -128,8 +131,9 @@ void usmp_close(usmp_t* ctx) {
   if (!ctx) return;
   if (ctx->transport.close) ctx->transport.close(&ctx->transport);
   ctx->established = false;
-  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+  mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
+  mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "0.5.1"; }
+const char* usmp_get_version(void) { return "0.6.0"; }

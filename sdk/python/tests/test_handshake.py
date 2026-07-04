@@ -54,7 +54,8 @@ async def test_handshake_success():
     assert "client" in result
     assert result["server"].device_id == DEVICE_ID
     assert result["server"].session_id == result["client"].session_id
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_handshake_wrong_psk():
@@ -69,8 +70,12 @@ async def test_handshake_wrong_psk():
 
 async def test_session_keys_match():
     result = await _run_pair(PSK, PSK)
-    assert len(result["server"].session_key) == 32
-    assert result["server"].session_key == result["client"].session_key
+    assert len(result["server"].tx_key) == 32
+    assert len(result["server"].rx_key) == 32
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
+    # Directional keys must be different from each other
+    assert result["server"].tx_key != result["server"].rx_key
 
 
 async def test_device_id_preserved():
@@ -87,7 +92,7 @@ async def test_session_id_is_random():
 async def test_session_key_is_random():
     result1 = await _run_pair(PSK, PSK)
     result2 = await _run_pair(PSK, PSK)
-    assert result1["server"].session_key != result2["server"].session_key
+    assert result1["server"].tx_key != result2["server"].tx_key
 
 
 async def test_rogue_server_detected():
@@ -103,7 +108,8 @@ async def test_rogue_server_detected():
     assert "server" in result
     assert "client" in result
     # Both should succeed with matching PSK
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_mutual_auth_both_sides_verified():
@@ -111,7 +117,8 @@ async def test_mutual_auth_both_sides_verified():
     result = await _run_pair(PSK, PSK)
     assert result["server"].device_id == DEVICE_ID
     assert result["server"].session_id == result["client"].session_id
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_wrong_psk_client_rejected():

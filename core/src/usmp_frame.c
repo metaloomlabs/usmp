@@ -85,9 +85,9 @@ int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
 
   memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
 
-  // Verify CRC using constant-time comparison (mitigates timing attacks)
+  // Verify CRC (non-secret integrity check — no need for constant-time comparison)
   uint16_t expected = compute_crc(pkt);
-  if (mbedtls_ct_memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0) return -1;
+  if (memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0) return -1;
 
   return 0;
 }
