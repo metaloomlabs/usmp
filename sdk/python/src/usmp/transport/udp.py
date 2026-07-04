@@ -63,6 +63,18 @@ class UDPStream:
         if magic != 0xABCD:
             return
 
+        # U2 fix: enforce one-frame-per-datagram on UDP
+        if len(data) < USMP_HEADER_SIZE:
+            return
+        length = struct.unpack("<H", data[8:10])[0]
+        if len(data) != USMP_HEADER_SIZE + length:
+            logger.debug(
+                "UDP datagram size mismatch: got %d, expected %d",
+                len(data),
+                USMP_HEADER_SIZE + length,
+            )
+            return
+
         type_val = data[3]
         seq_val = struct.unpack("<I", data[4:8])[0]
 

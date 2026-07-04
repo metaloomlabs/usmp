@@ -80,7 +80,8 @@ static int send_control(usmp_t* ctx, uint8_t type) {
 int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (!ctx || !ctx->established) return -1;
 
-  if (ctx->tx_seq >= 0xFFFFFFFF) {
+  uint32_t num_fragments = (len == 0) ? 1 : (uint32_t)((len + USMP_MAX_DATA_LEN - 1) / USMP_MAX_DATA_LEN);
+  if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
     return -1;
@@ -174,6 +175,9 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 
     if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
       USMP_LOGE(TAG, "Parse failed");
+      if (ctx->transport.confirm_authenticated) {
+        continue;  // UDP: drop unauthenticated packet and continue reading
+      }
       return -1;
     }
 

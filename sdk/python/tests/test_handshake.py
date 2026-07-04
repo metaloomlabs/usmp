@@ -233,3 +233,31 @@ async def test_rate_limiter_table_capping():
     assert "192.168.1.99" in _failed_handshakes
 
     _failed_handshakes.clear()
+
+
+async def test_empty_psk_rejected():
+    import pytest
+    from unittest.mock import Mock
+    from usmp._server import USMPServer
+    from usmp._handshake import client_handshake, server_handshake
+    
+    # Server initialization empty/None PSK check
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk=b"")
+    assert "PSK must be configured" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk=None)  # type: ignore
+    assert "PSK must be configured" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk={b"\x01\x02": b""})
+    assert "cannot be empty" in str(exc.value)
+
+    # Handshake function empty check
+    mock_reader = Mock(spec=asyncio.StreamReader)
+    mock_writer = Mock(spec=asyncio.StreamWriter)
+    
+    with pytest.raises(ValueError) as exc:
+        await client_handshake(mock_reader, mock_writer, psk=b"", device_id=b"\x01"*6)
+    assert "PSK cannot be empty" in str(exc.value)

@@ -325,3 +325,67 @@ async def test_udp_concurrent_handshakes_limit():
                 await c.disconnect()
 
     await _run(server, client_coro())
+
+
+@pytest.mark.asyncio
+async def test_udp_invalid_length_discard():
+    """Verify that datagrams with size mismatch compared to header length are discarded."""
+    from usmp.transport.udp import UDPStream
+    from unittest.mock import Mock
+
+    mock_transport = Mock()
+    stream = UDPStream(mock_transport, ("127.0.0.1", 1234))
+
+    # Header states magic=0xABCD (2B), version=2 (1B), type=5 (1B), seq=0 (4B), length=100 (2B), crc=0 (2B)
+    # Total header: 12B. Datagram size: 20B.
+    # Expected size: 12 + 100 = 112B. Mismatch!
+    bad_data = b"\xCD\xAB\x02\x05\x00\x00\x00\x00\x64\x00\x00\x00" + b"A" * 8
+    stream.feed_packet(bad_data)
+
+    assert len(stream._read_buffer) == 0  # Should be discarded
+
+
+@pytest.mark.asyncio
+async def test_udp_malformed_frame_robustness():
+    """Verify that parsing/crypto exceptions do not tear down the session on UDP."""
+    port = _free_port()
+    received = []
+
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0, protocol="udp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        try:
+            while True:
+                data = await session.recv()
+                received.append(data)
+                await session.send(b"echo:" + data)
+        except Exception:
+            pass
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+
+        # Send a valid frame
+        await client.send(b"valid1")
+        assert await client.recv() == b"echo:valid1"
+
+        # Manually feed an invalid frame (bad version) to client stream directly to test robustness
+        # client's own transport/stream should drop it on decrypt/parse error and keep running
+        stream = client._session._reader
+        
+        # Craft a fake frame: magic=0xABCD, version=99 (invalid), type=5, seq=999, len=10, crc=0
+        bad_frame = b"\xCD\xAB\x63\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
+        stream.feed_packet(bad_frame)
+
+        await asyncio.sleep(0.05)
+
+        # Send another valid frame to confirm session is still alive
+        await client.send(b"valid2")
+        assert await client.recv() == b"echo:valid2"
+
+        await client.disconnect()
+
+    await _run(server, client_coro())
+    assert received == [b"valid1", b"valid2"]

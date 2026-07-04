@@ -47,6 +47,16 @@ class USMPServer:
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
         protocol: USMPProtocol | str = USMPProtocol.TCP,
     ):
+        if not psk:
+            raise ValueError("PSK must be configured and non-empty")
+        if isinstance(psk, dict):
+            for dev_id, val in psk.items():
+                if not val:
+                    raise ValueError(f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} cannot be empty")
+        elif isinstance(psk, bytes):
+            if not psk:
+                raise ValueError("PSK bytes cannot be empty")
+
         self._host = host
         self._port = port
         self._psk = psk

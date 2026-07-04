@@ -90,11 +90,11 @@ class USMPSession:
             ctrl_count = 0
 
             while True:
-                frame = await read_frame(self._reader)
-                self._last_recv = time.monotonic()
-
-                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                 try:
+                    frame = await read_frame(self._reader)
+                    self._last_recv = time.monotonic()
+
+                    nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                     plaintext = decrypt(
                         key=self._info.rx_key,
                         nonce=nonce,

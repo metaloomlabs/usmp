@@ -71,7 +71,9 @@ async def server_handshake(
         pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
 
         if isinstance(psk, dict):
-            resolved_psk = psk.get(device_id) or psk.get(b"")
+            resolved_psk = psk.get(device_id)
+            if resolved_psk is None:
+                resolved_psk = psk.get(b"")
             if resolved_psk is None:
                 raise HandshakeError("Device ID not registered")
         elif isinstance(psk, bytes):
@@ -82,6 +84,9 @@ async def server_handshake(
                 resolved_psk = await resolved_psk
         else:
             raise HandshakeError("Invalid PSK type")
+
+        if not resolved_psk:
+            raise HandshakeError("Resolved PSK cannot be empty")
 
         assert isinstance(resolved_psk, bytes)
 
@@ -173,6 +178,8 @@ async def client_handshake(
     """
     Run the client side of the USMP handshake.
     """
+    if not psk:
+        raise ValueError("PSK cannot be empty")
 
     # ── Generate client keypair ───────────────────────────────────────────────
     priv_c, pub_c = generate_keypair()
