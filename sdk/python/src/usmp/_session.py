@@ -7,7 +7,7 @@ from typing import Any
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, PayloadError, SequenceError
+from .errors import ConnectionClosedError, PayloadError, SequenceError, USMPError
 from .errors import TimeoutError as USMPTimeoutError
 from .types import (
     USMP_MAGIC,
@@ -65,7 +65,7 @@ class USMPSession:
                 raise SequenceError("TX sequence overflowed")
             nonce = struct.pack("<I", seq) + self._info.session_id[:8]
             ciphertext = encrypt(
-                key=self._info.session_key,
+                key=self._info.tx_key,
                 nonce=nonce,
                 seq=seq,
                 type_=int(packet_type),
@@ -90,13 +90,13 @@ class USMPSession:
             ctrl_count = 0
 
             while True:
-                frame = await read_frame(self._reader)
-                self._last_recv = time.monotonic()
-
-                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                 try:
+                    frame = await read_frame(self._reader)
+                    self._last_recv = time.monotonic()
+
+                    nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                     plaintext = decrypt(
-                        key=self._info.session_key,
+                        key=self._info.rx_key,
                         nonce=nonce,
                         seq=frame.seq,
                         type_=int(frame.type),
@@ -105,9 +105,9 @@ class USMPSession:
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
                     )
-                except Exception:
+                except (USMPError, ValueError):
                     if getattr(self._reader, "confirm_authenticated", None) is not None:
-                        # UDP: drop unauthenticated packet and continue reading
+                        # UDP: drop unauthenticated/malformed packet and continue reading
                         continue
                     raise
 
@@ -175,7 +175,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PING),
@@ -191,7 +191,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.BYE),
@@ -207,7 +207,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PONG),

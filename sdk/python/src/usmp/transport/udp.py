@@ -11,6 +11,9 @@ logger = logging.getLogger("usmp.transport.udp")
 
 UTACK_MAGIC = b"\xAC\xAC"
 
+# L3 fix: cap read buffer to prevent memory exhaustion from forged datagrams
+MAX_READ_BUFFER = 4096
+
 
 class UDPStream:
     """
@@ -60,6 +63,18 @@ class UDPStream:
         if magic != 0xABCD:
             return
 
+        # U2 fix: enforce one-frame-per-datagram on UDP
+        if len(data) < USMP_HEADER_SIZE:
+            return
+        length = struct.unpack("<H", data[8:10])[0]
+        if len(data) != USMP_HEADER_SIZE + length:
+            logger.debug(
+                "UDP datagram size mismatch: got %d, expected %d",
+                len(data),
+                USMP_HEADER_SIZE + length,
+            )
+            return
+
         type_val = data[3]
         seq_val = struct.unpack("<I", data[4:8])[0]
 
@@ -87,6 +102,11 @@ class UDPStream:
                     self._last_rx_seq,
                 )
                 return
+
+        # L3 fix: drop if buffer would exceed cap (unauthenticated data)
+        if len(self._read_buffer) + len(data) > MAX_READ_BUFFER:
+            logger.debug("UDP read buffer full (%d bytes), dropping packet", len(self._read_buffer))
+            return
 
         self._read_buffer.extend(data)
         self._data_event.set()

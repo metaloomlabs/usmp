@@ -5,7 +5,7 @@ import os
 import time
 from typing import Any, Callable
 
-from ._crypto import derive_session_key, generate_keypair
+from ._crypto import derive_session_keys, generate_keypair
 from ._frame import read_frame, write_frame
 from .errors import AuthError, HandshakeError
 from .types import (
@@ -71,7 +71,9 @@ async def server_handshake(
         pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
 
         if isinstance(psk, dict):
-            resolved_psk = psk.get(device_id) or psk.get(b"")
+            resolved_psk = psk.get(device_id)
+            if resolved_psk is None:
+                resolved_psk = psk.get(b"")
             if resolved_psk is None:
                 raise HandshakeError("Device ID not registered")
         elif isinstance(psk, bytes):
@@ -83,6 +85,9 @@ async def server_handshake(
         else:
             raise HandshakeError("Invalid PSK type")
 
+        if not resolved_psk:
+            raise HandshakeError("Resolved PSK cannot be empty")
+
         assert isinstance(resolved_psk, bytes)
 
         # ── Generate server keypair ───────────────────────────────────────────────
@@ -93,7 +98,7 @@ async def server_handshake(
         await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
 
         # ── Derive session key ────────────────────────────────────────────────────
-        session_key = derive_session_key(priv_s, pub_c, nonce, pub_c, pub_s)
+        session_key = derive_session_keys(priv_s, pub_c, nonce, pub_c, pub_s)
 
         # ── Step 3: Receive HELLO_ACK [hmac_client(32)] ──────────────────────────
         try:
@@ -122,10 +127,13 @@ async def server_handshake(
         if limiter_key in _failed_handshakes:
             del _failed_handshakes[limiter_key]
 
+        k_c2s, k_s2c = session_key
+
         return SessionInfo(
             device_id=device_id,
             session_id=session_id,
-            session_key=session_key,
+            tx_key=k_s2c,   # server sends with server-to-client key
+            rx_key=k_c2s,   # server receives with client-to-server key
         )
 
     except Exception:
@@ -170,6 +178,8 @@ async def client_handshake(
     """
     Run the client side of the USMP handshake.
     """
+    if not psk:
+        raise ValueError("PSK cannot be empty")
 
     # ── Generate client keypair ───────────────────────────────────────────────
     priv_c, pub_c = generate_keypair()
@@ -193,7 +203,7 @@ async def client_handshake(
     pub_s = frame.payload[USMP_NONCE_LEN : USMP_NONCE_LEN + USMP_PUB_KEY_LEN]
 
     # ── Derive session key ────────────────────────────────────────────────────
-    session_key = derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
+    session_key = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
     hmac_client = _compute_hmac(psk, nonce, device_id, pub_c, pub_s)
@@ -224,8 +234,11 @@ async def client_handshake(
     if not hmac.compare_digest(expected_server, hmac_server):
         raise AuthError("Server HMAC verification failed — possible rogue server")
 
+    k_c2s, k_s2c = session_key
+
     return SessionInfo(
         device_id=device_id,
         session_id=session_id,
-        session_key=session_key,
+        tx_key=k_c2s,   # client sends with client-to-server key
+        rx_key=k_s2c,   # client receives with server-to-client key
     )

@@ -54,7 +54,8 @@ async def test_handshake_success():
     assert "client" in result
     assert result["server"].device_id == DEVICE_ID
     assert result["server"].session_id == result["client"].session_id
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_handshake_wrong_psk():
@@ -69,8 +70,12 @@ async def test_handshake_wrong_psk():
 
 async def test_session_keys_match():
     result = await _run_pair(PSK, PSK)
-    assert len(result["server"].session_key) == 32
-    assert result["server"].session_key == result["client"].session_key
+    assert len(result["server"].tx_key) == 32
+    assert len(result["server"].rx_key) == 32
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
+    # Directional keys must be different from each other
+    assert result["server"].tx_key != result["server"].rx_key
 
 
 async def test_device_id_preserved():
@@ -87,7 +92,7 @@ async def test_session_id_is_random():
 async def test_session_key_is_random():
     result1 = await _run_pair(PSK, PSK)
     result2 = await _run_pair(PSK, PSK)
-    assert result1["server"].session_key != result2["server"].session_key
+    assert result1["server"].tx_key != result2["server"].tx_key
 
 
 async def test_rogue_server_detected():
@@ -103,7 +108,8 @@ async def test_rogue_server_detected():
     assert "server" in result
     assert "client" in result
     # Both should succeed with matching PSK
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_mutual_auth_both_sides_verified():
@@ -111,7 +117,8 @@ async def test_mutual_auth_both_sides_verified():
     result = await _run_pair(PSK, PSK)
     assert result["server"].device_id == DEVICE_ID
     assert result["server"].session_id == result["client"].session_id
-    assert result["server"].session_key == result["client"].session_key
+    assert result["server"].tx_key == result["client"].rx_key
+    assert result["server"].rx_key == result["client"].tx_key
 
 
 async def test_wrong_psk_client_rejected():
@@ -226,3 +233,31 @@ async def test_rate_limiter_table_capping():
     assert "192.168.1.99" in _failed_handshakes
 
     _failed_handshakes.clear()
+
+
+async def test_empty_psk_rejected():
+    import pytest
+    from unittest.mock import Mock
+    from usmp._server import USMPServer
+    from usmp._handshake import client_handshake, server_handshake
+    
+    # Server initialization empty/None PSK check
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk=b"")
+    assert "PSK must be configured" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk=None)  # type: ignore
+    assert "PSK must be configured" in str(exc.value)
+
+    with pytest.raises(ValueError) as exc:
+        USMPServer(psk={b"\x01\x02": b""})
+    assert "cannot be empty" in str(exc.value)
+
+    # Handshake function empty check
+    mock_reader = Mock(spec=asyncio.StreamReader)
+    mock_writer = Mock(spec=asyncio.StreamWriter)
+    
+    with pytest.raises(ValueError) as exc:
+        await client_handshake(mock_reader, mock_writer, psk=b"", device_id=b"\x01"*6)
+    assert "PSK cannot be empty" in str(exc.value)

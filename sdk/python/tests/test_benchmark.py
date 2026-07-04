@@ -4,7 +4,7 @@ import asyncio
 import statistics
 import time
 
-from usmp._crypto import decrypt, derive_session_key, encrypt, generate_keypair
+from usmp._crypto import decrypt, derive_session_keys, encrypt, generate_keypair
 from usmp._frame import decode_frame, encode_frame
 from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
@@ -95,7 +95,7 @@ def test_bench_session_key_derivation():
 
     for _ in range(RUNS):
         t0 = time.perf_counter()
-        derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
+        derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
         times.append(time.perf_counter() - t0)
 
     passed = print_benchmark(

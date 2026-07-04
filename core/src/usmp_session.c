@@ -38,7 +38,7 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   usmp_packet_t pkt;
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
-  pkt.version = 1;
+  pkt.version = USMP_VERSION;
   pkt.type = type;
   pkt.seq = ctx->tx_seq;
 
@@ -58,7 +58,7 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   memcpy(nonce + 4, ctx->session_id, 8);
 
   size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad), NULL, 0, pkt.payload, &out_len) !=
+  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), NULL, 0, pkt.payload, &out_len) !=
       0)
     return -1;
 
@@ -80,7 +80,8 @@ static int send_control(usmp_t* ctx, uint8_t type) {
 int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (!ctx || !ctx->established) return -1;
 
-  if (ctx->tx_seq >= 0xFFFFFFFF) {
+  uint32_t num_fragments = (len == 0) ? 1 : (uint32_t)((len + USMP_MAX_DATA_LEN - 1) / USMP_MAX_DATA_LEN);
+  if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
     return -1;
@@ -104,7 +105,7 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = USMP_MAGIC;
-    pkt.version = 1;
+    pkt.version = USMP_VERSION;
     pkt.type = (offset + chunk_len < len) ? USMP_TYPE_DATA_FRAG : USMP_TYPE_DATA;
     pkt.seq = ctx->tx_seq;
 
@@ -120,7 +121,7 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     memcpy(nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad), data + offset, chunk_len,
+    if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data + offset, chunk_len,
                          pkt.payload, &out_len) != 0) {
       USMP_LOGE(TAG, "Encryption failed");
       return -1;
@@ -174,6 +175,9 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 
     if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
       USMP_LOGE(TAG, "Parse failed");
+      if (ctx->transport.confirm_authenticated) {
+        continue;  // UDP: drop unauthenticated packet and continue reading
+      }
       return -1;
     }
 
@@ -223,7 +227,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_decrypt(ctx->session_key, expected_nonce, aad, sizeof(aad), pkt.payload,
+    if (usmp_gcm_decrypt(ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload,
                          pkt.length, dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
       if (ctx->transport.confirm_authenticated) {

@@ -13,7 +13,7 @@ extern "C" {
 
 /**
  * Perform USMP mutual-auth handshake over the given transport.
- * Populates session->device_id, session_id, session_key, established.
+ * Populates session->device_id, session_id, tx_key, rx_key, established.
  * Returns 0 on success, -1 on failure.
  */
 int usmp_handshake(usmp_transport_t* transport, usmp_t* session);

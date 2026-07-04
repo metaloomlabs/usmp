@@ -13,8 +13,8 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 0
-#define USMP_VERSION_MINOR 5
-#define USMP_VERSION_PATCH 1
+#define USMP_VERSION_MINOR 6
+#define USMP_VERSION_PATCH 0
 
 /**
  * Get the library version string at runtime (e.g. "0.5.1").
@@ -71,7 +71,8 @@ const char* usmp_get_version(void);
 typedef struct {
   uint8_t device_id[USMP_DEVICE_ID_LEN];
   uint8_t session_id[USMP_SESSION_ID_LEN];
-  uint8_t session_key[USMP_SESSION_KEY_LEN];
+  uint8_t tx_key[USMP_SESSION_KEY_LEN];
+  uint8_t rx_key[USMP_SESSION_KEY_LEN];
   bool established;
   usmp_transport_t transport;
   uint32_t tx_seq;

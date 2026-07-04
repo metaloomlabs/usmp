@@ -47,6 +47,16 @@ class USMPServer:
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
         protocol: USMPProtocol | str = USMPProtocol.TCP,
     ):
+        if not psk:
+            raise ValueError("PSK must be configured and non-empty")
+        if isinstance(psk, dict):
+            for dev_id, val in psk.items():
+                if not val:
+                    raise ValueError(f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} cannot be empty")
+        elif isinstance(psk, bytes):
+            if not psk:
+                raise ValueError("PSK bytes cannot be empty")
+
         self._host = host
         self._port = port
         self._psk = psk
@@ -60,6 +70,9 @@ class USMPServer:
         self._udp_sessions: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_handshakes: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
+        # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
+        # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
+        self._handshake_semaphore = asyncio.Semaphore(10)
 
     def on_session(
         self,
@@ -149,10 +162,11 @@ class USMPServer:
     async def _handle_udp_client(self, stream: "UDPStream", addr: tuple[str, int]) -> None:
         watchdog_task: asyncio.Task[None] | None = None
         try:
-            info = await asyncio.wait_for(
-                server_handshake(stream, stream, self._psk),
-                timeout=self._handshake_timeout,
-            )
+            async with self._handshake_semaphore:
+                info = await asyncio.wait_for(
+                    server_handshake(stream, stream, self._psk),
+                    timeout=self._handshake_timeout,
+                )
 
             # Clean up any existing active session for this client address
             old_session_stream = self._udp_sessions.get(addr)
@@ -226,10 +240,11 @@ class USMPServer:
         watchdog_task: asyncio.Task[None] | None = None
 
         try:
-            info = await asyncio.wait_for(
-                server_handshake(reader, writer, self._psk),
-                timeout=self._handshake_timeout,
-            )
+            async with self._handshake_semaphore:
+                info = await asyncio.wait_for(
+                    server_handshake(reader, writer, self._psk),
+                    timeout=self._handshake_timeout,
+                )
             logger.info(
                 "Session established: device=%s session=%s",
                 info.device_id_str,
