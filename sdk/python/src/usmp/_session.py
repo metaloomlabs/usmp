@@ -7,7 +7,7 @@ from typing import Any
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, PayloadError, SequenceError
+from .errors import ConnectionClosedError, PayloadError, SequenceError, USMPError
 from .errors import TimeoutError as USMPTimeoutError
 from .types import (
     USMP_MAGIC,
@@ -105,9 +105,9 @@ class USMPSession:
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
                     )
-                except Exception:
+                except (USMPError, ValueError):
                     if getattr(self._reader, "confirm_authenticated", None) is not None:
-                        # UDP: drop unauthenticated packet and continue reading
+                        # UDP: drop unauthenticated/malformed packet and continue reading
                         continue
                     raise
 
