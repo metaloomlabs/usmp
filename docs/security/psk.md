@@ -2,6 +2,12 @@
 
 The Pre-Shared Key (PSK) is the root secret in USMP. Both the device and gateway must have the same PSK.
 
+!!! warning "Security Requirement"
+    USMP strictly enforces a **minimum PSK length of 16 bytes (128 bits)** at all client, server, and lookup entry points. Configuring a key shorter than 16 bytes will trigger initialization or handshake errors.
+
+!!! danger "Offline Dictionary Attacks"
+    Because USMP does not run an interactive Password-Authenticated Key Exchange (PAKE), the handshake HMAC is vulnerable to **offline brute-forcing or dictionary attacks** if an attacker captures the handshake. Consequently, you **MUST** use a cryptographically random, high-entropy key of at least 16 bytes (ideally 32 bytes). Do not use a human-readable password or passphrase.
+
 ## Generating a PSK
 
 Use at least 32 bytes (64 hex chars) of random data. You can generate one via Python:
