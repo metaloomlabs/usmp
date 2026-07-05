@@ -8,8 +8,8 @@
 /**
  * Encrypt plaintext with AES-256-GCM.
  *
- * Generates a fresh 12-byte random nonce via usmp_port_random() and
- * prepends it to the output: out = nonce(12) || ciphertext || tag(16)
+ * Prepends the provided 12-byte deterministic nonce to the output:
+ * out = nonce(12) || ciphertext || tag(16)
  *
  * @param key        32-byte AES-256 session key
  * @param nonce      12-byte nonce

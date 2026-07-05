@@ -125,7 +125,13 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       fd_set rfds;
       FD_ZERO(&rfds);
       FD_SET(udp->sock, &rfds);
-      int select_ret = select(udp->sock + 1, &rfds, NULL, NULL, NULL);
+      struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+      int select_ret = select(udp->sock + 1, &rfds, NULL, NULL, &tv);
+      if (select_ret == 0) {
+        // Timeout. If socket has been closed / set to negative by another thread, exit
+        if (udp->sock < 0) return -1;
+        continue;
+      }
       if (select_ret < 0) {
         if (errno == EINTR) continue;
         return -1;
