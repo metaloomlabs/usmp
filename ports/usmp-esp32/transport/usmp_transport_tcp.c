@@ -167,6 +167,7 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->reconnect = usmp_tcp_reconnect;
   t->available = usmp_tcp_available;
   t->destroy = usmp_tcp_destroy;
+  t->confirm_authenticated = NULL;
   t->ctx = tcp;
 
   return 0;

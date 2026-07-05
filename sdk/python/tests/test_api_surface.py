@@ -26,7 +26,7 @@ def test_version_string():
 
 
 def test_usmp_server_instantiates():
-    server = usmp.USMPServer(host="0.0.0.0", port=9000, psk=b"test-psk")
+    server = usmp.USMPServer(host="0.0.0.0", port=9000, psk=b"test-psk-1234-super-secret")
     assert server is not None
 
 
@@ -40,7 +40,7 @@ def test_usmp_server_accepts_timeout_params():
     server = usmp.USMPServer(
         host="0.0.0.0",
         port=9000,
-        psk=b"test-psk",
+        psk=b"test-psk-1234-super-secret",
         handshake_timeout=5.0,
         session_timeout=30.0,
     )
@@ -54,14 +54,14 @@ def test_usmp_server_accepts_on_timeout_callback():
     server = usmp.USMPServer(
         host="0.0.0.0",
         port=9000,
-        psk=b"test-psk",
+        psk=b"test-psk-1234-super-secret",
         on_timeout=my_callback,
     )
     assert server is not None
 
 
 def test_usmp_server_on_session_decorator():
-    server = usmp.USMPServer(psk=b"test-psk")
+    server = usmp.USMPServer(psk=b"test-psk-1234-super-secret")
 
     @server.on_session
     async def handler(session: usmp.USMPSession) -> None:
@@ -74,7 +74,7 @@ def test_usmp_server_on_session_decorator():
 
 
 def test_usmp_client_instantiates():
-    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk")
+    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
     assert client is not None
 
 
@@ -85,14 +85,14 @@ def test_usmp_client_has_expected_methods():
 
 
 def test_usmp_client_session_id_none_before_connect():
-    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk")
+    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
     assert client.session_id is None
 
 
 def test_usmp_client_not_connected_raises():
     import pytest
 
-    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk")
+    client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
     with pytest.raises(RuntimeError, match="Not connected"):
         client._ensure_connected()
 
@@ -100,14 +100,14 @@ def test_usmp_client_not_connected_raises():
 def test_usmp_client_accepts_device_id():
     device_id = bytes([0x00, 0x11, 0x22, 0x33, 0x44, 0x55])
     client = usmp.USMPClient(
-        host="127.0.0.1", port=9000, psk=b"test-psk", device_id=device_id
+        host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret", device_id=device_id
     )
     assert client._device_id == device_id
 
 
 def test_usmp_client_generates_random_device_id():
-    c1 = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk")
-    c2 = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk")
+    c1 = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
+    c2 = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
     assert c1._device_id != c2._device_id
 
 

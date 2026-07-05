@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from ._crypto import derive_session_keys, generate_keypair
 from ._frame import read_frame, write_frame
@@ -14,6 +14,8 @@ from .types import (
     USMP_NONCE_LEN,
     USMP_PUB_KEY_LEN,
     USMP_SESSION_ID_LEN,
+    USMP_MAGIC,
+    USMP_VERSION,
     PacketType,
     SessionInfo,
 )
@@ -32,7 +34,7 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
 async def server_handshake(
     reader: Any,
     writer: Any,
-    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes],
+    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]],
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
@@ -64,7 +66,7 @@ async def server_handshake(
         if frame.type != PacketType.HELLO:
             raise HandshakeError(f"Expected HELLO, got {frame.type_name()}")
 
-        if frame.length != USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN:
+        if frame.length not in (38, 54):
             raise HandshakeError(f"Bad HELLO length: {frame.length}")
 
         device_id = frame.payload[:USMP_DEVICE_ID_LEN]
@@ -85,8 +87,8 @@ async def server_handshake(
         else:
             raise HandshakeError("Invalid PSK type")
 
-        if not resolved_psk:
-            raise HandshakeError("Resolved PSK cannot be empty")
+        if not resolved_psk or len(resolved_psk) < 16:
+            raise HandshakeError("Resolved PSK must be at least 16 bytes long")
 
         assert isinstance(resolved_psk, bytes)
 
@@ -113,7 +115,9 @@ async def server_handshake(
             raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
         # ── Verify client HMAC ────────────────────────────────────────────────────
-        expected_client = _compute_hmac(resolved_psk, nonce, device_id, pub_c, pub_s)
+        import struct
+        prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
+        expected_client = _compute_hmac(resolved_psk, prefix_client, nonce, device_id, pub_c, pub_s)
         received_client = frame.payload[:USMP_HMAC_LEN]
 
         if not hmac.compare_digest(expected_client, received_client):
@@ -121,7 +125,8 @@ async def server_handshake(
 
         # ── Step 4: Send SESSION_OK [session_id(16) || hmac_server(32)] ───────────
         session_id = os.urandom(USMP_SESSION_ID_LEN)
-        hmac_server = _compute_hmac(resolved_psk, nonce, session_id, pub_c, pub_s)
+        prefix_server = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.SESSION_OK)])
+        hmac_server = _compute_hmac(resolved_psk, prefix_server, nonce, session_id, pub_c, pub_s)
         await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
         if limiter_key in _failed_handshakes:
@@ -136,6 +141,9 @@ async def server_handshake(
             rx_key=k_c2s,   # server receives with client-to-server key
         )
 
+    except (asyncio.IncompleteReadError, ConnectionResetError, ConnectionAbortedError, EOFError, OSError):
+        # Clean disconnects / transport failures — don't count against rate limiter
+        raise
     except Exception:
         now = time.monotonic()
         entry = _failed_handshakes.get(limiter_key)
@@ -178,8 +186,8 @@ async def client_handshake(
     """
     Run the client side of the USMP handshake.
     """
-    if not psk:
-        raise ValueError("PSK cannot be empty")
+    if not psk or len(psk) < 16:
+        raise ValueError("PSK must be configured and at least 16 bytes long")
 
     # ── Generate client keypair ───────────────────────────────────────────────
     priv_c, pub_c = generate_keypair()
@@ -187,11 +195,24 @@ async def client_handshake(
     # ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
     await write_frame(writer, PacketType.HELLO, device_id + pub_c)
 
-    # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] ───────────────────
+    # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
     try:
         frame = await read_frame(reader, verify_crc=False)
     except asyncio.IncompleteReadError as e:
         raise HandshakeError("Connection closed before CHALLENGE") from e
+
+    if frame.type == PacketType.HELLO_RETRY:
+        if frame.length != 16:
+            raise HandshakeError(f"Bad HELLO_RETRY length: {frame.length}")
+        cookie = frame.payload[:16]
+        # Resend HELLO with cookie appended
+        await write_frame(writer, PacketType.HELLO, device_id + pub_c + cookie)
+        
+        # Read the actual CHALLENGE
+        try:
+            frame = await read_frame(reader, verify_crc=False)
+        except asyncio.IncompleteReadError as e:
+            raise HandshakeError("Connection closed before CHALLENGE (after retry)") from e
 
     if frame.type != PacketType.CHALLENGE:
         raise HandshakeError(f"Expected CHALLENGE, got {frame.type_name()}")
@@ -206,7 +227,9 @@ async def client_handshake(
     session_key = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-    hmac_client = _compute_hmac(psk, nonce, device_id, pub_c, pub_s)
+    import struct
+    prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
+    hmac_client = _compute_hmac(psk, prefix_client, nonce, device_id, pub_c, pub_s)
     await write_frame(writer, PacketType.HELLO_ACK, hmac_client)
 
     # ── Step 4: Receive SESSION_OK [session_id(16) || hmac_server(32)] ────────
@@ -230,7 +253,8 @@ async def client_handshake(
     ]
 
     # ── Verify server HMAC ────────────────────────────────────────────────────
-    expected_server = _compute_hmac(psk, nonce, session_id, pub_c, pub_s)
+    prefix_server = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.SESSION_OK)])
+    expected_server = _compute_hmac(psk, prefix_server, nonce, session_id, pub_c, pub_s)
     if not hmac.compare_digest(expected_server, hmac_server):
         raise AuthError("Server HMAC verification failed — possible rogue server")
 

@@ -12,8 +12,8 @@ extern "C" {
 #endif
 
 // Version ───────────────────────────────────────────────────────────────────
-#define USMP_VERSION_MAJOR 0
-#define USMP_VERSION_MINOR 6
+#define USMP_VERSION_MAJOR 1
+#define USMP_VERSION_MINOR 0
 #define USMP_VERSION_PATCH 0
 
 /**
@@ -91,6 +91,7 @@ typedef struct {
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
+  uint64_t rx_window_bitmap;
 
   /*
    * Runtime PSK — must be set before calling usmp_connect().

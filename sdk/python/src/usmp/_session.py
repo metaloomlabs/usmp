@@ -88,11 +88,23 @@ class USMPSession:
             assembled_payload = bytearray()
             frame_count = 0
             ctrl_count = 0
+            expected_frag_seq = 0
 
             while True:
                 try:
                     frame = await read_frame(self._reader)
                     self._last_recv = time.monotonic()
+
+                    # Sliding replay window check for UDP (L2)
+                    confirm = getattr(self._reader, "confirm_authenticated", None)
+                    is_udp = confirm is not None
+                    if is_udp:
+                        if frame.seq <= self._info.rx_seq - 64:
+                            continue  # too old, drop silently
+                        if frame.seq <= self._info.rx_seq:
+                            offset = self._info.rx_seq - frame.seq
+                            if (self._info.rx_window_bitmap & (1 << offset)) != 0:
+                                continue  # duplicate/replayed seq, drop silently
 
                     nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                     plaintext = decrypt(
@@ -111,18 +123,33 @@ class USMPSession:
                         continue
                     raise
 
-                if frame.seq != self._info.rx_seq:
-                    raise SequenceError(
-                        f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
-                    )
-
-                if self._info.rx_seq >= 0xFFFFFFFF:
+                if frame.seq >= 0xFFFFFFFF:
                     raise SequenceError("RX sequence overflowed")
 
-                self._info.rx_seq += 1
-                confirm = getattr(self._reader, "confirm_authenticated", None)
-                if confirm is not None:
+                if is_udp:
+                    # Update sliding replay window on successful verification (L2)
+                    if frame.seq > self._info.rx_seq:
+                        shift = frame.seq - self._info.rx_seq
+                        if shift < 64:
+                            self._info.rx_window_bitmap = ((self._info.rx_window_bitmap << shift) & 0xFFFFFFFFFFFFFFFF) | 1
+                        else:
+                            self._info.rx_window_bitmap = 1
+                        self._info.rx_seq = frame.seq
+                    else:
+                        offset = self._info.rx_seq - frame.seq
+                        self._info.rx_window_bitmap |= (1 << offset)
+
                     confirm(frame.seq)
+                else:
+                    if frame.seq != self._info.rx_seq:
+                        raise SequenceError(
+                            f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
+                        )
+
+                    if self._info.rx_seq >= 0xFFFFFFFF:
+                        raise SequenceError("RX sequence overflowed")
+
+                    self._info.rx_seq += 1
 
                 if frame.type == PacketType.BYE:
                     if len(assembled_payload) > 0:
@@ -152,6 +179,13 @@ class USMPSession:
 
                 if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
                     raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+
+                if frame_count > 0:
+                    if frame.seq != expected_frag_seq:
+                        raise SequenceError("Protocol error: out-of-order fragment sequence")
+                    expected_frag_seq += 1
+                else:
+                    expected_frag_seq = frame.seq + 1
 
                 assembled_payload.extend(plaintext)
                 frame_count += 1

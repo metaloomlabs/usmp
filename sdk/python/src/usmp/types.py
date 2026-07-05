@@ -17,7 +17,9 @@ class PacketType(IntEnum):
     PONG = 0x07
     BYE = 0x08
     DATA_FRAG = 0x09
+    HELLO_RETRY = 0x0A
     ERROR = 0xFF
+
 
 
 class ErrorCode(IntEnum):
@@ -84,6 +86,7 @@ class SessionInfo:
     rx_key: bytes
     tx_seq: int = 0
     rx_seq: int = 0
+    rx_window_bitmap: int = 0
 
     def __post_init__(self) -> None:
         if len(self.device_id) != USMP_DEVICE_ID_LEN:

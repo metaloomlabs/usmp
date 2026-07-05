@@ -1,7 +1,11 @@
 # src/usmp/_server.py
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
+import struct
 import time
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -41,21 +45,23 @@ class USMPServer:
         self,
         host: str = "0.0.0.0",
         port: int = 9000,
-        psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes] = b"",
+        psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]] = b"",
         handshake_timeout: float = 10.0,
         session_timeout: float = 60.0,
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
         protocol: USMPProtocol | str = USMPProtocol.TCP,
+        max_connections: int = 100,
+        max_connections_per_ip: int = 5,
     ):
         if not psk:
             raise ValueError("PSK must be configured and non-empty")
         if isinstance(psk, dict):
             for dev_id, val in psk.items():
-                if not val:
-                    raise ValueError(f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} cannot be empty")
+                if not val or len(val) < 16:
+                    raise ValueError(f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} must be at least 16 bytes long")
         elif isinstance(psk, bytes):
-            if not psk:
-                raise ValueError("PSK bytes cannot be empty")
+            if len(psk) < 16:
+                raise ValueError("PSK bytes must be at least 16 bytes long")
 
         self._host = host
         self._port = port
@@ -63,6 +69,9 @@ class USMPServer:
         self._handshake_timeout = handshake_timeout
         self._session_timeout = session_timeout
         self._on_timeout = on_timeout
+        self._max_connections = max_connections
+        self._max_connections_per_ip = max_connections_per_ip
+        self._tcp_connections = {}
         self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
         if self._protocol not in ("tcp", "udp"):
@@ -70,6 +79,9 @@ class USMPServer:
         self._udp_sessions: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_handshakes: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
+        # Ephemeral cookie secret for UDP return-routability
+        import os
+        self._cookie_secret = os.urandom(32)
         # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
         # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
         self._handshake_semaphore = asyncio.Semaphore(10)
@@ -126,6 +138,43 @@ class USMPServer:
                 stream.feed_packet(data)
                 return
 
+            # Only HELLO packet (type 0x01) can initiate a new handshake
+            if type_val != 0x01:
+                return
+
+            # Enforce UDP stateless cookie return-routability verification (U3/U4)
+            if len(data) == 50:
+                from ._frame import encode_frame
+                from .types import PacketType
+
+                # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
+                type_val = data[3]
+                seq_val = struct.unpack("<I", data[4:8])[0]
+                utack = b"\xAC\xAC" + bytes([type_val]) + struct.pack("<I", seq_val)
+                transport.sendto(utack, addr)
+
+                time_bucket = int(time.time() // 30)
+                msg = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                cookie = hmac.new(self._cookie_secret, msg, hashlib.sha256).digest()[:16]
+
+                retry_packet = encode_frame(PacketType.HELLO_RETRY, cookie)
+                transport.sendto(retry_packet, addr)
+                return
+            elif len(data) == 66:
+                cookie = data[50:66]
+                time_bucket = int(time.time() // 30)
+                msg1 = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                msg2 = f"{addr[0]}:{addr[1]}:{time_bucket - 1}".encode()
+                expected1 = hmac.new(self._cookie_secret, msg1, hashlib.sha256).digest()[:16]
+                expected2 = hmac.new(self._cookie_secret, msg2, hashlib.sha256).digest()[:16]
+
+                if not (hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)):
+                    # Invalid cookie, silently ignore
+                    return
+            else:
+                # Invalid size for initial HELLO, ignore
+                return
+
             # Check rate limiter lockout
             limiter_key = addr[0]
             now = time.monotonic()
@@ -138,10 +187,6 @@ class USMPServer:
             # Check concurrent handshakes limit to prevent task exhaustion
             in_progress = self._udp_in_progress_handshakes.get(limiter_key, 0)
             if in_progress >= 3:
-                return
-
-            # Only HELLO packet (type 0x01) can initiate a new handshake
-            if type_val != 0x01:
                 return
 
             # Increment concurrent count
@@ -161,12 +206,40 @@ class USMPServer:
 
     async def _handle_udp_client(self, stream: "UDPStream", addr: tuple[str, int]) -> None:
         watchdog_task: asyncio.Task[None] | None = None
+        limiter_key = addr[0]
+        handshake_decremented = False
         try:
             async with self._handshake_semaphore:
                 info = await asyncio.wait_for(
                     server_handshake(stream, stream, self._psk),
                     timeout=self._handshake_timeout,
                 )
+
+            # Immediately decrement handshake counter upon completion
+            if limiter_key in self._udp_in_progress_handshakes:
+                self._udp_in_progress_handshakes[limiter_key] -= 1
+                if self._udp_in_progress_handshakes[limiter_key] <= 0:
+                    self._udp_in_progress_handshakes.pop(limiter_key, None)
+            handshake_decremented = True
+
+            # Enforce global UDP active session limit
+            if len(self._udp_sessions) >= self._max_connections:
+                logger.warning(
+                    "Global UDP session limit reached (%d). Rejecting %s",
+                    self._max_connections, addr,
+                )
+                stream.close()
+                return
+
+            # Enforce per-IP UDP active session limit
+            ip_count = sum(1 for a in self._udp_sessions if a[0] == limiter_key)
+            if ip_count >= self._max_connections_per_ip:
+                logger.warning(
+                    "Per-IP UDP session limit reached for %s (%d). Rejecting",
+                    limiter_key, self._max_connections_per_ip,
+                )
+                stream.close()
+                return
 
             # Clean up any existing active session for this client address
             old_session_stream = self._udp_sessions.get(addr)
@@ -220,12 +293,12 @@ class USMPServer:
             if self._udp_sessions.get(addr) is stream:
                 self._udp_sessions.pop(addr, None)
 
-            # Decrement concurrent handshakes count
-            limiter_key = addr[0]
-            if limiter_key in self._udp_in_progress_handshakes:
-                self._udp_in_progress_handshakes[limiter_key] -= 1
-                if self._udp_in_progress_handshakes[limiter_key] <= 0:
-                    self._udp_in_progress_handshakes.pop(limiter_key, None)
+            # Decrement concurrent handshakes count (if not already done)
+            if not handshake_decremented:
+                if limiter_key in self._udp_in_progress_handshakes:
+                    self._udp_in_progress_handshakes[limiter_key] -= 1
+                    if self._udp_in_progress_handshakes[limiter_key] <= 0:
+                        self._udp_in_progress_handshakes.pop(limiter_key, None)
 
             logger.info("Disconnected (UDP): %s", addr)
 
@@ -236,6 +309,32 @@ class USMPServer:
     ) -> None:
         addr = writer.get_extra_info("peername")
         logger.info("TCP connected: %s", addr)
+
+        ip = addr[0] if addr and isinstance(addr, tuple) else str(addr)
+
+        # Enforce global connection limit (L1)
+        global_count = sum(self._tcp_connections.values())
+        if global_count >= self._max_connections:
+            logger.warning("Global TCP connection limit reached (%d). Rejecting %s", self._max_connections, ip)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
+        # Enforce per-IP connection limit (L1)
+        ip_count = self._tcp_connections.get(ip, 0)
+        if ip_count >= self._max_connections_per_ip:
+            logger.warning("Per-IP TCP connection limit reached for %s (%d). Rejecting", ip, self._max_connections_per_ip)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
+        self._tcp_connections[ip] = ip_count + 1
 
         watchdog_task: asyncio.Task[None] | None = None
 
@@ -276,6 +375,12 @@ class USMPServer:
             logger.error("Unexpected error (%s): %s", addr, e)
 
         finally:
+            # Decrement connection count (L1)
+            if ip in self._tcp_connections:
+                self._tcp_connections[ip] -= 1
+                if self._tcp_connections[ip] <= 0:
+                    self._tcp_connections.pop(ip, None)
+
             # Always cancel watchdog when handler exits for any reason
             if watchdog_task is not None and not watchdog_task.done():
                 watchdog_task.cancel()

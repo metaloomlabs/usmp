@@ -164,8 +164,14 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 
   uint16_t bytes_written = 0;
   uint8_t frame_count = 0;
+  uint32_t expected_frag_seq = 0;
+  int attempts = 0;
 
   for (int ctrl_count = 0;;) {
+    if (attempts++ >= 10) {
+      USMP_LOGW(TAG, "Max receive attempts reached per call — possible flood");
+      return 0;
+    }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
     if (len < 0) {
       USMP_LOGE(TAG, "Recv failed");
@@ -179,6 +185,26 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
         continue;  // UDP: drop unauthenticated packet and continue reading
       }
       return -1;
+    }
+
+    // Sliding replay window check for UDP (L2)
+    if (ctx->transport.confirm_authenticated) {
+      if (pkt.seq >= 0xFFFFFFFF) {
+        USMP_LOGE(TAG, "RX sequence overflowed");
+        ctx->established = false;
+        return -1;
+      }
+      if (ctx->rx_seq >= 64 && pkt.seq <= ctx->rx_seq - 64) {
+        USMP_LOGD(TAG, "Packet sequence is too old");
+        continue; // drop silently
+      }
+      if (pkt.seq <= ctx->rx_seq) {
+        uint32_t offset = ctx->rx_seq - pkt.seq;
+        if ((ctx->rx_window_bitmap & ((uint64_t)1 << offset)) != 0) {
+          USMP_LOGD(TAG, "Duplicate packet detected");
+          continue; // duplicate, drop silently
+        }
+      }
     }
 
     /* Choose output buffer and max length for decryption */
@@ -236,23 +262,35 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       return -1;
     }
 
-    if (ctx->rx_seq >= 0xFFFFFFFF) {
-      USMP_LOGE(TAG, "RX sequence overflowed");
-      ctx->established = false;
-      return -1;
-    }
-
-    if (pkt.seq != ctx->rx_seq) {
-      snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu", (unsigned long)ctx->rx_seq,
-               (unsigned long)pkt.seq);
-      USMP_LOGE(TAG, _msg);
-      return -1;
-    }
-
-    ctx->rx_seq++;
-
     if (ctx->transport.confirm_authenticated) {
+      // Update sliding replay window on successful verification (L2)
+      if (pkt.seq > ctx->rx_seq) {
+        uint32_t shift = pkt.seq - ctx->rx_seq;
+        if (shift < 64) {
+          ctx->rx_window_bitmap = (ctx->rx_window_bitmap << shift) | 1;
+        } else {
+          ctx->rx_window_bitmap = 1;
+        }
+        ctx->rx_seq = pkt.seq;
+      } else {
+        uint32_t offset = ctx->rx_seq - pkt.seq;
+        ctx->rx_window_bitmap |= ((uint64_t)1 << offset);
+      }
       ctx->transport.confirm_authenticated(&ctx->transport, pkt.seq);
+    } else {
+      if (ctx->rx_seq >= 0xFFFFFFFF) {
+        USMP_LOGE(TAG, "RX sequence overflowed");
+        ctx->established = false;
+        return -1;
+      }
+
+      if (pkt.seq != ctx->rx_seq) {
+        snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu", (unsigned long)ctx->rx_seq,
+                 (unsigned long)pkt.seq);
+        USMP_LOGE(TAG, _msg);
+        return -1;
+      }
+      ctx->rx_seq++;
     }
 
     /* Handle control frames and loop back for the next frame */
@@ -290,6 +328,16 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     }
 
     /* It's a DATA or DATA_FRAG frame */
+    if (frame_count > 0) {
+      if (pkt.seq != expected_frag_seq) {
+        USMP_LOGE(TAG, "Protocol error: out-of-order fragment sequence");
+        return -1;
+      }
+      expected_frag_seq++;
+    } else {
+      expected_frag_seq = pkt.seq + 1;
+    }
+
     bytes_written += (uint16_t)out_len;
     frame_count++;
 

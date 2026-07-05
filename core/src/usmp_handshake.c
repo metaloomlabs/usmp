@@ -80,11 +80,11 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   uint8_t k_s2c[USMP_SESSION_KEY_LEN] = {0};
 
   /*
-   * Require an explicitly configured PSK — no compile-time fallback.
+   * Require an explicitly configured PSK of sufficient strength (>= 16 bytes).
    * Callers must set session->psk and session->psk_len before handshake.
    */
-  if (!session->psk || session->psk_len == 0) {
-    USMP_LOGE(TAG, "No PSK configured — set ctx.psk and ctx.psk_len before connecting");
+  if (!session->psk || session->psk_len < 16) {
+    USMP_LOGE(TAG, "PSK must be configured and at least 16 bytes long");
     return -1;
   }
   const uint8_t* psk = session->psk;
@@ -177,15 +177,55 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   /* Debug-only: avoid logging device_id at INFO level (information leakage) */
   USMP_LOGD(TAG, "HELLO sent");
 
-  // Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] ───────────────────
+  // Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
   len = transport->recv(transport, rx_buf, 512);
   if (len < 0) {
     USMP_LOGE(TAG, "Failed to receive CHALLENGE");
     goto cleanup;
   }
 
-  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_CHALLENGE ||
-      pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN) {
+  if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
+    USMP_LOGE(TAG, "Failed to parse packet at step 2");
+    goto cleanup;
+  }
+
+  if (pkt.type == USMP_TYPE_HELLO_RETRY) {
+    if (pkt.length != 16) {
+      USMP_LOGE(TAG, "Bad HELLO_RETRY length");
+      goto cleanup;
+    }
+    // Append cookie (which is in pkt.payload) to HELLO payload and send again
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.magic = USMP_MAGIC;
+    pkt.version = USMP_VERSION;
+    pkt.type = USMP_TYPE_HELLO;
+    pkt.seq = 0;
+    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + 16;
+    memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
+    memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
+    // Copy cookie from previous packet's payload
+    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE, 16);
+
+    len = usmp_build_packet(&pkt, tx_buf, NULL);
+    if (transport->send(transport, tx_buf, len) < 0) {
+      USMP_LOGE(TAG, "Failed to resend HELLO with cookie");
+      goto cleanup;
+    }
+
+    // Read the actual CHALLENGE packet now
+    len = transport->recv(transport, rx_buf, 512);
+    if (len < 0) {
+      USMP_LOGE(TAG, "Failed to receive CHALLENGE after cookie retry");
+      goto cleanup;
+    }
+
+    if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
+      USMP_LOGE(TAG, "Failed to parse CHALLENGE after cookie retry");
+      goto cleanup;
+    }
+  }
+
+  if (pkt.type != USMP_TYPE_CHALLENGE || pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN) {
     snprintf(_msg, sizeof(_msg), "Bad CHALLENGE frame (type=0x%02x len=%u)", pkt.type, pkt.length);
     USMP_LOGE(TAG, _msg);
     goto cleanup;
@@ -240,11 +280,15 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   // Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
   uint8_t hmac_client[USMP_HMAC_LEN];
   {
-    uint8_t input[USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
-    memcpy(input, nonce, USMP_NONCE_LEN);
-    memcpy(input + USMP_NONCE_LEN, session->device_id, USMP_DEVICE_ID_LEN);
-    memcpy(input + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
-    memcpy(input + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
+    uint8_t input[4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
+    input[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input[2] = USMP_VERSION;
+    input[3] = USMP_TYPE_HELLO_ACK;
+    memcpy(input + 4, nonce, USMP_NONCE_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN, session->device_id, USMP_DEVICE_ID_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
     if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_client) != 0) {
       USMP_LOGE(TAG, "Client HMAC computation failed");
       goto cleanup;
@@ -287,11 +331,15 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   // Verify server HMAC ────────────────────────────────────────────────────
   uint8_t hmac_server_expected[USMP_HMAC_LEN];
   {
-    uint8_t input[USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
-    memcpy(input, nonce, USMP_NONCE_LEN);
-    memcpy(input + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
-    memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN, pub_c, PUB_KEY_LEN);
-    memcpy(input + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
+    uint8_t input[4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
+    input[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input[2] = USMP_VERSION;
+    input[3] = USMP_TYPE_SESSION_OK;
+    memcpy(input + 4, nonce, USMP_NONCE_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN, pub_c, PUB_KEY_LEN);
+    memcpy(input + 4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
     if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected) != 0) {
       USMP_LOGE(TAG, "Server HMAC computation failed");
       goto cleanup;

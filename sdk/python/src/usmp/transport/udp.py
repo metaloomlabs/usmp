@@ -95,9 +95,9 @@ class UDPStream:
 
         # Duplicate detection (only for active sessions, types >= 5)
         else:
-            if self._last_rx_seq != -1 and seq_val <= self._last_rx_seq:
+            if self._last_rx_seq != -1 and seq_val <= self._last_rx_seq - 64:
                 logger.debug(
-                    "UDP Duplicate packet discarded: seq=%d (last_rx=%d)",
+                    "UDP Duplicate/Too-old packet discarded: seq=%d (last_rx=%d)",
                     seq_val,
                     self._last_rx_seq,
                 )
@@ -112,7 +112,8 @@ class UDPStream:
         self._data_event.set()
 
     def confirm_authenticated(self, seq: int) -> None:
-        self._last_rx_seq = seq
+        if seq > self._last_rx_seq:
+            self._last_rx_seq = seq
 
     async def readexactly(self, n: int) -> bytes:
         while len(self._read_buffer) < n:

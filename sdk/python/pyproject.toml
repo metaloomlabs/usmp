@@ -1,25 +1,33 @@
 [project]
 name = "usmp"
-version = "0.6.0"
+version = "1.0.0"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
+license = "Apache-2.0"
 authors = [
     { name = "winterx64", email = "itswinterx64@gmail.com" }
 ]
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "cryptography>=42.0.0,<45.0.0",
+    "cryptography>=42.0.0,<49.0.0",
 ]
-
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.23.0",
+keywords = ["iot", "esp32", "arduino", "protocol", "encryption", "aes-gcm", "embedded", "udp", "tcp"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Networking",
+    "Topic :: Security :: Cryptography",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 
 [project.urls]
 Homepage = "https://usmp.metaloom.in"
 Repository = "https://github.com/metaloomlabs/usmp"
+Documentation = "https://usmp.metaloom.in/docs"
+"Bug Tracker" = "https://github.com/metaloomlabs/usmp/issues"
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]

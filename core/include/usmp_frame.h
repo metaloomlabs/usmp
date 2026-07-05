@@ -19,6 +19,7 @@ extern "C" {
 #define USMP_TYPE_PONG 0x07
 #define USMP_TYPE_BYE 0x08
 #define USMP_TYPE_DATA_FRAG 0x09
+#define USMP_TYPE_HELLO_RETRY 0x0A
 #define USMP_TYPE_ERROR 0xFF  // Unused (reserved for future error reporting)
 
 // Frame sizes
