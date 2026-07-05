@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build-and-release:
@@ -15,17 +16,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@f67e2a3f2bd08a159500ad6f1938502cd8340487 # v5.3.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@887bf08e7612117b4d00f0422e1a3c7c2514c2b1 # v5.2.1
         with:
-          version: "latest"
+          version: "0.5.21"
           enable-cache: true
 
       - name: Run Python SDK tests
@@ -52,7 +53,7 @@ jobs:
           ./scripts/build-esp32-component.sh --in-place
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c95fe14ecb2e3c402ffd45d9db92a10cd29598ee # v2.2.0
         with:
           files: |
             usmp-*-arduino.zip
@@ -65,17 +66,16 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish Python package to PyPI
-        env:
-          PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-        if: ${{ env.PYPI_TOKEN != '' }}
         run: |
-          uv publish --token "$PYPI_TOKEN" dist/*
+          if [ -n "${{ secrets.PYPI_TOKEN }}" ]; then
+            uv publish --token "${{ secrets.PYPI_TOKEN }}" dist/*
+          else
+            uv publish dist/*
+          fi
 
       - name: Publish ESP32 component to ESP Component Registry
-        env:
-          IDF_COMPONENT_API_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
-        if: ${{ env.IDF_COMPONENT_API_TOKEN != '' }}
-        uses: espressif/upload-components-ci-action@v2
+        if: ${{ secrets.IDF_COMPONENT_API_TOKEN != '' }}
+        uses: espressif/upload-components-ci-action@1cc9ecfb1e72b4c16d56a31c5188bc8a9b23b6b1 # v2.0.0
         with:
           components: "usmp: ports/usmp-esp32"
           namespace: "metaloomhq"
