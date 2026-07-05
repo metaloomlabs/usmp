@@ -181,3 +181,82 @@ def test_decrypt_fails_on_wrong_seq():
             length=len(ct),
             nonce_ct_tag=ct,
         )
+
+
+def test_golden_vectors():
+    import json
+    import os
+    import binascii
+    import struct
+    from usmp._frame import crc16, encode_frame
+    
+    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    json_path = os.path.join(base_dir, "tests", "golden_vectors.json")
+    with open(json_path, "r") as f:
+        golden = json.load(f)
+
+    # 1. CRC
+    for case in golden["crc_cases"]:
+        data = binascii.unhexlify(case["input"])
+        assert f"{crc16(data):04X}" == case["expected_crc"]
+
+    # 2. AAD
+    for case in golden["aad_cases"]:
+        aad = build_aad(
+            magic=case["magic"],
+            version=case["version"],
+            type_=case["type"],
+            seq=case["seq"],
+            length=case["length"],
+        )
+        assert binascii.hexlify(aad).decode('ascii').upper() == case["expected_aad"]
+
+    # 3. Nonce
+    for case in golden["nonce_cases"]:
+        seq = case["seq"]
+        session_id = binascii.unhexlify(case["session_id"])
+        nonce = struct.pack("<I", seq) + session_id[:8]
+        assert binascii.hexlify(nonce).decode('ascii').upper() == case["expected_nonce"]
+
+    # 4. Encryption
+    for case in golden["encryption_cases"]:
+        key = binascii.unhexlify(case["key"])
+        plaintext = binascii.unhexlify(case["plaintext"])
+        nonce = binascii.unhexlify(case["expected_nonce"])
+        
+        # Encrypt
+        ct = encrypt(
+            key=key,
+            nonce=nonce,
+            seq=case["seq"],
+            type_=case["type"],
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
+            plaintext=plaintext,
+        )
+        assert binascii.hexlify(ct).decode('ascii').upper() == case["expected_ciphertext_tag"]
+
+        # Decrypt
+        pt = decrypt(
+            key=key,
+            nonce=nonce,
+            seq=case["seq"],
+            type_=case["type"],
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
+            length=len(ct),
+            nonce_ct_tag=ct,
+        )
+        assert pt == plaintext
+
+    # 5. Frame Encoding
+    for case in golden["frame_cases"]:
+        payload = binascii.unhexlify(case["payload"])
+        frame = encode_frame(
+            type_=PacketType(case["type"]),
+            payload=payload,
+            seq=case["seq"],
+            version=case["version"],
+        )
+        assert binascii.hexlify(frame).decode('ascii').upper() == case["expected_frame"]
+

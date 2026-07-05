@@ -27,10 +27,22 @@ jobs:
           version: "latest"
           enable-cache: true
 
+      - name: Install mbedtls and compile C core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmbedtls-dev
+          cmake -B build -S .
+          cmake --build build
+
+      - name: Run C Core unit tests
+        run: |
+          ./build/usmp_tests
+
       - name: Install dependencies and run tests
         run: |
           cd sdk/python
           uv run pytest tests/ -v
+
 
       - name: Run Ruff Linter
         run: |

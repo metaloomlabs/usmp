@@ -197,7 +197,7 @@ async def test_udp_client_reboot_no_lockout():
 
 @pytest.mark.asyncio
 async def test_udp_off_path_spoofing_resistance():
-    """Verify that spoofed invalid packets do not tear down the session or poison sequence."""
+    """Verify that spoofed invalid/adversarial packets do not tear down the session or poison sequence."""
     port = _free_port()
     received = []
 
@@ -217,27 +217,48 @@ async def test_udp_off_path_spoofing_resistance():
         client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
         await client.connect()
 
-        # Get client's local port
-        session = client._session
-        assert session is not None
-        _ = cast(UDPStream, session._writer)
+        # Capture the raw encoded bytes of a valid frame to test replay
+        # We can intercept client.write or record the sent packet
+        original_write = client._session._writer.write
+        sent_packets = []
+        def mock_write(data):
+            sent_packets.append(data)
+            original_write(data)
+        client._session._writer.write = mock_write
 
         await client.send(b"valid1")
         assert await client.recv() == b"echo:valid1"
+        assert len(sent_packets) == 1
+        valid1_packet = sent_packets[0]
 
-        # Simulate off-path attacker spoofing an invalid packet with high seq
-        attacker_transport, _ = await asyncio.get_running_loop().create_datagram_endpoint(
-            asyncio.DatagramProtocol,
-            local_addr=("127.0.0.1", 0)
-        )
+        # Get client's local address from the server's session map
+        client_addrs = list(server._udp_sessions.keys())
+        assert len(client_addrs) == 1
+        client_addr = client_addrs[0]
 
-        # Craft a fake frame: magic=0xABCD, version=1, type=5 (DATA), seq=999, len=10, crc=0
-        # GCM tag will be invalid since attacker doesn't have the key
-        fake_frame = b"\xCD\xAB\x01\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
-        attacker_transport.sendto(fake_frame, (HOST, port))
+        # We will feed multiple adversarial packets simulating a same-address/same-port spoofing attacker
 
-        await asyncio.sleep(0.1) # let server process (and log warning)
-        attacker_transport.close()
+        # Case 1: Bad version (causes VersionError in read_frame)
+        # Craft a frame with version=1, seq=999, len=10
+        fake_bad_version = b"\xCD\xAB\x01\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
+        server._handle_udp_datagram(None, fake_bad_version, client_addr)
+
+        # Case 2: Tampered payload/GCM tag (causes decrypt failure)
+        # Take the valid1 packet, change one byte of ciphertext
+        tampered_packet = bytearray(valid1_packet)
+        tampered_packet[-5] ^= 0xFF
+        server._handle_udp_datagram(None, bytes(tampered_packet), client_addr)
+
+        # Case 3: Replayed packet (causes SequenceError/replay detection)
+        # Re-inject the exact packet that was already processed
+        server._handle_udp_datagram(None, valid1_packet, client_addr)
+
+        # Case 4: Lying header length (U2 validation - length mismatch)
+        # Send a packet where len(data) != header_len + payload_len
+        lying_length_packet = b"\xCD\xAB\x02\x05\x02\x00\x00\x00\x10\x00\x00\x00" + b"short"
+        server._handle_udp_datagram(None, lying_length_packet, client_addr)
+
+        await asyncio.sleep(0.1)  # let server process all fed packets
 
         # Legitimate client sends another valid packet
         # If sequence was poisoned or session closed, this will fail
@@ -247,6 +268,7 @@ async def test_udp_off_path_spoofing_resistance():
         await client.disconnect()
 
     await _run(server, client_coro())
+
 
 
 @pytest.mark.asyncio
@@ -389,3 +411,4 @@ async def test_udp_malformed_frame_robustness():
 
     await _run(server, client_coro())
     assert received == [b"valid1", b"valid2"]
+
