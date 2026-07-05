@@ -19,12 +19,12 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Set up Python
-        uses: actions/setup-python@f67e2a3f2bd08a159500ad6f1938502cd8340487 # v5.3.0
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
         with:
           python-version: "3.11"
 
       - name: Install uv
-        uses: astral-sh/setup-uv@887bf08e7612117b4d00f0422e1a3c7c2514c2b1 # v5.2.1
+        uses: astral-sh/setup-uv@b5f58b2abc5763ade55e4e9d0fe52cd1ff7979ca # v5.2.1
         with:
           version: "0.5.21"
           enable-cache: true
@@ -53,7 +53,7 @@ jobs:
           ./scripts/build-esp32-component.sh --in-place
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@c95fe14ecb2e3c402ffd45d9db92a10cd29598ee # v2.2.0
+        uses: softprops/action-gh-release@7b4da11513bf3f43f9999e90eabced41ab8bb048 # v2.2.0
         with:
           files: |
             usmp-*-arduino.zip
@@ -74,9 +74,11 @@ jobs:
           fi
 
       - name: Publish ESP32 component to ESP Component Registry
-        if: ${{ secrets.IDF_COMPONENT_API_TOKEN != '' }}
-        uses: espressif/upload-components-ci-action@1cc9ecfb1e72b4c16d56a31c5188bc8a9b23b6b1 # v2.0.0
+        env:
+          IDF_COMPONENT_API_TOKEN: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+        if: ${{ env.IDF_COMPONENT_API_TOKEN != '' }}
+        uses: espressif/upload-components-ci-action@44ae55252d675f3f7aaa25c153a6af2bb58f3fe2 # v2.0.0
         with:
           components: "usmp: ports/usmp-esp32"
           namespace: "metaloomhq"
-          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+          api_token: ${{ env.IDF_COMPONENT_API_TOKEN }}
