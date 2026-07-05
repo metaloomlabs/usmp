@@ -79,6 +79,7 @@ typedef struct {
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
+  uint64_t rx_window_bitmap;
   const uint8_t* psk;
   size_t psk_len;
 } usmp_t;

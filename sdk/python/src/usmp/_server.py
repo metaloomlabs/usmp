@@ -1,7 +1,11 @@
 # src/usmp/_server.py
 
 import asyncio
+import hashlib
+import hmac
 import logging
+import os
+import struct
 import time
 from typing import TYPE_CHECKING, Awaitable, Callable
 
@@ -70,6 +74,9 @@ class USMPServer:
         self._udp_sessions: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_handshakes: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
+        # Ephemeral cookie secret for UDP return-routability
+        import os
+        self._cookie_secret = os.urandom(32)
         # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
         # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
         self._handshake_semaphore = asyncio.Semaphore(10)
@@ -126,6 +133,43 @@ class USMPServer:
                 stream.feed_packet(data)
                 return
 
+            # Only HELLO packet (type 0x01) can initiate a new handshake
+            if type_val != 0x01:
+                return
+
+            # Enforce UDP stateless cookie return-routability verification (U3/U4)
+            if len(data) == 50:
+                from ._frame import encode_frame
+                from .types import PacketType
+
+                # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
+                type_val = data[3]
+                seq_val = struct.unpack("<I", data[4:8])[0]
+                utack = b"\xAC\xAC" + bytes([type_val]) + struct.pack("<I", seq_val)
+                transport.sendto(utack, addr)
+
+                time_bucket = int(time.time() // 30)
+                msg = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                cookie = hmac.new(self._cookie_secret, msg, hashlib.sha256).digest()[:16]
+
+                retry_packet = encode_frame(PacketType.HELLO_RETRY, cookie)
+                transport.sendto(retry_packet, addr)
+                return
+            elif len(data) == 66:
+                cookie = data[50:66]
+                time_bucket = int(time.time() // 30)
+                msg1 = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                msg2 = f"{addr[0]}:{addr[1]}:{time_bucket - 1}".encode()
+                expected1 = hmac.new(self._cookie_secret, msg1, hashlib.sha256).digest()[:16]
+                expected2 = hmac.new(self._cookie_secret, msg2, hashlib.sha256).digest()[:16]
+
+                if not (hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)):
+                    # Invalid cookie, silently ignore
+                    return
+            else:
+                # Invalid size for initial HELLO, ignore
+                return
+
             # Check rate limiter lockout
             limiter_key = addr[0]
             now = time.monotonic()
@@ -138,10 +182,6 @@ class USMPServer:
             # Check concurrent handshakes limit to prevent task exhaustion
             in_progress = self._udp_in_progress_handshakes.get(limiter_key, 0)
             if in_progress >= 3:
-                return
-
-            # Only HELLO packet (type 0x01) can initiate a new handshake
-            if type_val != 0x01:
                 return
 
             # Increment concurrent count

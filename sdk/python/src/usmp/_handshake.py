@@ -64,7 +64,7 @@ async def server_handshake(
         if frame.type != PacketType.HELLO:
             raise HandshakeError(f"Expected HELLO, got {frame.type_name()}")
 
-        if frame.length != USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN:
+        if frame.length not in (38, 54):
             raise HandshakeError(f"Bad HELLO length: {frame.length}")
 
         device_id = frame.payload[:USMP_DEVICE_ID_LEN]
@@ -187,11 +187,24 @@ async def client_handshake(
     # ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
     await write_frame(writer, PacketType.HELLO, device_id + pub_c)
 
-    # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] ───────────────────
+    # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
     try:
         frame = await read_frame(reader, verify_crc=False)
     except asyncio.IncompleteReadError as e:
         raise HandshakeError("Connection closed before CHALLENGE") from e
+
+    if frame.type == PacketType.HELLO_RETRY:
+        if frame.length != 16:
+            raise HandshakeError(f"Bad HELLO_RETRY length: {frame.length}")
+        cookie = frame.payload[:16]
+        # Resend HELLO with cookie appended
+        await write_frame(writer, PacketType.HELLO, device_id + pub_c + cookie)
+        
+        # Read the actual CHALLENGE
+        try:
+            frame = await read_frame(reader, verify_crc=False)
+        except asyncio.IncompleteReadError as e:
+            raise HandshakeError("Connection closed before CHALLENGE (after retry)") from e
 
     if frame.type != PacketType.CHALLENGE:
         raise HandshakeError(f"Expected CHALLENGE, got {frame.type_name()}")

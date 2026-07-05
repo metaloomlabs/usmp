@@ -412,3 +412,145 @@ async def test_udp_malformed_frame_robustness():
     await _run(server, client_coro())
     assert received == [b"valid1", b"valid2"]
 
+
+@pytest.mark.asyncio
+async def test_udp_sliding_replay_window():
+    """Verify that out-of-order packets are accepted, and duplicates/old packets are dropped."""
+    port = _free_port()
+    received = []
+
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0, protocol="udp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        try:
+            while True:
+                data = await session.recv()
+                received.append(data)
+        except Exception:
+            pass
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        await asyncio.sleep(0.05)  # Let server complete post-handshake registration
+
+        # Extract client session and get client's address from server session map
+        session = client._session
+        assert session is not None
+        client_addrs = list(server._udp_sessions.keys())
+        assert len(client_addrs) == 1
+        client_addr = client_addrs[0]
+
+        import struct
+        from usmp._crypto import encrypt
+        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
+        from usmp._frame import encode_frame
+
+        def make_packet(seq, payload):
+            nonce = struct.pack("<I", seq) + session._info.session_id[:8]
+            ciphertext = encrypt(
+                key=session._info.tx_key,
+                nonce=nonce,
+                seq=seq,
+                type_=int(PacketType.DATA),
+                version=USMP_VERSION,
+                magic=USMP_MAGIC,
+                plaintext=payload
+            )
+            return encode_frame(PacketType.DATA, ciphertext, seq=seq)
+
+        # 1. Send seq=3 (out of order, skipping 1 and 2)
+        server._handle_udp_datagram(None, make_packet(3, b"p3"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 2. Send seq=2 (out of order, late arrival) -> should be accepted
+        server._handle_udp_datagram(None, make_packet(2, b"p2"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 3. Send seq=2 again (duplicate) -> should be ignored
+        server._handle_udp_datagram(None, make_packet(2, b"p2-dup"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 4. Send seq=1 (out of order, late arrival) -> should be accepted
+        server._handle_udp_datagram(None, make_packet(1, b"p1"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 5. Send seq=3 again (duplicate) -> should be ignored
+        server._handle_udp_datagram(None, make_packet(3, b"p3-dup"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 6. Send seq=67 (advanced far forward) -> should shift the window
+        server._handle_udp_datagram(None, make_packet(67, b"p67"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # 7. Send seq=1 again (now too old/outside shifted window: 67 - 64 = 3) -> should be ignored
+        server._handle_udp_datagram(None, make_packet(1, b"p1-too-old"), client_addr)
+        await asyncio.sleep(0.05)
+
+        await client.disconnect()
+
+    await _run(server, client_coro())
+    assert received == [b"p3", b"p2", b"p1", b"p67"]
+
+
+@pytest.mark.asyncio
+async def test_udp_fragment_order_enforcement():
+    """Verify that out-of-order fragments of a single fragmented message are rejected (B2)."""
+    port = _free_port()
+    received = []
+    errors = []
+
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        try:
+            await session.recv()
+        except SequenceError as e:
+            errors.append(e)
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        await asyncio.sleep(0.05)
+
+        session = client._session
+        assert session is not None
+        client_addrs = list(server._udp_sessions.keys())
+        assert len(client_addrs) == 1
+        client_addr = client_addrs[0]
+
+        import struct
+        from usmp._crypto import encrypt
+        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
+        from usmp._frame import encode_frame
+
+        def make_packet(seq, packet_type, payload):
+            nonce = struct.pack("<I", seq) + session._info.session_id[:8]
+            ciphertext = encrypt(
+                key=session._info.tx_key,
+                nonce=nonce,
+                seq=seq,
+                type_=int(packet_type),
+                version=USMP_VERSION,
+                magic=USMP_MAGIC,
+                plaintext=payload
+            )
+            return encode_frame(packet_type, ciphertext, seq=seq)
+
+        # Send first fragment of a message: type DATA_FRAG, seq 1
+        server._handle_udp_datagram(None, make_packet(1, PacketType.DATA_FRAG, b"frag1"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # Send second fragment with out-of-order seq 3 (instead of expected seq 2)
+        server._handle_udp_datagram(None, make_packet(3, PacketType.DATA, b"frag2"), client_addr)
+        await asyncio.sleep(0.05)
+
+        client._session._writer.close()
+
+    await _run(server, client_coro())
+    assert len(errors) == 1
+    assert "out-of-order fragment" in str(errors[0])
+
+
