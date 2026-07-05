@@ -194,6 +194,21 @@ To view the complete, tutorial-based guide covering installation, TCP, UDP, and 
 
 ---
 
+## ⚠️ Security Notice: PSK Limitation
+
+> **USMP uses Pre-Shared Key (PSK) authentication, which is vulnerable to offline brute-force attacks on captured handshake transcripts.**
+
+Unlike PAKE protocols (SPAKE2, CPace), an attacker who records a USMP handshake can attempt to crack the PSK offline. The 16-byte minimum length is enforced, but **length ≠ entropy**.
+
+**You must:**
+- Use cryptographically random PSKs (`os.urandom(32)` or hardware RNG) — not human-readable passphrases.
+- Store PSKs in secure storage (encrypted NVS, secure elements, HSMs).
+- Never hardcode PSKs in source code or firmware.
+
+See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. A PAKE upgrade is planned for a future release.
+
+---
+
 ## Roadmap
 
 * [x] **v0.2.0**: Core protocol, Keepalive mechanism, and Arduino Port.

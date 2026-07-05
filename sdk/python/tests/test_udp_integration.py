@@ -197,7 +197,13 @@ async def test_udp_client_reboot_no_lockout():
 
 @pytest.mark.asyncio
 async def test_udp_off_path_spoofing_resistance():
-    """Verify that spoofed invalid/adversarial packets do not tear down the session or poison sequence."""
+    """Verify that spoofed invalid/adversarial packets do not tear down the session or poison sequence.
+
+    Asserts:
+      - Only legitimate packets are processed by the session handler.
+      - No spoofed, replayed, or tampered data leaks through.
+      - The session remains functional after adversarial injection.
+    """
     port = _free_port()
     received = []
 
@@ -231,6 +237,10 @@ async def test_udp_off_path_spoofing_resistance():
         assert len(sent_packets) == 1
         valid1_packet = sent_packets[0]
 
+        # Snapshot received count after first legitimate message
+        assert len(received) == 1
+        assert received[0] == b"valid1"
+
         # Get client's local address from the server's session map
         client_addrs = list(server._udp_sessions.keys())
         assert len(client_addrs) == 1
@@ -260,10 +270,20 @@ async def test_udp_off_path_spoofing_resistance():
 
         await asyncio.sleep(0.1)  # let server process all fed packets
 
+        # Assert no adversarial data leaked through — still only "valid1"
+        assert len(received) == 1, (
+            f"Expected only 1 received message after spoofing, got {len(received)}: {received}"
+        )
+
         # Legitimate client sends another valid packet
         # If sequence was poisoned or session closed, this will fail
         await client.send(b"valid2")
         assert await client.recv() == b"echo:valid2"
+
+        # Final assertion: exactly 2 legitimate messages, no spoofed data
+        assert received == [b"valid1", b"valid2"], (
+            f"Only legitimate packets should be received, got: {received}"
+        )
 
         await client.disconnect()
 
@@ -316,8 +336,21 @@ async def test_session_sequence_overflow():
 
 @pytest.mark.asyncio
 async def test_udp_concurrent_handshakes_limit():
+    """Verify that per-IP active session limits are enforced for UDP.
+
+    With quick-decrement handshake counters, the concurrency limit that matters
+    for fully-completed connections is max_connections_per_ip (active sessions),
+    not the in-progress handshake counter.
+
+    Note: In UDP, the client can't synchronously observe server-side rejection
+    (unlike TCP where the stream close propagates). We verify the server's
+    session map instead.
+    """
     port = _free_port()
-    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+    server = USMPServer(
+        host=HOST, port=port, psk=PSK, protocol="udp",
+        max_connections_per_ip=3,
+    )
     server._handshake_timeout = 1.0
 
     @server.on_session
@@ -337,14 +370,22 @@ async def test_udp_concurrent_handshakes_limit():
             return_exceptions=True
         )
 
-        # Verify that at most 3 clients connected successfully, and some raised exceptions
-        success_count = sum(1 for r in results if not isinstance(r, Exception))
-        assert success_count <= 3
+        # Give server a moment to process all session promotions/rejections
+        await asyncio.sleep(0.2)
+
+        # Verify server-side enforcement: at most 3 active sessions from this IP
+        active_sessions = len(server._udp_sessions)
+        assert active_sessions <= 3, (
+            f"Expected at most 3 active UDP sessions (per-IP limit), got {active_sessions}"
+        )
 
         # Clean up successfully connected clients
         for i, c in enumerate(clients):
             if not isinstance(results[i], Exception):
-                await c.disconnect()
+                try:
+                    await c.disconnect()
+                except (OSError, Exception):
+                    pass  # Rejected clients may fail to send BYE
 
     await _run(server, client_coro())
 

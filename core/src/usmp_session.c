@@ -165,8 +165,13 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
   uint16_t bytes_written = 0;
   uint8_t frame_count = 0;
   uint32_t expected_frag_seq = 0;
+  int attempts = 0;
 
   for (int ctrl_count = 0;;) {
+    if (attempts++ >= 10) {
+      USMP_LOGW(TAG, "Max receive attempts reached per call — possible flood");
+      return 0;
+    }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
     if (len < 0) {
       USMP_LOGE(TAG, "Recv failed");

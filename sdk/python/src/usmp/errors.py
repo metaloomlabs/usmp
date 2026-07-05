@@ -41,8 +41,12 @@ class SequenceError(USMPError):
     """Sequence number out of order — possible replay attack."""
 
 
-class TimeoutError(USMPError):
+class USMPTimeoutError(USMPError):
     """Handshake or keepalive timeout."""
+
+
+# Backwards-compatible alias — deprecated, will be removed in 2.0
+TimeoutError = USMPTimeoutError
 
 
 class ConnectionClosedError(USMPError):

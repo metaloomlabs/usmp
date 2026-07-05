@@ -3,7 +3,7 @@ import hashlib
 import hmac
 import os
 import time
-from typing import Any, Callable
+from typing import Any, Awaitable, Callable
 
 from ._crypto import derive_session_keys, generate_keypair
 from ._frame import read_frame, write_frame
@@ -34,7 +34,7 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
 async def server_handshake(
     reader: Any,
     writer: Any,
-    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes],
+    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]],
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
@@ -141,6 +141,9 @@ async def server_handshake(
             rx_key=k_c2s,   # server receives with client-to-server key
         )
 
+    except (asyncio.IncompleteReadError, ConnectionResetError, ConnectionAbortedError, EOFError, OSError):
+        # Clean disconnects / transport failures — don't count against rate limiter
+        raise
     except Exception:
         now = time.monotonic()
         entry = _failed_handshakes.get(limiter_key)

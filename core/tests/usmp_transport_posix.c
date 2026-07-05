@@ -224,7 +224,7 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
 
   if (len >= 8) {
     type = data[3];
-    seq = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+    seq = data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
     expect_ack = true;
   }
 
@@ -256,7 +256,7 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
 
       if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
-        uint32_t ack_seq = temp[3] | (temp[4] << 8) | (temp[5] << 16) | (temp[6] << 24);
+        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) | ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
           return 0; // ACK matched
         }
@@ -315,7 +315,7 @@ static int posix_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 
     // Save info for UTACK sending on confirmation
     udp->last_rx_type = temp[3];
-    udp->last_rx_seq = temp[4] | (temp[5] << 8) | (temp[6] << 16) | (temp[7] << 24);
+    udp->last_rx_seq = temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
     udp->last_rx_seq_set = true;
 
     return (int)n;

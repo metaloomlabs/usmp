@@ -108,6 +108,7 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   t->reconnect = arduino_tcp_reconnect;
   t->available = arduino_tcp_available;
   t->destroy = arduino_tcp_destroy;
+  t->confirm_authenticated = NULL;
   t->ctx = ctx;
   return true;
 }
@@ -123,7 +124,8 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
   bool expect_ack = false;
   if (len >= 8) {
     type = data[3];
-    seq = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+    seq =
+        data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
     expect_ack = true;
   }
 
@@ -154,7 +156,8 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
       // Check if it is a transport UTACK
       if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
-        uint32_t ack_seq = temp[3] | (temp[4] << 8) | (temp[5] << 16) | (temp[6] << 24);
+        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) |
+                           ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
           return 0;  // Success! ACK received
         }
@@ -205,7 +208,8 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (magic != 0xABCD) continue;
 
     uint8_t type = temp[3];
-    uint32_t seq = temp[4] | (temp[5] << 8) | (temp[6] << 16) | (temp[7] << 24);
+    uint32_t seq =
+        temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
 
     // Send UTACK back immediately
     uint8_t utack[7] = {0xAC,
@@ -225,10 +229,6 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
         continue;  // Discard duplicate/old handshake packet
       }
       ctx->last_rx_type = type;
-    } else {
-      if (ctx->last_rx_seq_set && seq <= ctx->last_rx_seq) {
-        continue;  // Discard duplicate
-      }
     }
 
     if ((size_t)n > max_len) return -1;

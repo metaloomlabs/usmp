@@ -1,26 +1,19 @@
 [project]
 name = "usmp-workspace"
-version = "0.6.0"
+version = "1.0.0"
 description = "USMP — Unified Secure Multi-transport Protocol"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = [
-    "usmp",
-]
+dependencies = ["usmp"]
 
 [tool.uv.workspace]
-members = [
-    "sdk/python",
-]
+members = ["sdk/python"]
 
 [tool.uv.sources]
 usmp = { workspace = true }
 
 [dependency-groups]
-dev = [
-    "mkdocs-material>=9.7.6",
-    "mkdocs-minify-plugin>=0.8.0",
-]
+dev = ["mkdocs-material>=9.7.6", "mkdocs-minify-plugin>=0.8.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

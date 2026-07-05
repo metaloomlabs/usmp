@@ -45,7 +45,7 @@ class USMPServer:
         self,
         host: str = "0.0.0.0",
         port: int = 9000,
-        psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes] = b"",
+        psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]] = b"",
         handshake_timeout: float = 10.0,
         session_timeout: float = 60.0,
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
@@ -206,12 +206,40 @@ class USMPServer:
 
     async def _handle_udp_client(self, stream: "UDPStream", addr: tuple[str, int]) -> None:
         watchdog_task: asyncio.Task[None] | None = None
+        limiter_key = addr[0]
+        handshake_decremented = False
         try:
             async with self._handshake_semaphore:
                 info = await asyncio.wait_for(
                     server_handshake(stream, stream, self._psk),
                     timeout=self._handshake_timeout,
                 )
+
+            # Immediately decrement handshake counter upon completion
+            if limiter_key in self._udp_in_progress_handshakes:
+                self._udp_in_progress_handshakes[limiter_key] -= 1
+                if self._udp_in_progress_handshakes[limiter_key] <= 0:
+                    self._udp_in_progress_handshakes.pop(limiter_key, None)
+            handshake_decremented = True
+
+            # Enforce global UDP active session limit
+            if len(self._udp_sessions) >= self._max_connections:
+                logger.warning(
+                    "Global UDP session limit reached (%d). Rejecting %s",
+                    self._max_connections, addr,
+                )
+                stream.close()
+                return
+
+            # Enforce per-IP UDP active session limit
+            ip_count = sum(1 for a in self._udp_sessions if a[0] == limiter_key)
+            if ip_count >= self._max_connections_per_ip:
+                logger.warning(
+                    "Per-IP UDP session limit reached for %s (%d). Rejecting",
+                    limiter_key, self._max_connections_per_ip,
+                )
+                stream.close()
+                return
 
             # Clean up any existing active session for this client address
             old_session_stream = self._udp_sessions.get(addr)
@@ -265,12 +293,12 @@ class USMPServer:
             if self._udp_sessions.get(addr) is stream:
                 self._udp_sessions.pop(addr, None)
 
-            # Decrement concurrent handshakes count
-            limiter_key = addr[0]
-            if limiter_key in self._udp_in_progress_handshakes:
-                self._udp_in_progress_handshakes[limiter_key] -= 1
-                if self._udp_in_progress_handshakes[limiter_key] <= 0:
-                    self._udp_in_progress_handshakes.pop(limiter_key, None)
+            # Decrement concurrent handshakes count (if not already done)
+            if not handshake_decremented:
+                if limiter_key in self._udp_in_progress_handshakes:
+                    self._udp_in_progress_handshakes[limiter_key] -= 1
+                    if self._udp_in_progress_handshakes[limiter_key] <= 0:
+                        self._udp_in_progress_handshakes.pop(limiter_key, None)
 
             logger.info("Disconnected (UDP): %s", addr)
 
