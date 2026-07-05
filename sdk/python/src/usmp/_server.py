@@ -50,6 +50,8 @@ class USMPServer:
         session_timeout: float = 60.0,
         on_timeout: Callable[[str, str], Awaitable[None]] | None = None,
         protocol: USMPProtocol | str = USMPProtocol.TCP,
+        max_connections: int = 100,
+        max_connections_per_ip: int = 5,
     ):
         if not psk:
             raise ValueError("PSK must be configured and non-empty")
@@ -67,6 +69,9 @@ class USMPServer:
         self._handshake_timeout = handshake_timeout
         self._session_timeout = session_timeout
         self._on_timeout = on_timeout
+        self._max_connections = max_connections
+        self._max_connections_per_ip = max_connections_per_ip
+        self._tcp_connections = {}
         self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
         if self._protocol not in ("tcp", "udp"):
@@ -277,6 +282,32 @@ class USMPServer:
         addr = writer.get_extra_info("peername")
         logger.info("TCP connected: %s", addr)
 
+        ip = addr[0] if addr and isinstance(addr, tuple) else str(addr)
+
+        # Enforce global connection limit (L1)
+        global_count = sum(self._tcp_connections.values())
+        if global_count >= self._max_connections:
+            logger.warning("Global TCP connection limit reached (%d). Rejecting %s", self._max_connections, ip)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
+        # Enforce per-IP connection limit (L1)
+        ip_count = self._tcp_connections.get(ip, 0)
+        if ip_count >= self._max_connections_per_ip:
+            logger.warning("Per-IP TCP connection limit reached for %s (%d). Rejecting", ip, self._max_connections_per_ip)
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+            return
+
+        self._tcp_connections[ip] = ip_count + 1
+
         watchdog_task: asyncio.Task[None] | None = None
 
         try:
@@ -316,6 +347,12 @@ class USMPServer:
             logger.error("Unexpected error (%s): %s", addr, e)
 
         finally:
+            # Decrement connection count (L1)
+            if ip in self._tcp_connections:
+                self._tcp_connections[ip] -= 1
+                if self._tcp_connections[ip] <= 0:
+                    self._tcp_connections.pop(ip, None)
+
             # Always cancel watchdog when handler exits for any reason
             if watchdog_task is not None and not watchdog_task.done():
                 watchdog_task.cancel()

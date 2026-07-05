@@ -400,3 +400,45 @@ async def test_multi_psk_async_callable():
     reply = await _run(server, client_coro())
     assert reply == b"hello-dyn-async-ok"
 
+
+@pytest.mark.asyncio
+async def test_tcp_connection_cap():
+    """Verify that concurrent TCP connections are limited globally and per-IP (L1)."""
+    port = _free_port()
+    server = USMPServer(
+        host=HOST,
+        port=port,
+        psk=PSK,
+        max_connections_per_ip=2,
+        session_timeout=5.0,
+    )
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        # Keep connection alive during test
+        try:
+            await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            pass
+
+    async def client_coro():
+        # Connect client 1 (active)
+        c1 = USMPClient(host=HOST, port=port, psk=PSK)
+        await c1.connect()
+
+        # Connect client 2 (active)
+        c2 = USMPClient(host=HOST, port=port, psk=PSK)
+        await c2.connect()
+
+        # Connect client 3 (should be rejected/disconnected immediately since limit is 2 per IP)
+        c3 = USMPClient(host=HOST, port=port, psk=PSK)
+        with pytest.raises(Exception):
+            await c3.connect()
+
+        # Clean up
+        await c1.disconnect()
+        await c2.disconnect()
+
+    await _run(server, client_coro())
+
+
