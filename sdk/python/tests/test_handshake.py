@@ -14,7 +14,7 @@ from usmp.types import (
     PacketType,
 )
 
-PSK = b"test-psk-1234"
+PSK = b"test-psk-1234-super-secret"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
 
 
@@ -59,7 +59,7 @@ async def test_handshake_success():
 
 
 async def test_handshake_wrong_psk():
-    result = await _run_pair(PSK, b"wrong-psk")
+    result = await _run_pair(PSK, b"wrong-psk-length-16-bytes")
 
     assert "server_error" in result
     assert isinstance(result["server_error"], AuthError)
@@ -104,7 +104,7 @@ async def test_rogue_server_detected():
     """
     # This is already covered by test_handshake_wrong_psk from client side
     # Here we explicitly test the server HMAC verification path
-    result = await _run_pair(b"real-psk", b"real-psk")
+    result = await _run_pair(b"real-psk-length-16-bytes", b"real-psk-length-16-bytes")
     assert "server" in result
     assert "client" in result
     # Both should succeed with matching PSK
@@ -123,7 +123,7 @@ async def test_mutual_auth_both_sides_verified():
 
 async def test_wrong_psk_client_rejected():
     """Server rejects client with wrong PSK."""
-    result = await _run_pair(PSK, b"wrong-psk")
+    result = await _run_pair(PSK, b"wrong-psk-length-16-bytes")
     assert isinstance(result.get("server_error"), AuthError)
     assert isinstance(result.get("client_error"), HandshakeError)
 
@@ -194,10 +194,10 @@ async def test_rate_limiter_non_ip_fallback():
 
     for _ in range(5):
         with pytest.raises(Exception):
-            await server_handshake(mock_reader, mock_writer, b"some-psk")
+            await server_handshake(mock_reader, mock_writer, b"some-psk-length-16-bytes")
 
     with pytest.raises(HandshakeError) as exc_info:
-        await server_handshake(mock_reader, mock_writer, b"some-psk")
+        await server_handshake(mock_reader, mock_writer, b"some-psk-length-16-bytes")
     assert "Rate limit exceeded" in str(exc_info.value)
 
     fallback_key = f"conn_{id(mock_writer)}"
@@ -226,7 +226,7 @@ async def test_rate_limiter_table_capping():
     mock_writer.get_extra_info.return_value = ("192.168.1.99", 54321)
 
     with pytest.raises(Exception):
-        await server_handshake(mock_reader, mock_writer, b"some-psk")
+        await server_handshake(mock_reader, mock_writer, b"some-psk-length-16-bytes")
 
     assert len(_failed_handshakes) == 1000
     assert "ip_0" not in _failed_handshakes
@@ -252,7 +252,7 @@ async def test_empty_psk_rejected():
 
     with pytest.raises(ValueError) as exc:
         USMPServer(psk={b"\x01\x02": b""})
-    assert "cannot be empty" in str(exc.value)
+    assert "must be at least 16 bytes long" in str(exc.value)
 
     # Handshake function empty check
     mock_reader = Mock(spec=asyncio.StreamReader)
@@ -260,4 +260,4 @@ async def test_empty_psk_rejected():
     
     with pytest.raises(ValueError) as exc:
         await client_handshake(mock_reader, mock_writer, psk=b"", device_id=b"\x01"*6)
-    assert "PSK cannot be empty" in str(exc.value)
+    assert "at least 16 bytes long" in str(exc.value)

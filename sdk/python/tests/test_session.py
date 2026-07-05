@@ -3,7 +3,7 @@ import asyncio
 from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
 
-PSK = b"test-psk-1234"
+PSK = b"test-psk-1234-super-secret"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
 
 
