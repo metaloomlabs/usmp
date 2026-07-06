@@ -11,8 +11,8 @@ on:
       - develop
 
 jobs:
-  test-python:
-    name: Test Python SDK
+  ci-checks:
+    name: CI Checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -44,7 +44,6 @@ jobs:
         run: |
           cd sdk/python
           uv run pytest tests/ -v
-
 
       - name: Run Ruff Linter
         run: |
