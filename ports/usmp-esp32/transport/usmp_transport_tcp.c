@@ -168,6 +168,7 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->available = usmp_tcp_available;
   t->destroy = usmp_tcp_destroy;
   t->confirm_authenticated = NULL;
+  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
   t->ctx = tcp;
 
   return 0;

@@ -8,7 +8,6 @@
 #include "usmp_port.h"
 #include "usmp_transport.h"
 
-
 #ifdef __cplusplus
 extern "C" {
 #endif

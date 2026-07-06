@@ -7,11 +7,19 @@
 #include "lwip/netdb.h"
 #include "lwip/sockets.h"
 #include "lwip/sys.h"
+#include "mbedtls/constant_time.h"
+#include "mbedtls/md.h"
 #include "usmp_frame.h"
 #include "usmp_port.h"
 #include "usmp_transport.h"
 
 #define UTACK_MAGIC 0xACAC
+
+// S3: session-phase UTACKs (frame type >= 5) carry an 8-byte truncated HMAC-SHA256 over
+// their 7-byte header so an off-path attacker cannot forge an ACK. Handshake-phase UTACKs
+// (types 1-4) predate the session keys and stay unauthenticated.
+#define UTACK_HEADER_LEN 7
+#define UTACK_MAC_LEN 8
 
 typedef struct {
   int sock;
@@ -22,7 +30,27 @@ typedef struct {
   uint32_t last_rx_seq;
   bool last_rx_seq_set;
   uint8_t last_rx_type;
+  uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
+  uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
+  bool keys_set;
 } usmp_udp_ctx_t;
+
+// S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
+static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
+  uint8_t full[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_hmac(info, key, 32, header, UTACK_HEADER_LEN, full);
+  memcpy(out, full, UTACK_MAC_LEN);
+}
+
+static void usmp_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
+                                      const uint8_t* rx_key) {
+  usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
+  if (!udp) return;
+  memcpy(udp->tx_key, tx_key, 32);
+  memcpy(udp->rx_key, rx_key, 32);
+  udp->keys_set = true;
+}
 
 static int udp_dial(usmp_udp_ctx_t* udp) {
   int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -51,9 +79,8 @@ static int udp_dial(usmp_udp_ctx_t* udp) {
   return 0;
 }
 static int is_transient_error(int err) {
-  return err == EAGAIN || err == EWOULDBLOCK || err == EINTR ||
-         err == ECONNREFUSED || err == EHOSTUNREACH || err == ENETUNREACH ||
-         err == ECONNRESET;
+  return err == EAGAIN || err == EWOULDBLOCK || err == EINTR || err == ECONNREFUSED ||
+         err == EHOSTUNREACH || err == ENETUNREACH || err == ECONNRESET;
 }
 
 static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
@@ -66,7 +93,8 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
 
   if (len >= 8) {
     type = data[3];
-    seq = data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    seq =
+        data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
     expect_ack = true;
   }
 
@@ -89,11 +117,20 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
       }
 
       // Check if it is a transport UTACK
-      if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
+      if (n >= UTACK_HEADER_LEN && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
-        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) | ((uint32_t)temp[6] << 24);
+        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) |
+                           ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
-          return 0;  // Success! ACK received
+          // S3: a session-phase ACK (type >= 5) must carry a valid MAC keyed by tx_key;
+          // drop forged or unauthenticated ACKs so an off-path attacker can't spoof one.
+          if (type >= 5) {
+            if (!udp->keys_set || n < UTACK_HEADER_LEN + UTACK_MAC_LEN) continue;
+            uint8_t expected[UTACK_MAC_LEN];
+            utack_mac(udp->tx_key, temp, expected);
+            if (mbedtls_ct_memcmp(expected, temp + UTACK_HEADER_LEN, UTACK_MAC_LEN) != 0) continue;
+          }
+          return 0;  // Success! ACK received (and authenticated for session frames)
         }
         continue;
       }
@@ -157,12 +194,19 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (magic != 0xABCD) continue;
 
     uint8_t type = temp[3];
-    uint32_t seq = temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
+    uint32_t seq =
+        temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
 
-    // Send UTACK back immediately
-    uint8_t utack[7] = {
+    // Send UTACK back immediately. S3: authenticate session-phase UTACKs (type >= 5)
+    // with rx_key once keys are established; handshake UTACKs stay plaintext.
+    uint8_t utack[UTACK_HEADER_LEN + UTACK_MAC_LEN] = {
         0xAC, 0xAC, type, seq & 0xFF, (seq >> 8) & 0xFF, (seq >> 16) & 0xFF, (seq >> 24) & 0xFF};
-    send(udp->sock, utack, sizeof(utack), 0);
+    size_t utack_len = UTACK_HEADER_LEN;
+    if (type >= 5 && udp->keys_set) {
+      utack_mac(udp->rx_key, utack, utack + UTACK_HEADER_LEN);
+      utack_len = UTACK_HEADER_LEN + UTACK_MAC_LEN;
+    }
+    send(udp->sock, utack, utack_len, 0);
 
     // Duplicate detection
     if (type < 5) {
@@ -260,6 +304,7 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   t->available = usmp_udp_available;
   t->destroy = usmp_udp_destroy;
   t->confirm_authenticated = usmp_udp_confirm_authenticated;
+  t->set_session_keys = usmp_udp_set_session_keys;
   t->ctx = udp;
 
   return 0;
