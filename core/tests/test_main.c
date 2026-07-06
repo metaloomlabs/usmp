@@ -73,7 +73,9 @@ static int loopback_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
 
 static int loopback_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   loopback_ctx_t* ctx = (loopback_ctx_t*)t->ctx;
-  if (ctx->read_pos >= ctx->write_pos) return -1; // no data available
+  if (ctx->read_pos >= ctx->write_pos) {
+    return t->confirm_authenticated ? 0 : -1; // return 0 (timeout/no-data) for UDP, -1 for TCP
+  }
 
   // Parse header to get length
   if (ctx->read_pos + USMP_HEADER_SIZE > ctx->write_pos) return -1;
