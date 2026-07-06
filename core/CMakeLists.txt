@@ -33,7 +33,7 @@ else()
         PUBLIC  include
         PRIVATE src
     )
-    target_link_libraries(usmp-core mbedtls)
+    target_link_libraries(usmp-core PUBLIC mbedtls)
 
     # Enable compile warning and hardening flags on host builds
     if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
