@@ -23,6 +23,7 @@ class USMPClient {
   String deviceId();
   String sessionId();
   void keepalive(uint32_t ms);
+  void setLogLevel(usmp_log_level_t level);
   void maintain();
   void onConnect(void (*cb)());
   void onDisconnect(void (*cb)());

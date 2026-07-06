@@ -44,7 +44,22 @@ void usmp_port_delay_ms(uint32_t ms) { delay(ms); }
 uint32_t usmp_port_millis(void) { return millis(); }
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
-  Serial.printf("[%c][%s] %s\n", level, tag, msg);
+  if (level == 'E') {
+    char lower_tag[64];
+    size_t i;
+    for (i = 0; i < sizeof(lower_tag) - 1 && tag[i] != '\0'; i++) {
+      char c = tag[i];
+      if (c >= 'A' && c <= 'Z') {
+        lower_tag[i] = (char)(c + ('a' - 'A'));
+      } else {
+        lower_tag[i] = c;
+      }
+    }
+    lower_tag[i] = '\0';
+    Serial.printf("[usmp] [%s]: %s\n", lower_tag, msg);
+  } else {
+    Serial.printf("[%c][%s] %s\n", level, tag, msg);
+  }
 }
 
 }  // extern "C"

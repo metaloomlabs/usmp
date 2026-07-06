@@ -36,18 +36,26 @@ bool USMPClient::_do_reconnect() {
 bool USMPClient::begin(USMPTCPTransport transport) {
   // WiFi
   if (transport._ssid) {
-    Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
+      Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
+    }
     if (!transport.connectWiFi()) {
-      Serial.println("[USMP] WiFi connect failed");
+      if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+        Serial.println("[usmp] [usmp]: WiFi connect failed");
+      }
       return false;
     }
-    Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
+      Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
+    }
   }
 
   // TCP transport init ────────────────────────────────────────────────────
   memset(&_transport, 0, sizeof(_transport));
   if (!transport.init(&_transport)) {
-    Serial.println("[USMP] TCP connect failed");
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+      Serial.println("[usmp] [usmp]: TCP connect failed");
+    }
     return false;
   }
 
@@ -57,7 +65,9 @@ bool USMPClient::begin(USMPTCPTransport transport) {
   _ctx.keepalive_ms = 30000;  // 30s default
 
   if (usmp_connect(&_ctx, &_transport) != 0) {
-    Serial.println("[USMP] Handshake failed");
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+      Serial.println("[usmp] [usmp]: Handshake failed");
+    }
     return false;
   }
 
@@ -72,18 +82,26 @@ bool USMPClient::begin(USMPTCPTransport transport) {
 bool USMPClient::begin(USMPUDPTransport transport) {
   // WiFi
   if (transport._ssid) {
-    Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
+      Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
+    }
     if (!transport.connectWiFi()) {
-      Serial.println("[USMP] WiFi connect failed");
+      if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+        Serial.println("[usmp] [usmp]: WiFi connect failed");
+      }
       return false;
     }
-    Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
+      Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
+    }
   }
 
   // UDP transport init ────────────────────────────────────────────────────
   memset(&_transport, 0, sizeof(_transport));
   if (!transport.init(&_transport)) {
-    Serial.println("[USMP] UDP connect failed");
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+      Serial.println("[usmp] [usmp]: UDP connect failed");
+    }
     return false;
   }
 
@@ -93,7 +111,9 @@ bool USMPClient::begin(USMPUDPTransport transport) {
   _ctx.keepalive_ms = 30000;  // 30s default
 
   if (usmp_connect(&_ctx, &_transport) != 0) {
-    Serial.println("[USMP] Handshake failed");
+    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
+      Serial.println("[usmp] [usmp]: Handshake failed");
+    }
     return false;
   }
 
@@ -172,6 +192,8 @@ String USMPClient::sessionId() {
 
 // keepalive ───────────────────────────────────────────────────────────────
 void USMPClient::keepalive(uint32_t ms) { _ctx.keepalive_ms = ms; }
+
+void USMPClient::setLogLevel(usmp_log_level_t level) { usmp_set_log_level(level); }
 
 // maintain
 void USMPClient::maintain() {
