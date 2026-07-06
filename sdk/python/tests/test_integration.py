@@ -285,14 +285,18 @@ async def test_multi_psk_dict():
 
     async def client_coro():
         # Connect client 1
-        client1 = USMPClient(host=HOST, port=port, psk=b"psk-device-1-longer-key", device_id=device_id_1)
+        client1 = USMPClient(
+            host=HOST, port=port, psk=b"psk-device-1-longer-key", device_id=device_id_1
+        )
         await client1.connect()
         await client1.send(b"c1")
         r1 = await client1.recv()
         await client1.disconnect()
 
         # Connect client 2
-        client2 = USMPClient(host=HOST, port=port, psk=b"psk-device-2-longer-key", device_id=device_id_2)
+        client2 = USMPClient(
+            host=HOST, port=port, psk=b"psk-device-2-longer-key", device_id=device_id_2
+        )
         await client2.connect()
         await client2.send(b"c2")
         r2 = await client2.recv()
@@ -323,7 +327,9 @@ async def test_multi_psk_callable():
         await session.send(data + b"-dyn-ok")
 
     async def client_coro():
-        client = USMPClient(host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed)
+        client = USMPClient(
+            host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed
+        )
         await client.connect()
         await client.send(b"hello")
         reply = await client.recv()
@@ -390,7 +396,9 @@ async def test_multi_psk_async_callable():
         await session.send(data + b"-dyn-async-ok")
 
     async def client_coro():
-        client = USMPClient(host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed)
+        client = USMPClient(
+            host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed
+        )
         await client.connect()
         await client.send(b"hello")
         reply = await client.recv()
@@ -440,5 +448,3 @@ async def test_tcp_connection_cap():
         await c2.disconnect()
 
     await _run(server, client_coro())
-
-

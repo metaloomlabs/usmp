@@ -62,6 +62,3 @@ def test_all_packet_types():
         data = encode_frame(ptype, b"payload", seq=1)
         frame = decode_frame(data)
         assert frame.type == ptype
-
-
-

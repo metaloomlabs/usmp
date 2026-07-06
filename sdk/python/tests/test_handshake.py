@@ -152,9 +152,7 @@ async def test_wrong_psk_server_rejected():
             # Send SESSION_OK with WRONG server HMAC
             session_id = os.urandom(USMP_SESSION_ID_LEN)
             bad_hmac_server = os.urandom(USMP_HMAC_LEN)  # random, not valid
-            await write_frame(
-                writer, PacketType.SESSION_OK, session_id + bad_hmac_server
-            )
+            await write_frame(writer, PacketType.SESSION_OK, session_id + bad_hmac_server)
 
         except Exception as e:
             result["server_error"] = e
@@ -217,6 +215,7 @@ async def test_rate_limiter_table_capping():
     _failed_handshakes.clear()
 
     import time
+
     now = time.monotonic()
     for i in range(1000):
         _failed_handshakes[f"ip_{i}"] = (1, 0.0, now - 500.0 + float(i) * 0.1)
@@ -261,5 +260,5 @@ async def test_empty_psk_rejected():
     mock_writer = Mock(spec=asyncio.StreamWriter)
 
     with pytest.raises(ValueError) as exc:
-        await client_handshake(mock_reader, mock_writer, psk=b"", device_id=b"\x01"*6)
+        await client_handshake(mock_reader, mock_writer, psk=b"", device_id=b"\x01" * 6)
     assert "at least 16 bytes long" in str(exc.value)

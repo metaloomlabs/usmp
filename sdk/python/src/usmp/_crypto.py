@@ -122,6 +122,7 @@ def decrypt(
     Raises CryptoError if authentication fails.
     """
     from cryptography.exceptions import InvalidTag
+
     if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
         raise CryptoError("Payload too short")
 

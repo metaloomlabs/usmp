@@ -191,7 +191,9 @@ def test_golden_vectors():
 
     from usmp._frame import crc16, encode_frame
 
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    base_dir = os.path.dirname(
+        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    )
     json_path = os.path.join(base_dir, "tests", "golden_vectors.json")
     with open(json_path, "r") as f:
         golden = json.load(f)
@@ -210,14 +212,14 @@ def test_golden_vectors():
             seq=case["seq"],
             length=case["length"],
         )
-        assert binascii.hexlify(aad).decode('ascii').upper() == case["expected_aad"]
+        assert binascii.hexlify(aad).decode("ascii").upper() == case["expected_aad"]
 
     # 3. Nonce
     for case in golden["nonce_cases"]:
         seq = case["seq"]
         session_id = binascii.unhexlify(case["session_id"])
         nonce = struct.pack("<I", seq) + session_id[:8]
-        assert binascii.hexlify(nonce).decode('ascii').upper() == case["expected_nonce"]
+        assert binascii.hexlify(nonce).decode("ascii").upper() == case["expected_nonce"]
 
     # 4. Encryption
     for case in golden["encryption_cases"]:
@@ -235,7 +237,7 @@ def test_golden_vectors():
             magic=USMP_MAGIC,
             plaintext=plaintext,
         )
-        assert binascii.hexlify(ct).decode('ascii').upper() == case["expected_ciphertext_tag"]
+        assert binascii.hexlify(ct).decode("ascii").upper() == case["expected_ciphertext_tag"]
 
         # Decrypt
         pt = decrypt(
@@ -259,5 +261,4 @@ def test_golden_vectors():
             seq=case["seq"],
             version=case["version"],
         )
-        assert binascii.hexlify(frame).decode('ascii').upper() == case["expected_frame"]
-
+        assert binascii.hexlify(frame).decode("ascii").upper() == case["expected_frame"]

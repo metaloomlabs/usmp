@@ -7,7 +7,7 @@ from typing import Any
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, PayloadError, SequenceError, USMPError
+from .errors import ConnectionClosedError, FrameError, PayloadError, SequenceError, USMPError
 from .errors import TimeoutError as USMPTimeoutError
 from .types import (
     USMP_MAGIC,
@@ -57,7 +57,7 @@ class USMPSession:
         offset = 0
         while offset < len(data) or len(data) == 0:
             chunk = data[offset : offset + USMP_MAX_DATA_LEN]
-            is_frag = (offset + len(chunk) < len(data))
+            is_frag = offset + len(chunk) < len(data)
             packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
 
             seq = self._info.tx_seq
@@ -132,15 +132,14 @@ class USMPSession:
                         shift = frame.seq - self._info.rx_seq
                         if shift < 64:
                             self._info.rx_window_bitmap = (
-                                (self._info.rx_window_bitmap << shift)
-                                & 0xFFFFFFFFFFFFFFFF
+                                (self._info.rx_window_bitmap << shift) & 0xFFFFFFFFFFFFFFFF
                             ) | 1
                         else:
                             self._info.rx_window_bitmap = 1
                         self._info.rx_seq = frame.seq
                     else:
                         offset = self._info.rx_seq - frame.seq
-                        self._info.rx_window_bitmap |= (1 << offset)
+                        self._info.rx_window_bitmap |= 1 << offset
 
                     if confirm is not None:
                         confirm(frame.seq)
@@ -155,50 +154,68 @@ class USMPSession:
 
                     self._info.rx_seq += 1
 
-                if frame.type == PacketType.BYE:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: BYE received during fragmentation")
-                    raise ConnectionClosedError("Remote sent BYE")
+                # S5 fix: over UDP a reordered or crafted fragment / control-frame
+                # sequence must not tear down the live session. The ordering and
+                # frame-type checks below are wrapped so that on UDP a violation drops
+                # the partial reassembly state and keeps reading, instead of
+                # propagating. An authenticated BYE — and the too-many-control-frames
+                # guard — still closes the session by raising ConnectionClosedError,
+                # which is deliberately not caught here. On TCP the violation still
+                # propagates (strict in-order delivery).
+                try:
+                    if frame.type == PacketType.BYE:
+                        raise ConnectionClosedError("Remote sent BYE")
 
-                if frame.type == PacketType.PING:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: PING received during fragmentation")
-                    await self._send_pong()
-                    ctrl_count += 1
-                    if ctrl_count >= 8:
-                        raise ConnectionClosedError(
-                            "Too many consecutive control frames received"
-                        )
-                    continue
+                    if frame.type == PacketType.PING:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError(
+                                "Protocol error: PING received during fragmentation"
+                            )
+                        await self._send_pong()
+                        ctrl_count += 1
+                        if ctrl_count >= 8:
+                            raise ConnectionClosedError(
+                                "Too many consecutive control frames received"
+                            )
+                        continue
 
-                if frame.type == PacketType.PONG:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: PONG received during fragmentation")
-                    ctrl_count += 1
-                    if ctrl_count >= 8:
-                        raise ConnectionClosedError(
-                            "Too many consecutive control frames received"
-                        )
-                    continue
+                    if frame.type == PacketType.PONG:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError(
+                                "Protocol error: PONG received during fragmentation"
+                            )
+                        ctrl_count += 1
+                        if ctrl_count >= 8:
+                            raise ConnectionClosedError(
+                                "Too many consecutive control frames received"
+                            )
+                        continue
 
-                if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
-                    raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+                    if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
+                        raise ValueError(f"Unexpected frame type: {frame.type_name()}")
 
-                if frame_count > 0:
-                    if frame.seq != expected_frag_seq:
-                        raise SequenceError("Protocol error: out-of-order fragment sequence")
-                    expected_frag_seq += 1
-                else:
-                    expected_frag_seq = frame.seq + 1
+                    if frame_count > 0:
+                        if frame.seq != expected_frag_seq:
+                            raise SequenceError("Protocol error: out-of-order fragment sequence")
+                        expected_frag_seq += 1
+                    else:
+                        expected_frag_seq = frame.seq + 1
 
-                assembled_payload.extend(plaintext)
-                frame_count += 1
+                    assembled_payload.extend(plaintext)
+                    frame_count += 1
 
-                if frame.type == PacketType.DATA:
-                    return bytes(assembled_payload)
+                    if frame.type == PacketType.DATA:
+                        return bytes(assembled_payload)
 
-                if frame_count >= USMP_MAX_FRAMES:
-                    raise PayloadError("Protocol error: exceeded max fragments limit")
+                    if frame_count >= USMP_MAX_FRAMES:
+                        raise PayloadError("Protocol error: exceeded max fragments limit")
+                except (FrameError, SequenceError, ValueError):
+                    if is_udp:
+                        assembled_payload = bytearray()
+                        frame_count = 0
+                        expected_frag_seq = 0
+                        continue
+                    raise
 
         if effective_timeout is not None:
             try:

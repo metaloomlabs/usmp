@@ -9,7 +9,7 @@ from typing import cast
 import pytest
 
 from usmp import USMPClient, USMPServer, USMPSession
-from usmp.errors import SequenceError
+from usmp.errors import ConnectionClosedError, SequenceError
 from usmp.transport.udp import UDPStream
 
 PSK = b"usmp-test-psk-udp-integration"
@@ -148,6 +148,7 @@ async def test_udp_client_reboot_no_lockout():
             if self._local_port:
                 from usmp._handshake import client_handshake
                 from usmp.transport.udp import ClientUDPProtocol
+
                 loop = asyncio.get_running_loop()
                 stream_future = loop.create_future()
                 transport, protocol = await loop.create_datagram_endpoint(
@@ -227,9 +228,11 @@ async def test_udp_off_path_spoofing_resistance():
         # We can intercept client.write or record the sent packet
         original_write = client._session._writer.write
         sent_packets = []
+
         def mock_write(data):
             sent_packets.append(data)
             original_write(data)
+
         client._session._writer.write = mock_write
 
         await client.send(b"valid1")
@@ -250,7 +253,7 @@ async def test_udp_off_path_spoofing_resistance():
 
         # Case 1: Bad version (causes VersionError in read_frame)
         # Craft a frame with version=1, seq=999, len=10
-        fake_bad_version = b"\xCD\xAB\x01\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
+        fake_bad_version = b"\xcd\xab\x01\x05\xe7\x03\x00\x00\x0a\x00\x00\x00" + b"A" * 10
         server._handle_udp_datagram(None, fake_bad_version, client_addr)
 
         # Case 2: Tampered payload/GCM tag (causes decrypt failure)
@@ -265,7 +268,7 @@ async def test_udp_off_path_spoofing_resistance():
 
         # Case 4: Lying header length (U2 validation - length mismatch)
         # Send a packet where len(data) != header_len + payload_len
-        lying_length_packet = b"\xCD\xAB\x02\x05\x02\x00\x00\x00\x10\x00\x00\x00" + b"short"
+        lying_length_packet = b"\xcd\xab\x02\x05\x02\x00\x00\x00\x10\x00\x00\x00" + b"short"
         server._handle_udp_datagram(None, lying_length_packet, client_addr)
 
         await asyncio.sleep(0.1)  # let server process all fed packets
@@ -288,7 +291,6 @@ async def test_udp_off_path_spoofing_resistance():
         await client.disconnect()
 
     await _run(server, client_coro())
-
 
 
 @pytest.mark.asyncio
@@ -348,7 +350,10 @@ async def test_udp_concurrent_handshakes_limit():
     """
     port = _free_port()
     server = USMPServer(
-        host=HOST, port=port, psk=PSK, protocol="udp",
+        host=HOST,
+        port=port,
+        psk=PSK,
+        protocol="udp",
         max_connections_per_ip=3,
     )
     server._handshake_timeout = 1.0
@@ -365,10 +370,7 @@ async def test_udp_concurrent_handshakes_limit():
         clients = [USMPClient(host=HOST, port=port, psk=PSK, protocol="udp") for _ in range(5)]
 
         # Attempt to connect all 5 concurrently
-        results = await asyncio.gather(
-            *[c.connect() for c in clients],
-            return_exceptions=True
-        )
+        results = await asyncio.gather(*[c.connect() for c in clients], return_exceptions=True)
 
         # Give server a moment to process all session promotions/rejections
         await asyncio.sleep(0.2)
@@ -403,7 +405,7 @@ async def test_udp_invalid_length_discard():
     # Header states magic=0xABCD (2B), version=2 (1B), type=5 (1B), seq=0 (4B), length=100 (2B), crc=0 (2B)
     # Total header: 12B. Datagram size: 20B.
     # Expected size: 12 + 100 = 112B. Mismatch!
-    bad_data = b"\xCD\xAB\x02\x05\x00\x00\x00\x00\x64\x00\x00\x00" + b"A" * 8
+    bad_data = b"\xcd\xab\x02\x05\x00\x00\x00\x00\x64\x00\x00\x00" + b"A" * 8
     stream.feed_packet(bad_data)
 
     assert len(stream._read_buffer) == 0  # Should be discarded
@@ -440,7 +442,7 @@ async def test_udp_malformed_frame_robustness():
         stream = client._session._reader
 
         # Craft a fake frame: magic=0xABCD, version=99 (invalid), type=5, seq=999, len=10, crc=0
-        bad_frame = b"\xCD\xAB\x63\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
+        bad_frame = b"\xcd\xab\x63\x05\xe7\x03\x00\x00\x0a\x00\x00\x00" + b"A" * 10
         stream.feed_packet(bad_frame)
 
         await asyncio.sleep(0.05)
@@ -499,7 +501,7 @@ async def test_udp_sliding_replay_window():
                 type_=int(PacketType.DATA),
                 version=USMP_VERSION,
                 magic=USMP_MAGIC,
-                plaintext=payload
+                plaintext=payload,
             )
             return encode_frame(PacketType.DATA, ciphertext, seq=seq)
 
@@ -539,18 +541,27 @@ async def test_udp_sliding_replay_window():
 
 @pytest.mark.asyncio
 async def test_udp_fragment_order_enforcement():
-    """Verify that out-of-order fragments of a single fragmented message are rejected (B2)."""
+    """S5: over UDP an out-of-order fragment is dropped, not fatal to the session.
+
+    A reordered fragment used to raise SequenceError and tear down the live session.
+    After the S5 fix the offending fragment is silently dropped (the partial reassembly
+    state is cleared) and the session keeps running — so no SequenceError reaches the
+    handler and a subsequent well-formed message is still delivered normally.
+    """
     port = _free_port()
     errors = []
+    recovered = []
 
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
 
     @server.on_session
     async def handler(session: USMPSession):
         try:
-            await session.recv()
+            recovered.append(await session.recv())
         except SequenceError as e:
             errors.append(e)
+        except (asyncio.IncompleteReadError, ConnectionClosedError, OSError):
+            pass
 
     async def client_coro():
         client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
@@ -578,22 +589,88 @@ async def test_udp_fragment_order_enforcement():
                 type_=int(packet_type),
                 version=USMP_VERSION,
                 magic=USMP_MAGIC,
-                plaintext=payload
+                plaintext=payload,
             )
             return encode_frame(packet_type, ciphertext, seq=seq)
 
-        # Send first fragment of a message: type DATA_FRAG, seq 1
-        server._handle_udp_datagram(None, make_packet(1, PacketType.DATA_FRAG, b"frag1"), client_addr)
+        # First fragment of a message: type DATA_FRAG, seq 1
+        server._handle_udp_datagram(
+            None, make_packet(1, PacketType.DATA_FRAG, b"frag1"), client_addr
+        )
         await asyncio.sleep(0.05)
 
-        # Send second fragment with out-of-order seq 3 (instead of expected seq 2)
+        # Out-of-order second fragment (seq 3 instead of the expected seq 2): dropped, not fatal
         server._handle_udp_datagram(None, make_packet(3, PacketType.DATA, b"frag2"), client_addr)
+        await asyncio.sleep(0.05)
+
+        # Session is still alive: a fresh complete message (seq 4) is delivered normally
+        server._handle_udp_datagram(
+            None, make_packet(4, PacketType.DATA, b"recovered"), client_addr
+        )
         await asyncio.sleep(0.05)
 
         client._session._writer.close()
 
     await _run(server, client_coro())
-    assert len(errors) == 1
-    assert "out-of-order fragment" in str(errors[0])
+    assert errors == []
+    assert recovered == [b"recovered"]
 
 
+@pytest.mark.asyncio
+async def test_udp_utack_authentication_s3():
+    """S3: session-phase UTACKs must carry a valid MAC or the sender's ARQ ignores them.
+
+    An off-path attacker who guesses (type, seq) but lacks the session key cannot forge a
+    UTACK to spoof delivery. A plaintext or wrong-MAC UTACK for a session frame (type >= 5)
+    is dropped; only a UTACK bearing the correct 8-byte truncated HMAC releases the wait.
+    """
+    import hashlib
+    import hmac
+    import struct
+
+    from usmp.transport.udp import UTACK_MAGIC, UDPStream
+
+    class _DummyTransport:
+        def sendto(self, data, addr):
+            pass
+
+        def get_extra_info(self, name):
+            return None
+
+        def close(self):
+            pass
+
+    # Golden UTACK-MAC vector — pins the exact wire bytes, cross-checked byte-for-byte
+    # against the C stack's mbedTLS HMAC in core/tests/test_golden.c (test_s3_utack_mac).
+    golden_key = bytes(range(1, 33))
+    golden_header = UTACK_MAGIC + bytes([5]) + struct.pack("<I", 7)
+    assert UDPStream._utack_mac(golden_key, golden_header) == bytes(
+        [0x40, 0x79, 0xB9, 0x59, 0x9A, 0x16, 0x0B, 0x87]
+    )
+
+    tx_key = b"\x11" * 32
+    rx_key = b"\x22" * 32
+    stream = UDPStream(_DummyTransport(), ("127.0.0.1", 9999), is_server=False)
+    stream.set_session_keys(tx_key, rx_key)
+
+    # Simulate an outstanding session-phase send (type=5, seq=7) awaiting its ACK.
+    seq, type_val = 7, 5
+    stream._pending_send_seq = seq
+    stream._pending_send_type = type_val
+    header = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq)
+
+    # 1. Plaintext UTACK (no MAC) for a session frame → rejected.
+    stream._ack_received_event.clear()
+    stream.feed_packet(header)
+    assert not stream._ack_received_event.is_set()
+
+    # 2. Wrong-MAC UTACK → rejected.
+    stream._ack_received_event.clear()
+    stream.feed_packet(header + b"\x00" * 8)
+    assert not stream._ack_received_event.is_set()
+
+    # 3. Correct MAC (the peer signs with its rx_key == our tx_key) → accepted.
+    good_mac = hmac.new(tx_key, header, hashlib.sha256).digest()[:8]
+    stream._ack_received_event.clear()
+    stream.feed_packet(header + good_mac)
+    assert stream._ack_received_event.is_set()

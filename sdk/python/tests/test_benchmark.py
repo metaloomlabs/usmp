@@ -98,9 +98,7 @@ def test_bench_session_key_derivation():
         derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
         times.append(time.perf_counter() - t0)
 
-    passed = print_benchmark(
-        "X25519 + HKDF session key derivation", times, target_ms=10.0
-    )
+    passed = print_benchmark("X25519 + HKDF session key derivation", times, target_ms=10.0)
     assert passed, "Session key derivation p95 exceeded 10ms target"
 
 
@@ -158,7 +156,6 @@ def test_bench_aes_gcm_decrypt():
 
     passed = print_benchmark("AES-256-GCM decrypt (21 bytes)", times, target_ms=2.0)
     assert passed, "AES-GCM decrypt p95 exceeded 2ms target"
-
 
 
 # ── Handshake benchmark ───────────────────────────────────────────────────────

@@ -58,7 +58,9 @@ class USMPServer:
         if isinstance(psk, dict):
             for dev_id, val in psk.items():
                 if not val or len(val) < 16:
-                    raise ValueError(f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} must be at least 16 bytes long")
+                    raise ValueError(
+                        f"PSK for device {dev_id.hex() if isinstance(dev_id, bytes) else dev_id} must be at least 16 bytes long"
+                    )
         elif isinstance(psk, bytes):
             if len(psk) < 16:
                 raise ValueError("PSK bytes must be at least 16 bytes long")
@@ -81,6 +83,11 @@ class USMPServer:
         self._udp_in_progress_handshakes: dict[str, int] = {}
         # Ephemeral cookie secret for UDP return-routability
         self._cookie_secret = os.urandom(32)
+        # S4 fix: per-IP token bucket capping the pre-routability cookie-issuance path
+        # (one HMAC-SHA256 + two sendto()s per 50-byte HELLO). Without it a spoofed-source
+        # HELLO flood forces unbounded CPU/bandwidth. 10 tokens, refilled at 5/s, keyed on
+        # the (still-unverified) source IP. maps ip -> (tokens, last_refill_monotonic).
+        self._udp_cookie_rate_limiter: dict[str, tuple[float, float]] = {}
         # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
         # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
         self._handshake_semaphore = asyncio.Semaphore(10)
@@ -120,6 +127,35 @@ class USMPServer:
                 session._writer.close()
                 return
 
+    def _allow_udp_cookie(self, ip: str) -> bool:
+        """S4: token-bucket rate limit for the UDP cookie-issuance path.
+
+        Returns True and consumes one token if a HELLO from ``ip`` may be answered, or
+        False if the per-IP budget is exhausted and the datagram must be dropped before
+        any HMAC/sendto work. Bucket: 10 tokens, refilled at 5 tokens/sec.
+        """
+        capacity = 10.0
+        refill_per_sec = 5.0
+        now = time.monotonic()
+
+        tokens, last = self._udp_cookie_rate_limiter.get(ip, (capacity, now))
+        tokens = min(capacity, tokens + (now - last) * refill_per_sec)
+
+        if tokens < 1.0:
+            self._udp_cookie_rate_limiter[ip] = (tokens, now)
+            return False
+
+        self._udp_cookie_rate_limiter[ip] = (tokens - 1.0, now)
+
+        # Bound memory under a spoofed-source flood: once the map grows large, drop
+        # fully-refilled (idle) entries — a fresh entry defaults to a full bucket anyway.
+        if len(self._udp_cookie_rate_limiter) > 1000:
+            self._udp_cookie_rate_limiter = {
+                k: v for k, v in self._udp_cookie_rate_limiter.items() if v[0] < capacity
+            }
+
+        return True
+
     def _handle_udp_datagram(
         self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]
     ) -> None:
@@ -127,7 +163,7 @@ class USMPServer:
         from .transport.udp import UDPStream
 
         # 1. Parse packet type
-        is_utack = len(data) >= 7 and data[:2] == b"\xAC\xAC"
+        is_utack = len(data) >= 7 and data[:2] == b"\xac\xac"
         type_val = data[2] if is_utack else data[3] if len(data) >= 12 else None
 
         # 2. Route handshake packets (type_val < 5) to self._udp_handshakes
@@ -143,13 +179,18 @@ class USMPServer:
 
             # Enforce UDP stateless cookie return-routability verification (U3/U4)
             if len(data) == 50:
+                # S4 fix: rate-limit the cookie path before any HMAC or sendto work,
+                # keyed on the (still-unverified) source IP.
+                if not self._allow_udp_cookie(addr[0]):
+                    return
+
                 from ._frame import encode_frame
                 from .types import PacketType
 
                 # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
                 type_val = data[3]
                 seq_val = struct.unpack("<I", data[4:8])[0]
-                utack = b"\xAC\xAC" + bytes([type_val]) + struct.pack("<I", seq_val)
+                utack = b"\xac\xac" + bytes([type_val]) + struct.pack("<I", seq_val)
                 transport.sendto(utack, addr)
 
                 time_bucket = int(time.time() // 30)
@@ -167,7 +208,9 @@ class USMPServer:
                 expected1 = hmac.new(self._cookie_secret, msg1, hashlib.sha256).digest()[:16]
                 expected2 = hmac.new(self._cookie_secret, msg2, hashlib.sha256).digest()[:16]
 
-                if not (hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)):
+                if not (
+                    hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)
+                ):
                     # Invalid cookie, silently ignore
                     return
             else:
@@ -225,7 +268,8 @@ class USMPServer:
             if len(self._udp_sessions) >= self._max_connections:
                 logger.warning(
                     "Global UDP session limit reached (%d). Rejecting %s",
-                    self._max_connections, addr,
+                    self._max_connections,
+                    addr,
                 )
                 stream.close()
                 return
@@ -235,7 +279,8 @@ class USMPServer:
             if ip_count >= self._max_connections_per_ip:
                 logger.warning(
                     "Per-IP UDP session limit reached for %s (%d). Rejecting",
-                    limiter_key, self._max_connections_per_ip,
+                    limiter_key,
+                    self._max_connections_per_ip,
                 )
                 stream.close()
                 return
@@ -410,6 +455,7 @@ class USMPServer:
 
         if self._protocol == "udp":
             from .transport.udp import ServerUDPProtocol
+
             loop = asyncio.get_running_loop()
             transport, protocol = await loop.create_datagram_endpoint(
                 lambda: ServerUDPProtocol(self),

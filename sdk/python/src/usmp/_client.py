@@ -43,6 +43,7 @@ class USMPClient:
         """Connect to a USMP server and complete the handshake."""
         if self._protocol == "udp":
             from .transport.udp import ClientUDPProtocol
+
             loop = asyncio.get_running_loop()
             stream_future = loop.create_future()
             transport, protocol = await loop.create_datagram_endpoint(
@@ -56,9 +57,7 @@ class USMPClient:
             reader, writer = await asyncio.open_connection(self._host, self._port)
             info = await client_handshake(reader, writer, self._psk, self._device_id)
             self._session = USMPSession(reader, writer, info)
-        logger.info(
-            f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}"
-        )
+        logger.info(f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}")
 
     async def send(self, data: bytes) -> None:
         session = self._ensure_connected()

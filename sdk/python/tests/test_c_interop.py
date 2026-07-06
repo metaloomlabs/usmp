@@ -9,12 +9,17 @@ import pytest
 from usmp import USMPProtocol, USMPServer, USMPSession
 
 # Resolve base paths
-REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+REPO_DIR = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 BUILD_DIR = os.path.join(REPO_DIR, "build")
 
 # Check if cmake and compilers are available
 HAS_CMAKE = shutil.which("cmake") is not None
-HAS_MBEDTLS = True # We assume it is available in CI, otherwise compilation fails and we handle errors
+HAS_MBEDTLS = (
+    True  # We assume it is available in CI, otherwise compilation fails and we handle errors
+)
+
 
 def build_c_client():
     if not HAS_CMAKE:
@@ -23,9 +28,19 @@ def build_c_client():
     os.makedirs(BUILD_DIR, exist_ok=True)
     try:
         # Run CMake config
-        subprocess.run(["cmake", "-S", REPO_DIR, "-B", BUILD_DIR], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(
+            ["cmake", "-S", REPO_DIR, "-B", BUILD_DIR],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
         # Run CMake build
-        subprocess.run(["cmake", "--build", BUILD_DIR], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.run(
+            ["cmake", "--build", BUILD_DIR],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
     except subprocess.CalledProcessError as e:
         # Log error details
         print("CMake build failed:", e.stdout.decode() + "\n" + e.stderr.decode())
@@ -36,22 +51,24 @@ def build_c_client():
         os.path.join(BUILD_DIR, "usmp_interop_client"),
         os.path.join(BUILD_DIR, "usmp_interop_client.exe"),
         os.path.join(BUILD_DIR, "Debug", "usmp_interop_client.exe"),
-        os.path.join(BUILD_DIR, "Release", "usmp_interop_client.exe")
+        os.path.join(BUILD_DIR, "Release", "usmp_interop_client.exe"),
     ]
     for cand in candidates:
         if os.path.exists(cand):
             return cand
     pytest.skip("C interop client binary not found after compilation")
 
+
 @pytest.fixture(scope="module")
 def c_client_path():
     return build_c_client()
+
 
 @pytest.mark.asyncio
 async def test_tcp_c_interop(c_client_path):
     port = 9110
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
-    psk_hex = binascii.hexlify(psk).decode('ascii')
+    psk_hex = binascii.hexlify(psk).decode("ascii")
 
     client_connected_event = asyncio.Event()
     test_completed_event = asyncio.Event()
@@ -79,26 +96,28 @@ async def test_tcp_c_interop(c_client_path):
             test_completed_event.set()
         except Exception as e:
             print("Server session handler failed:", e)
-            test_completed_event.set() # prevent hang
+            test_completed_event.set()  # prevent hang
 
     # Start server
     server_task = asyncio.create_task(server.serve())
-    await asyncio.sleep(0.5) # Let server start listening
+    await asyncio.sleep(0.5)  # Let server start listening
 
     try:
         # Launch C client subprocess
         cmd = [
             c_client_path,
-            "--host", "127.0.0.1",
-            "--port", str(port),
-            "--protocol", "tcp",
-            "--psk", psk_hex
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--protocol",
+            "tcp",
+            "--psk",
+            psk_hex,
         ]
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
@@ -115,11 +134,12 @@ async def test_tcp_c_interop(c_client_path):
         except asyncio.CancelledError:
             pass
 
+
 @pytest.mark.asyncio
 async def test_udp_c_interop(c_client_path):
     port = 9111
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
-    psk_hex = binascii.hexlify(psk).decode('ascii')
+    psk_hex = binascii.hexlify(psk).decode("ascii")
 
     client_connected_event = asyncio.Event()
     test_completed_event = asyncio.Event()
@@ -157,16 +177,18 @@ async def test_udp_c_interop(c_client_path):
         # Launch C client subprocess
         cmd = [
             c_client_path,
-            "--host", "127.0.0.1",
-            "--port", str(port),
-            "--protocol", "udp",
-            "--psk", psk_hex
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--protocol",
+            "udp",
+            "--psk",
+            psk_hex,
         ]
 
         proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)

@@ -21,7 +21,6 @@ class PacketType(IntEnum):
     ERROR = 0xFF
 
 
-
 class ErrorCode(IntEnum):
     ERR_VERSION = 0x01
     ERR_AUTH = 0x02

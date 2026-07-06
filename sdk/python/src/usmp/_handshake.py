@@ -31,6 +31,14 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
     return hmac.new(psk, data, hashlib.sha256).digest()
 
 
+def _install_udp_keys(transport: Any, tx_key: bytes, rx_key: bytes) -> None:
+    """S3: hand session keys to a UDP transport so it can authenticate session-phase
+    UTACKs. No-op for transports (e.g. TCP) without a set_session_keys() method."""
+    setter = getattr(transport, "set_session_keys", None)
+    if setter is not None:
+        setter(tx_key, rx_key)
+
+
 async def server_handshake(
     reader: Any,
     writer: Any,
@@ -118,7 +126,10 @@ async def server_handshake(
 
         # ── Verify client HMAC ────────────────────────────────────────────────────
         import struct
-        prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
+
+        prefix_client = struct.pack("<H", USMP_MAGIC) + bytes(
+            [USMP_VERSION, int(PacketType.HELLO_ACK)]
+        )
         expected_client = _compute_hmac(resolved_psk, prefix_client, nonce, device_id, pub_c, pub_s)
         received_client = frame.payload[:USMP_HMAC_LEN]
 
@@ -127,8 +138,18 @@ async def server_handshake(
 
         # ── Step 4: Send SESSION_OK [session_id(16) || hmac_server(32)] ───────────
         session_id = os.urandom(USMP_SESSION_ID_LEN)
-        prefix_server = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.SESSION_OK)])
+        prefix_server = struct.pack("<H", USMP_MAGIC) + bytes(
+            [USMP_VERSION, int(PacketType.SESSION_OK)]
+        )
         hmac_server = _compute_hmac(resolved_psk, prefix_server, nonce, session_id, pub_c, pub_s)
+
+        # S3: install UDP keys BEFORE sending SESSION_OK. The client may send its first
+        # session frame the instant it processes SESSION_OK, so the server must already be
+        # able to authenticate the UTACK for it — otherwise it sends a plaintext UTACK the
+        # client rejects. (tx=k_s2c, rx=k_c2s — see the SessionInfo mapping below.)
+        k_c2s, k_s2c = session_key
+        _install_udp_keys(writer, tx_key=k_s2c, rx_key=k_c2s)
+
         await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
 
         if limiter_key in _failed_handshakes:
@@ -139,11 +160,17 @@ async def server_handshake(
         return SessionInfo(
             device_id=device_id,
             session_id=session_id,
-            tx_key=k_s2c,   # server sends with server-to-client key
-            rx_key=k_c2s,   # server receives with client-to-server key
+            tx_key=k_s2c,  # server sends with server-to-client key
+            rx_key=k_c2s,  # server receives with client-to-server key
         )
 
-    except (asyncio.IncompleteReadError, ConnectionResetError, ConnectionAbortedError, EOFError, OSError):
+    except (
+        asyncio.IncompleteReadError,
+        ConnectionResetError,
+        ConnectionAbortedError,
+        EOFError,
+        OSError,
+    ):
         # Clean disconnects / transport failures — don't count against rate limiter
         raise
     except Exception:
@@ -171,7 +198,8 @@ async def server_handshake(
 
         # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
         expired_keys = [
-            k for k, v in _failed_handshakes.items()
+            k
+            for k, v in _failed_handshakes.items()
             if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
         ]
         for expired_key in expired_keys:
@@ -230,6 +258,7 @@ async def client_handshake(
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
     import struct
+
     prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
     hmac_client = _compute_hmac(psk, prefix_client, nonce, device_id, pub_c, pub_s)
     await write_frame(writer, PacketType.HELLO_ACK, hmac_client)
@@ -238,9 +267,7 @@ async def client_handshake(
     try:
         frame = await read_frame(reader, verify_crc=False)
     except asyncio.IncompleteReadError as e:
-        raise HandshakeError(
-            "Connection closed by server — PSK rejected or server error"
-        ) from e
+        raise HandshakeError("Connection closed by server — PSK rejected or server error") from e
 
     if frame.type != PacketType.SESSION_OK:
         raise HandshakeError(f"Expected SESSION_OK, got {frame.type_name()}")
@@ -250,21 +277,25 @@ async def client_handshake(
         raise HandshakeError(f"Bad SESSION_OK length: {frame.length}")
 
     session_id = frame.payload[:USMP_SESSION_ID_LEN]
-    hmac_server = frame.payload[
-        USMP_SESSION_ID_LEN : USMP_SESSION_ID_LEN + USMP_HMAC_LEN
-    ]
+    hmac_server = frame.payload[USMP_SESSION_ID_LEN : USMP_SESSION_ID_LEN + USMP_HMAC_LEN]
 
     # ── Verify server HMAC ────────────────────────────────────────────────────
-    prefix_server = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.SESSION_OK)])
+    prefix_server = struct.pack("<H", USMP_MAGIC) + bytes(
+        [USMP_VERSION, int(PacketType.SESSION_OK)]
+    )
     expected_server = _compute_hmac(psk, prefix_server, nonce, session_id, pub_c, pub_s)
     if not hmac.compare_digest(expected_server, hmac_server):
         raise AuthError("Server HMAC verification failed — possible rogue server")
 
     k_c2s, k_s2c = session_key
 
+    # S3: authenticate session-phase UTACKs now that keys are derived and the server is
+    # verified. Done before returning, so keys are set before any client session I/O.
+    _install_udp_keys(writer, tx_key=k_c2s, rx_key=k_s2c)
+
     return SessionInfo(
         device_id=device_id,
         session_id=session_id,
-        tx_key=k_c2s,   # client sends with client-to-server key
-        rx_key=k_s2c,   # client receives with server-to-client key
+        tx_key=k_c2s,  # client sends with client-to-server key
+        rx_key=k_s2c,  # client receives with server-to-client key
     )
