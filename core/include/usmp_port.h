@@ -70,10 +70,23 @@ uint32_t usmp_port_millis(void);
  */
 void usmp_port_log(char level, const char* tag, const char* msg);
 
+typedef enum {
+  USMP_LOG_LEVEL_NONE = 0,
+  USMP_LOG_LEVEL_ERROR,
+  USMP_LOG_LEVEL_WARN,
+  USMP_LOG_LEVEL_INFO,
+  USMP_LOG_LEVEL_DEBUG
+} usmp_log_level_t;
+
+void usmp_set_log_level(usmp_log_level_t level);
+usmp_log_level_t usmp_get_log_level(void);
+
+void usmp_log(char level, const char* tag, const char* msg);
+
 // Convenience macros ────────────────────────────────────────────────────────
-#define USMP_LOGI(tag, msg) usmp_port_log('I', tag, msg)
-#define USMP_LOGW(tag, msg) usmp_port_log('W', tag, msg)
-#define USMP_LOGE(tag, msg) usmp_port_log('E', tag, msg)
+#define USMP_LOGI(tag, msg) usmp_log('I', tag, msg)
+#define USMP_LOGW(tag, msg) usmp_log('W', tag, msg)
+#define USMP_LOGE(tag, msg) usmp_log('E', tag, msg)
 
 /*
  * USMP_LOGD — debug-level logging (verbose, disabled in production builds).
@@ -83,7 +96,7 @@ void usmp_port_log(char level, const char* tag, const char* msg);
 #ifdef USMP_DISABLE_DEBUG
 #define USMP_LOGD(tag, msg) ((void)0)
 #else
-#define USMP_LOGD(tag, msg) usmp_port_log('D', tag, msg)
+#define USMP_LOGD(tag, msg) usmp_log('D', tag, msg)
 #endif
 
 #ifdef __cplusplus
