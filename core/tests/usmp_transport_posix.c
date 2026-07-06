@@ -1,6 +1,7 @@
 #include "usmp_transport.h"
 #include "usmp_frame.h"
 #include "usmp_port.h"
+#include <stdbool.h>
 
 #include <stdio.h>
 #include <stdlib.h>
