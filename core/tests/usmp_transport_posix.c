@@ -1,11 +1,12 @@
-#include "usmp_transport.h"
-#include "usmp_frame.h"
-#include "usmp_port.h"
 #include <stdbool.h>
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "usmp_frame.h"
+#include "usmp_port.h"
+#include "usmp_transport.h"
+
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -17,14 +18,15 @@ static void socket_init(void) {
   WSAStartup(MAKEWORD(2, 2), &wsa);
 }
 #else
-#include <unistd.h>
 #include <arpa/inet.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
-#include <sys/socket.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <sys/time.h>
-#include <errno.h>
+#include <unistd.h>
+
 static void socket_init(void) {}
 #endif
 
@@ -95,7 +97,8 @@ static int posix_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   if (USMP_HEADER_SIZE + payload_len > max_len) return -1;
 
   while (received < USMP_HEADER_SIZE + payload_len) {
-    ssize_t n = recv(tcp->sock, (char*)buf + received, (int)(USMP_HEADER_SIZE + payload_len - received), 0);
+    ssize_t n =
+        recv(tcp->sock, (char*)buf + received, (int)(USMP_HEADER_SIZE + payload_len - received), 0);
     if (n <= 0) return -1;
     received += (size_t)n;
   }
@@ -121,7 +124,7 @@ static int posix_tcp_reconnect(usmp_transport_t* t) {
 static int posix_tcp_available(usmp_transport_t* t) {
   posix_tcp_ctx_t* tcp = (posix_tcp_ctx_t*)t->ctx;
   if (!tcp || tcp->sock < 0) return 0;
-  
+
   fd_set rfds;
   FD_ZERO(&rfds);
   FD_SET((unsigned int)tcp->sock, &rfds);
@@ -225,7 +228,8 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
 
   if (len >= 8) {
     type = data[3];
-    seq = data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+    seq =
+        data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
     expect_ack = true;
   }
 
@@ -257,13 +261,14 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
 
       if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
-        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) | ((uint32_t)temp[6] << 24);
+        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) |
+                           ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
-          return 0; // ACK matched
+          return 0;  // ACK matched
         }
         continue;
       }
-      
+
       // Buffer other data packet
       if (n >= USMP_HEADER_SIZE) {
         memcpy(udp->rx_buf, temp, (size_t)n);
@@ -271,8 +276,8 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
       }
     }
   }
-  
-  return -1; // timed out waiting for ACK
+
+  return -1;  // timed out waiting for ACK
 }
 
 static int posix_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
@@ -309,15 +314,32 @@ static int posix_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (temp[0] == 0xAC && temp[1] == 0xAC) continue;
 
     uint16_t length = (uint16_t)(temp[8] | (temp[9] << 8));
-    if (n != (ssize_t)(USMP_HEADER_SIZE + length)) continue; // enforce one-frame-per-datagram
+    if (n != (ssize_t)(USMP_HEADER_SIZE + length)) continue;  // enforce one-frame-per-datagram
 
     if ((size_t)n > max_len) return -1;
     memcpy(buf, temp, (size_t)n);
 
-    // Save info for UTACK sending on confirmation
-    udp->last_rx_type = temp[3];
-    udp->last_rx_seq = temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
-    udp->last_rx_seq_set = true;
+    uint8_t type = temp[3];
+    uint32_t seq =
+        temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
+
+    if (type < 5) {
+      // Send UTACK immediately for handshake packets (they are not authenticated via AES-GCM)
+      uint8_t utack[7];
+      utack[0] = 0xAC;
+      utack[1] = 0xAC;
+      utack[2] = type;
+      utack[3] = seq & 0xFF;
+      utack[4] = (seq >> 8) & 0xFF;
+      utack[5] = (seq >> 16) & 0xFF;
+      utack[6] = (seq >> 24) & 0xFF;
+      send(udp->sock, (const char*)utack, sizeof(utack), 0);
+    } else {
+      // Save info for UTACK sending on confirmation (post-handshake authenticated packets)
+      udp->last_rx_type = type;
+      udp->last_rx_seq = seq;
+      udp->last_rx_seq_set = true;
+    }
 
     return (int)n;
   }
