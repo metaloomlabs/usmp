@@ -1,9 +1,10 @@
-#include "usmp.h"
-#include "usmp_transport.h"
-#include "usmp_port.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "usmp.h"
+#include "usmp_port.h"
+#include "usmp_transport.h"
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -66,8 +67,9 @@ int main(int argc, char** argv) {
     }
     // Set custom device ID in the handshake context or let port mock handle it.
     // Wait, usmp_connect() resets ctx and copies from transport. Wait, does it reset device_id?
-    // Let's check: usmp_connect reset ctx to 0, then runs handshake, which gets device_id from usmp_port_get_device_id.
-    // Yes! usmp_connect gets device_id from port hooks. So to override the device ID, we can define a global override.
+    // Let's check: usmp_connect reset ctx to 0, then runs handshake, which gets device_id from
+    // usmp_port_get_device_id. Yes! usmp_connect gets device_id from port hooks. So to override the
+    // device ID, we can define a global override.
   }
 
   usmp_transport_t transport = {0};

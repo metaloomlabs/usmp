@@ -4,8 +4,9 @@
 
 #include "usmp_port.h"
 
-
 #ifdef _WIN32
+/* windows.h must precede wincrypt.h: wincrypt.h uses base Win32 types
+   (BOOL, DWORD, WINAPI, ...) that windows.h defines (S8). */
 #include <wincrypt.h>
 #include <windows.h>
 

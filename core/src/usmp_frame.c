@@ -71,7 +71,8 @@ int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
   pkt->magic = data[0] | (data[1] << 8);
   pkt->version = data[2];
   pkt->type = data[3];
-  pkt->seq = data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
+  pkt->seq =
+      data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
   pkt->length = data[8] | (data[9] << 8);
   pkt->crc = data[10] | (data[11] << 8);
 

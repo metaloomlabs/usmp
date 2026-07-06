@@ -1,9 +1,11 @@
-#include "golden_vectors.h"
-#include "usmp_frame.h"
-#include "usmp_crypto.h"
 #include <assert.h>
-#include <string.h>
 #include <stdio.h>
+#include <string.h>
+
+#include "golden_vectors.h"
+#include "mbedtls/md.h"
+#include "usmp_crypto.h"
+#include "usmp_frame.h"
 
 void test_golden(void) {
   printf("[TEST] Running golden vector tests...\n");
@@ -35,16 +37,17 @@ void test_golden(void) {
     uint8_t out[1024];
     size_t out_len = 0;
 
-    int ret = usmp_gcm_encrypt(c->key, c->expected_nonce, c->expected_aad, 10,
-                               c->plaintext, c->plaintext_len, out, &out_len);
+    int ret = usmp_gcm_encrypt(c->key, c->expected_nonce, c->expected_aad, 10, c->plaintext,
+                               c->plaintext_len, out, &out_len);
     assert(ret == 0);
     assert(out_len == c->expected_ciphertext_tag_len);
     assert(memcmp(out, c->expected_ciphertext_tag, out_len) == 0);
 
     uint8_t dec[1024];
     size_t dec_len = 0;
-    ret = usmp_gcm_decrypt(c->key, c->expected_nonce, c->expected_aad, 10,
-                           c->expected_ciphertext_tag, c->expected_ciphertext_tag_len, dec, &dec_len);
+    ret =
+        usmp_gcm_decrypt(c->key, c->expected_nonce, c->expected_aad, 10, c->expected_ciphertext_tag,
+                         c->expected_ciphertext_tag_len, dec, &dec_len);
     assert(ret == 0);
     assert(dec_len == c->plaintext_len);
     if (dec_len > 0) {
@@ -86,5 +89,23 @@ void test_golden(void) {
     assert(memcmp(parsed.payload, c->payload, c->payload_len) == 0);
   }
   printf("  - Frame building/parsing cases passed (%zu)\n", frame_cases_count);
+
+  // 5. S3 UTACK-MAC golden vector. The 8-byte truncated HMAC-SHA256 over a UTACK's
+  //    7-byte header must match the Python stack byte-for-byte (see the same vector in
+  //    sdk/python tests, test_udp_utack_authentication_s3), or C<->Python UDP ACKs break.
+  {
+    uint8_t key[32];
+    for (int i = 0; i < 32; i++) key[i] = (uint8_t)(i + 1);
+    const uint8_t header[7] = {0xAC, 0xAC, 0x05, 0x07, 0x00, 0x00, 0x00};
+    const uint8_t expected_mac[8] = {0x40, 0x79, 0xB9, 0x59, 0x9A, 0x16, 0x0B, 0x87};
+
+    uint8_t full[32];
+    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    assert(info != NULL);
+    assert(mbedtls_md_hmac(info, key, 32, header, sizeof(header), full) == 0);
+    assert(memcmp(full, expected_mac, 8) == 0);
+  }
+  printf("  - S3 UTACK-MAC golden vector passed\n");
+
   printf("[TEST] Golden vector tests completed successfully!\n");
 }

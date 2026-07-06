@@ -48,6 +48,11 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
   memcpy(ctx->tx_key, hs.tx_key, USMP_SESSION_KEY_LEN);
   memcpy(ctx->rx_key, hs.rx_key, USMP_SESSION_KEY_LEN);
+  /* S3: hand the derived keys to the transport so session-phase UTACKs are
+     authenticated. Synchronous client — keys are set before any session I/O. */
+  if (ctx->transport.set_session_keys) {
+    ctx->transport.set_session_keys(&ctx->transport, ctx->tx_key, ctx->rx_key);
+  }
   ctx->established = true;
   ctx->tx_seq = 0;
   ctx->rx_seq = 0;

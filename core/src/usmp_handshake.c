@@ -20,9 +20,9 @@ static const char* TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
 
-static int derive_session_keys(const uint8_t* shared_secret, size_t secret_len, const uint8_t* nonce,
-                               size_t nonce_len, const uint8_t* pub_c, const uint8_t* pub_s,
-                               uint8_t* out_c2s, uint8_t* out_s2c) {
+static int derive_session_keys(const uint8_t* shared_secret, size_t secret_len,
+                               const uint8_t* nonce, size_t nonce_len, const uint8_t* pub_c,
+                               const uint8_t* pub_s, uint8_t* out_c2s, uint8_t* out_s2c) {
   const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (!md) return -1;
 
@@ -267,8 +267,8 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   }
 
   // Derive directional session keys ────────────────────────────────────────
-  if (derive_session_keys(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s,
-                          k_c2s, k_s2c) != 0) {
+  if (derive_session_keys(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s, k_c2s,
+                          k_s2c) != 0) {
     USMP_LOGE(TAG, "HKDF failed");
     goto cleanup;
   }

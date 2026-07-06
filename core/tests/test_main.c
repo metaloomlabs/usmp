@@ -126,6 +126,7 @@ static void loopback_init(usmp_transport_t* t, loopback_ctx_t* ctx) {
   t->available = loopback_available;
   t->destroy = loopback_destroy;
   t->confirm_authenticated = NULL;
+  t->set_session_keys = NULL;
   t->ctx = ctx;
 }
 

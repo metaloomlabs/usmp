@@ -3,15 +3,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mbedtls/constant_time.h"
+#include "mbedtls/md.h"
 #include "usmp_frame.h"
 #include "usmp_port.h"
 #include "usmp_transport.h"
 
-
 #ifdef _WIN32
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#define close closesocket
+// Dedicated socket-close macro. A blanket `#define close closesocket` would also rewrite
+// the `t->close` struct-member assignments below into `t->closesocket` and break the build.
+#define usmp_sock_close(s) closesocket(s)
 typedef int socklen_t;
 static void socket_init(void) {
   WSADATA wsa;
@@ -27,6 +30,7 @@ static void socket_init(void) {
 #include <sys/time.h>
 #include <unistd.h>
 
+#define usmp_sock_close(s) close(s)
 static void socket_init(void) {}
 #endif
 
@@ -57,12 +61,12 @@ static int tcp_dial(posix_tcp_ctx_t* tcp) {
   addr.sin_port = htons((uint16_t)tcp->port);
 
   if (inet_pton(AF_INET, tcp->server_ip, &addr.sin_addr) != 1) {
-    close(sock);
+    usmp_sock_close(sock);
     return -1;
   }
 
   if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-    close(sock);
+    usmp_sock_close(sock);
     return -1;
   }
 
@@ -109,7 +113,7 @@ static int posix_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 static void posix_tcp_close(usmp_transport_t* t) {
   posix_tcp_ctx_t* tcp = (posix_tcp_ctx_t*)t->ctx;
   if (tcp && tcp->sock >= 0) {
-    close(tcp->sock);
+    usmp_sock_close(tcp->sock);
     tcp->sock = -1;
   }
 }
@@ -161,6 +165,7 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->available = posix_tcp_available;
   t->destroy = posix_tcp_destroy;
   t->confirm_authenticated = NULL;
+  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
   t->ctx = tcp;
 
   return 0;
@@ -172,6 +177,12 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
 
 #define UTACK_MAGIC 0xACAC
 
+// S3: session-phase UTACKs (frame type >= 5) carry an 8-byte truncated HMAC-SHA256 over
+// their 7-byte header so an off-path attacker cannot forge an ACK. Handshake-phase UTACKs
+// (types 1-4) predate the session keys and stay unauthenticated.
+#define UTACK_HEADER_LEN 7
+#define UTACK_MAC_LEN 8
+
 typedef struct {
   int sock;
   char server_ip[64];
@@ -181,7 +192,27 @@ typedef struct {
   uint32_t last_rx_seq;
   bool last_rx_seq_set;
   uint8_t last_rx_type;
+  uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
+  uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
+  bool keys_set;
 } posix_udp_ctx_t;
+
+// S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
+static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
+  uint8_t full[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_hmac(info, key, 32, header, UTACK_HEADER_LEN, full);
+  memcpy(out, full, UTACK_MAC_LEN);
+}
+
+static void posix_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
+                                       const uint8_t* rx_key) {
+  posix_udp_ctx_t* udp = (posix_udp_ctx_t*)t->ctx;
+  if (!udp) return;
+  memcpy(udp->tx_key, tx_key, 32);
+  memcpy(udp->rx_key, rx_key, 32);
+  udp->keys_set = true;
+}
 
 static int udp_dial(posix_udp_ctx_t* udp) {
   int sock = (int)socket(AF_INET, SOCK_DGRAM, 0);
@@ -197,12 +228,12 @@ static int udp_dial(posix_udp_ctx_t* udp) {
   addr.sin_port = htons((uint16_t)udp->port);
 
   if (inet_pton(AF_INET, udp->server_ip, &addr.sin_addr) != 1) {
-    close(sock);
+    usmp_sock_close(sock);
     return -1;
   }
 
   if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-    close(sock);
+    usmp_sock_close(sock);
     return -1;
   }
 
@@ -259,12 +290,20 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
         return -1;
       }
 
-      if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
+      if (n >= UTACK_HEADER_LEN && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
         uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) |
                            ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
-          return 0;  // ACK matched
+          // S3: a session-phase ACK (type >= 5) must carry a valid MAC keyed by tx_key;
+          // drop forged or unauthenticated ACKs so an off-path attacker can't spoof one.
+          if (type >= 5) {
+            if (!udp->keys_set || n < UTACK_HEADER_LEN + UTACK_MAC_LEN) continue;
+            uint8_t expected[UTACK_MAC_LEN];
+            utack_mac(udp->tx_key, temp, expected);
+            if (mbedtls_ct_memcmp(expected, temp + UTACK_HEADER_LEN, UTACK_MAC_LEN) != 0) continue;
+          }
+          return 0;  // ACK matched (and authenticated for session frames)
         }
         continue;
       }
@@ -348,7 +387,7 @@ static int posix_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 static void posix_udp_close(usmp_transport_t* t) {
   posix_udp_ctx_t* udp = (posix_udp_ctx_t*)t->ctx;
   if (udp && udp->sock >= 0) {
-    close(udp->sock);
+    usmp_sock_close(udp->sock);
     udp->sock = -1;
   }
 }
@@ -378,7 +417,7 @@ static void posix_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
   if (!udp || udp->sock < 0) return;
   if (!udp->last_rx_seq_set || udp->last_rx_seq != seq) return;
 
-  uint8_t utack[7];
+  uint8_t utack[UTACK_HEADER_LEN + UTACK_MAC_LEN];
   utack[0] = 0xAC;
   utack[1] = 0xAC;
   utack[2] = udp->last_rx_type;
@@ -387,7 +426,15 @@ static void posix_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
   utack[5] = (seq >> 16) & 0xFF;
   utack[6] = (seq >> 24) & 0xFF;
 
-  send(udp->sock, (const char*)utack, sizeof(utack), 0);
+  // S3: confirm_authenticated only fires for session frames (type >= 5), so authenticate
+  // the ACK with rx_key (the key this frame was decrypted with).
+  size_t utack_len = UTACK_HEADER_LEN;
+  if (udp->keys_set) {
+    utack_mac(udp->rx_key, utack, utack + UTACK_HEADER_LEN);
+    utack_len = UTACK_HEADER_LEN + UTACK_MAC_LEN;
+  }
+
+  send(udp->sock, (const char*)utack, (int)utack_len, 0);
   udp->last_rx_seq_set = false;
 }
 
@@ -419,6 +466,7 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   t->reconnect = posix_udp_reconnect;
   t->available = posix_udp_available;
   t->confirm_authenticated = posix_udp_confirm_authenticated;
+  t->set_session_keys = posix_udp_set_session_keys;
   t->destroy = posix_udp_destroy;
   t->ctx = udp;
 
