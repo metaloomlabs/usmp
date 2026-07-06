@@ -10,6 +10,7 @@
 #define usmp_recv arduino_usmp_recv
 #define usmp_ping arduino_usmp_ping
 #define usmp_keepalive_tick arduino_usmp_keepalive_tick
+#define usmp_is_connected arduino_usmp_is_connected
 
 #include "../../ports/usmp-arduino/src/usmp_api.h"
 
@@ -22,6 +23,7 @@
 #undef usmp_recv
 #undef usmp_ping
 #undef usmp_keepalive_tick
+#undef usmp_is_connected
 
 #include "usmp.h"
 #include "usmp_frame.h"
@@ -395,7 +397,6 @@ void test_replay_window(void) {
     uint32_t saved_tx_seq = client_ctx.tx_seq;
     client_ctx.tx_seq = 0;
 
-    size_t saved_write = loopback.write_pos;
     uint8_t ancient[] = "ancient";
     int ret = usmp_send(&client_ctx, ancient, sizeof(ancient));
     assert(ret == 0);
