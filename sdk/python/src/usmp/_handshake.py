@@ -11,10 +11,10 @@ from .errors import AuthError, HandshakeError
 from .types import (
     USMP_DEVICE_ID_LEN,
     USMP_HMAC_LEN,
+    USMP_MAGIC,
     USMP_NONCE_LEN,
     USMP_PUB_KEY_LEN,
     USMP_SESSION_ID_LEN,
-    USMP_MAGIC,
     USMP_VERSION,
     PacketType,
     SessionInfo,
@@ -81,9 +81,11 @@ async def server_handshake(
         elif isinstance(psk, bytes):
             resolved_psk = psk
         elif callable(psk):
-            resolved_psk = psk(device_id)
-            if asyncio.iscoroutine(resolved_psk):
-                resolved_psk = await resolved_psk
+            res = psk(device_id)
+            if isinstance(res, bytes):
+                resolved_psk = res
+            else:
+                resolved_psk = await res
         else:
             raise HandshakeError("Invalid PSK type")
 
@@ -207,7 +209,7 @@ async def client_handshake(
         cookie = frame.payload[:16]
         # Resend HELLO with cookie appended
         await write_frame(writer, PacketType.HELLO, device_id + pub_c + cookie)
-        
+
         # Read the actual CHALLENGE
         try:
             frame = await read_frame(reader, verify_crc=False)

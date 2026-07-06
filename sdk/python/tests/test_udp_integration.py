@@ -393,8 +393,9 @@ async def test_udp_concurrent_handshakes_limit():
 @pytest.mark.asyncio
 async def test_udp_invalid_length_discard():
     """Verify that datagrams with size mismatch compared to header length are discarded."""
-    from usmp.transport.udp import UDPStream
     from unittest.mock import Mock
+
+    from usmp.transport.udp import UDPStream
 
     mock_transport = Mock()
     stream = UDPStream(mock_transport, ("127.0.0.1", 1234))
@@ -437,7 +438,7 @@ async def test_udp_malformed_frame_robustness():
         # Manually feed an invalid frame (bad version) to client stream directly to test robustness
         # client's own transport/stream should drop it on decrypt/parse error and keep running
         stream = client._session._reader
-        
+
         # Craft a fake frame: magic=0xABCD, version=99 (invalid), type=5, seq=999, len=10, crc=0
         bad_frame = b"\xCD\xAB\x63\x05\xE7\x03\x00\x00\x0A\x00\x00\x00" + b"A"*10
         stream.feed_packet(bad_frame)
@@ -484,9 +485,10 @@ async def test_udp_sliding_replay_window():
         client_addr = client_addrs[0]
 
         import struct
+
         from usmp._crypto import encrypt
-        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
         from usmp._frame import encode_frame
+        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
 
         def make_packet(seq, payload):
             nonce = struct.pack("<I", seq) + session._info.session_id[:8]
@@ -539,7 +541,6 @@ async def test_udp_sliding_replay_window():
 async def test_udp_fragment_order_enforcement():
     """Verify that out-of-order fragments of a single fragmented message are rejected (B2)."""
     port = _free_port()
-    received = []
     errors = []
 
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
@@ -563,9 +564,10 @@ async def test_udp_fragment_order_enforcement():
         client_addr = client_addrs[0]
 
         import struct
+
         from usmp._crypto import encrypt
-        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
         from usmp._frame import encode_frame
+        from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
 
         def make_packet(seq, packet_type, payload):
             nonce = struct.pack("<I", seq) + session._info.session_id[:8]

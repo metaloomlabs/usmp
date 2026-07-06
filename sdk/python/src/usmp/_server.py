@@ -71,7 +71,7 @@ class USMPServer:
         self._on_timeout = on_timeout
         self._max_connections = max_connections
         self._max_connections_per_ip = max_connections_per_ip
-        self._tcp_connections = {}
+        self._tcp_connections: dict[str, int] = {}
         self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
         if self._protocol not in ("tcp", "udp"):
@@ -80,7 +80,6 @@ class USMPServer:
         self._udp_handshakes: dict[tuple[str, int], "UDPStream"] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
         # Ephemeral cookie secret for UDP return-routability
-        import os
         self._cookie_secret = os.urandom(32)
         # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
         # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
@@ -315,7 +314,11 @@ class USMPServer:
         # Enforce global connection limit (L1)
         global_count = sum(self._tcp_connections.values())
         if global_count >= self._max_connections:
-            logger.warning("Global TCP connection limit reached (%d). Rejecting %s", self._max_connections, ip)
+            logger.warning(
+                "Global TCP connection limit reached (%d). Rejecting %s",
+                self._max_connections,
+                ip,
+            )
             writer.close()
             try:
                 await writer.wait_closed()
@@ -326,7 +329,11 @@ class USMPServer:
         # Enforce per-IP connection limit (L1)
         ip_count = self._tcp_connections.get(ip, 0)
         if ip_count >= self._max_connections_per_ip:
-            logger.warning("Per-IP TCP connection limit reached for %s (%d). Rejecting", ip, self._max_connections_per_ip)
+            logger.warning(
+                "Per-IP TCP connection limit reached for %s (%d). Rejecting",
+                ip,
+                self._max_connections_per_ip,
+            )
             writer.close()
             try:
                 await writer.wait_closed()

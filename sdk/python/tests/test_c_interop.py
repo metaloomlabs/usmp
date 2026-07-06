@@ -1,10 +1,12 @@
 import asyncio
-import os
-import subprocess
-import shutil
-import pytest
 import binascii
-from usmp import USMPServer, USMPSession, USMPProtocol
+import os
+import shutil
+import subprocess
+
+import pytest
+
+from usmp import USMPProtocol, USMPServer, USMPSession
 
 # Resolve base paths
 REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -17,7 +19,7 @@ HAS_MBEDTLS = True # We assume it is available in CI, otherwise compilation fail
 def build_c_client():
     if not HAS_CMAKE:
         pytest.skip("cmake not found, skipping C interop test")
-    
+
     os.makedirs(BUILD_DIR, exist_ok=True)
     try:
         # Run CMake config
@@ -50,7 +52,7 @@ async def test_tcp_c_interop(c_client_path):
     port = 9110
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
     psk_hex = binascii.hexlify(psk).decode('ascii')
-    
+
     client_connected_event = asyncio.Event()
     test_completed_event = asyncio.Event()
 
@@ -63,17 +65,17 @@ async def test_tcp_c_interop(c_client_path):
             # 1. Expect "hello from C client"
             msg1 = await session.recv()
             assert msg1 == b"hello from C client"
-            
+
             # Respond
             await session.send(b"echo:hello from C client")
 
             # 2. Expect 500-byte message
             msg2 = await session.recv()
             assert len(msg2) == 500
-            
+
             # Echo it back
             await session.send(msg2)
-            
+
             test_completed_event.set()
         except Exception as e:
             print("Server session handler failed:", e)
@@ -92,18 +94,18 @@ async def test_tcp_c_interop(c_client_path):
             "--protocol", "tcp",
             "--psk", psk_hex
         ]
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        
+
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-        
+
         print("C Client stdout:", stdout.decode())
         print("C Client stderr:", stderr.decode())
-        
+
         assert proc.returncode == 0
         await asyncio.wait_for(test_completed_event.wait(), timeout=10.0)
     finally:
@@ -118,7 +120,7 @@ async def test_udp_c_interop(c_client_path):
     port = 9111
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
     psk_hex = binascii.hexlify(psk).decode('ascii')
-    
+
     client_connected_event = asyncio.Event()
     test_completed_event = asyncio.Event()
 
@@ -131,17 +133,17 @@ async def test_udp_c_interop(c_client_path):
             # 1. Expect "hello from C client"
             msg1 = await session.recv()
             assert msg1 == b"hello from C client"
-            
+
             # Respond
             await session.send(b"echo:hello from C client")
 
             # 2. Expect 500-byte message
             msg2 = await session.recv()
             assert len(msg2) == 500
-            
+
             # Echo it back
             await session.send(msg2)
-            
+
             test_completed_event.set()
         except Exception as e:
             print("Server session handler failed:", e)
@@ -160,18 +162,18 @@ async def test_udp_c_interop(c_client_path):
             "--protocol", "udp",
             "--psk", psk_hex
         ]
-        
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        
+
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
-        
+
         print("C Client stdout:", stdout.decode())
         print("C Client stderr:", stderr.decode())
-        
+
         assert proc.returncode == 0
         await asyncio.wait_for(test_completed_event.wait(), timeout=10.0)
     finally:

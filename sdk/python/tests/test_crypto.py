@@ -184,12 +184,13 @@ def test_decrypt_fails_on_wrong_seq():
 
 
 def test_golden_vectors():
+    import binascii
     import json
     import os
-    import binascii
     import struct
+
     from usmp._frame import crc16, encode_frame
-    
+
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
     json_path = os.path.join(base_dir, "tests", "golden_vectors.json")
     with open(json_path, "r") as f:
@@ -223,7 +224,7 @@ def test_golden_vectors():
         key = binascii.unhexlify(case["key"])
         plaintext = binascii.unhexlify(case["plaintext"])
         nonce = binascii.unhexlify(case["expected_nonce"])
-        
+
         # Encrypt
         ct = encrypt(
             key=key,

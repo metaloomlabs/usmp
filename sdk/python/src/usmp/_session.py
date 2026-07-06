@@ -131,7 +131,10 @@ class USMPSession:
                     if frame.seq > self._info.rx_seq:
                         shift = frame.seq - self._info.rx_seq
                         if shift < 64:
-                            self._info.rx_window_bitmap = ((self._info.rx_window_bitmap << shift) & 0xFFFFFFFFFFFFFFFF) | 1
+                            self._info.rx_window_bitmap = (
+                                (self._info.rx_window_bitmap << shift)
+                                & 0xFFFFFFFFFFFFFFFF
+                            ) | 1
                         else:
                             self._info.rx_window_bitmap = 1
                         self._info.rx_seq = frame.seq
@@ -139,7 +142,8 @@ class USMPSession:
                         offset = self._info.rx_seq - frame.seq
                         self._info.rx_window_bitmap |= (1 << offset)
 
-                    confirm(frame.seq)
+                    if confirm is not None:
+                        confirm(frame.seq)
                 else:
                     if frame.seq != self._info.rx_seq:
                         raise SequenceError(
