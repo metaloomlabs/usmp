@@ -1,14 +1,18 @@
-#include "usmp_port.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "usmp_port.h"
+
+
 #ifdef _WIN32
-#include <windows.h>
 #include <wincrypt.h>
+#include <windows.h>
+
 #else
-#include <unistd.h>
 #include <time.h>
+#include <unistd.h>
+
 #endif
 
 int usmp_port_get_device_id(uint8_t* out, size_t len) {
@@ -39,13 +43,9 @@ int usmp_port_random(uint8_t* out, size_t len) {
   return 0;
 }
 
-void usmp_port_delay_ms(uint32_t ms) {
-  Sleep(ms);
-}
+void usmp_port_delay_ms(uint32_t ms) { Sleep(ms); }
 
-uint32_t usmp_port_millis(void) {
-  return GetTickCount();
-}
+uint32_t usmp_port_millis(void) { return GetTickCount(); }
 #else
 int usmp_port_random(uint8_t* out, size_t len) {
   FILE* f = fopen("/dev/urandom", "rb");
@@ -69,6 +69,34 @@ uint32_t usmp_port_millis(void) {
 }
 #endif
 
+char g_last_log_level = 0;
+char g_last_log_tag[64] = {0};
+char g_last_log_msg[256] = {0};
+char g_last_formatted_log[512] = {0};
+
 void usmp_port_log(char level, const char* tag, const char* msg) {
-  printf("[%c][%s] %s\n", level, tag, msg);
+  g_last_log_level = level;
+  strncpy(g_last_log_tag, tag, sizeof(g_last_log_tag) - 1);
+  g_last_log_tag[sizeof(g_last_log_tag) - 1] = '\0';
+  strncpy(g_last_log_msg, msg, sizeof(g_last_log_msg) - 1);
+  g_last_log_msg[sizeof(g_last_log_msg) - 1] = '\0';
+
+  if (level == 'E') {
+    char lower_tag[64];
+    size_t i;
+    for (i = 0; i < sizeof(lower_tag) - 1 && tag[i] != '\0'; i++) {
+      char c = tag[i];
+      if (c >= 'A' && c <= 'Z') {
+        lower_tag[i] = (char)(c + ('a' - 'A'));
+      } else {
+        lower_tag[i] = c;
+      }
+    }
+    lower_tag[i] = '\0';
+    snprintf(g_last_formatted_log, sizeof(g_last_formatted_log), "[usmp] [%s]: %s", lower_tag, msg);
+    printf("%s\n", g_last_formatted_log);
+  } else {
+    snprintf(g_last_formatted_log, sizeof(g_last_formatted_log), "[%c][%s] %s", level, tag, msg);
+    printf("%s\n", g_last_formatted_log);
+  }
 }

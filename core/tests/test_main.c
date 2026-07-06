@@ -25,31 +25,44 @@
 #undef usmp_keepalive_tick
 #undef usmp_is_connected
 
-#include "usmp.h"
-#include "usmp_frame.h"
-#include "usmp_crypto.h"
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
+
+#include "usmp.h"
+#include "usmp_crypto.h"
+#include "usmp_frame.h"
 
 // Assert layout compatibility between core and Arduino usmp_t structures (A1)
 // All 13 fields must have identical offsets to ensure binary compatibility.
-_Static_assert(sizeof(arduino_usmp_t) == sizeof(usmp_t), "usmp_t size mismatch between Core and Arduino!");
-_Static_assert(offsetof(arduino_usmp_t, device_id) == offsetof(usmp_t, device_id), "device_id offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, session_id) == offsetof(usmp_t, session_id), "session_id offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, tx_key) == offsetof(usmp_t, tx_key), "tx_key offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, rx_key) == offsetof(usmp_t, rx_key), "rx_key offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, established) == offsetof(usmp_t, established), "established offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, transport) == offsetof(usmp_t, transport), "transport offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, tx_seq) == offsetof(usmp_t, tx_seq), "tx_seq offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, rx_seq) == offsetof(usmp_t, rx_seq), "rx_seq offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, keepalive_ms) == offsetof(usmp_t, keepalive_ms), "keepalive_ms offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, last_tx_ms) == offsetof(usmp_t, last_tx_ms), "last_tx_ms offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, rx_window_bitmap) == offsetof(usmp_t, rx_window_bitmap), "rx_window_bitmap offset mismatch!");
+_Static_assert(sizeof(arduino_usmp_t) == sizeof(usmp_t),
+               "usmp_t size mismatch between Core and Arduino!");
+_Static_assert(offsetof(arduino_usmp_t, device_id) == offsetof(usmp_t, device_id),
+               "device_id offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, session_id) == offsetof(usmp_t, session_id),
+               "session_id offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, tx_key) == offsetof(usmp_t, tx_key),
+               "tx_key offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, rx_key) == offsetof(usmp_t, rx_key),
+               "rx_key offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, established) == offsetof(usmp_t, established),
+               "established offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, transport) == offsetof(usmp_t, transport),
+               "transport offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, tx_seq) == offsetof(usmp_t, tx_seq),
+               "tx_seq offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, rx_seq) == offsetof(usmp_t, rx_seq),
+               "rx_seq offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, keepalive_ms) == offsetof(usmp_t, keepalive_ms),
+               "keepalive_ms offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, last_tx_ms) == offsetof(usmp_t, last_tx_ms),
+               "last_tx_ms offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, rx_window_bitmap) == offsetof(usmp_t, rx_window_bitmap),
+               "rx_window_bitmap offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, psk) == offsetof(usmp_t, psk), "psk offset mismatch!");
-_Static_assert(offsetof(arduino_usmp_t, psk_len) == offsetof(usmp_t, psk_len), "psk_len offset mismatch!");
-
+_Static_assert(offsetof(arduino_usmp_t, psk_len) == offsetof(usmp_t, psk_len),
+               "psk_len offset mismatch!");
 
 // Forward declaration from test_golden.c
 void test_golden(void);
@@ -74,7 +87,7 @@ static int loopback_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
 static int loopback_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   loopback_ctx_t* ctx = (loopback_ctx_t*)t->ctx;
   if (ctx->read_pos >= ctx->write_pos) {
-    return t->confirm_authenticated ? 0 : -1; // return 0 (timeout/no-data) for UDP, -1 for TCP
+    return t->confirm_authenticated ? 0 : -1;  // return 0 (timeout/no-data) for UDP, -1 for TCP
   }
 
   // Parse header to get length
@@ -90,9 +103,7 @@ static int loopback_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   return (int)total_frame_len;
 }
 
-static void loopback_close(usmp_transport_t* t) {
-  (void)t;
-}
+static void loopback_close(usmp_transport_t* t) { (void)t; }
 
 static int loopback_reconnect(usmp_transport_t* t) {
   (void)t;
@@ -104,9 +115,7 @@ static int loopback_available(usmp_transport_t* t) {
   return (ctx->write_pos > ctx->read_pos) ? 1 : 0;
 }
 
-static void loopback_destroy(usmp_transport_t* t) {
-  (void)t;
-}
+static void loopback_destroy(usmp_transport_t* t) { (void)t; }
 
 static void loopback_init(usmp_transport_t* t, loopback_ctx_t* ctx) {
   memset(ctx, 0, sizeof(loopback_ctx_t));
@@ -121,9 +130,8 @@ static void loopback_init(usmp_transport_t* t, loopback_ctx_t* ctx) {
 }
 
 // ── Helpers: set up a matched client/server pair on a shared loopback ─────
-static void setup_session_pair(usmp_t* client, usmp_t* server,
-                               usmp_transport_t* c_tr, usmp_transport_t* s_tr,
-                               loopback_ctx_t* lb) {
+static void setup_session_pair(usmp_t* client, usmp_t* server, usmp_transport_t* c_tr,
+                               usmp_transport_t* s_tr, loopback_ctx_t* lb) {
   memset(client, 0, sizeof(*client));
   memset(server, 0, sizeof(*server));
 
@@ -198,7 +206,7 @@ void test_malformed_frames(void) {
   {
     uint8_t bad_magic[USMP_HEADER_SIZE] = {0};
     bad_magic[0] = 0xFF;
-    bad_magic[1] = 0xFF; // magic = 0xFFFF, not 0xABCD
+    bad_magic[1] = 0xFF;  // magic = 0xFFFF, not 0xABCD
     bad_magic[2] = USMP_VERSION;
     bad_magic[3] = USMP_TYPE_DATA;
     // length = 0, CRC will be wrong but magic check is first
@@ -251,7 +259,7 @@ void test_malformed_frames(void) {
     short_pkt.version = USMP_VERSION;
     short_pkt.type = USMP_TYPE_DATA;
     short_pkt.seq = 0;
-    short_pkt.length = 10; // declare 10 payload bytes
+    short_pkt.length = 10;  // declare 10 payload bytes
     memset(short_pkt.payload, 0xAA, 10);
 
     uint8_t frame[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
@@ -375,7 +383,7 @@ void test_replay_window(void) {
     // the replay window bitmap, drop it, and loop. After max attempts it
     // returns 0 (no data).
     recv_len = usmp_recv(&server_ctx, recv_buf, sizeof(recv_buf));
-    assert(recv_len <= 0); // dropped or no-data, never a successful decode
+    assert(recv_len <= 0);  // dropped or no-data, never a successful decode
     printf("  - Replay of message #1 correctly dropped\n");
   }
 
@@ -402,7 +410,7 @@ void test_replay_window(void) {
     uint8_t ancient[] = "ancient";
     int ret = usmp_send(&client_ctx, ancient, sizeof(ancient));
     assert(ret == 0);
-    client_ctx.tx_seq = saved_tx_seq; // restore
+    client_ctx.tx_seq = saved_tx_seq;  // restore
 
     // Try to receive — should be dropped as too old
     uint8_t recv_buf[64];
@@ -412,6 +420,81 @@ void test_replay_window(void) {
   }
 
   printf("[TEST] UDP sliding replay window tests passed!\n");
+}
+
+extern char g_last_log_level;
+extern char g_last_log_tag[64];
+extern char g_last_log_msg[256];
+extern char g_last_formatted_log[512];
+
+void test_logging(void) {
+  printf("[TEST] Running logging tests...\n");
+
+  // 1. Verify default log level is ERROR
+  assert(usmp_get_log_level() == USMP_LOG_LEVEL_ERROR);
+
+  // Reset captured variables
+  g_last_log_level = 0;
+  g_last_log_tag[0] = '\0';
+  g_last_log_msg[0] = '\0';
+  g_last_formatted_log[0] = '\0';
+
+  // 2. Logging below level ERROR (e.g. INFO) should be ignored
+  USMP_LOGI("SOME_TAG", "Info message");
+  assert(g_last_log_level == 0);  // ignored
+
+  USMP_LOGD("SOME_TAG", "Debug message");
+  assert(g_last_log_level == 0);  // ignored
+
+  USMP_LOGW("SOME_TAG", "Warning message");
+  assert(g_last_log_level == 0);  // ignored
+
+  // 3. Logging at ERROR level should be printed and formatted
+  USMP_LOGE("TEST_TAG", "Error occurred!");
+  assert(g_last_log_level == 'E');
+  assert(strcmp(g_last_log_tag, "TEST_TAG") == 0);
+  assert(strcmp(g_last_log_msg, "Error occurred!") == 0);
+  assert(strcmp(g_last_formatted_log, "[usmp] [test_tag]: Error occurred!") == 0);
+
+  // Reset capture
+  g_last_log_level = 0;
+
+  // 4. Change log level to INFO
+  usmp_set_log_level(USMP_LOG_LEVEL_INFO);
+  assert(usmp_get_log_level() == USMP_LOG_LEVEL_INFO);
+
+  // Now INFO and WARN should be logged (formatted standard way)
+  USMP_LOGI("TAG_INFO", "Info msg");
+  assert(g_last_log_level == 'I');
+  assert(strcmp(g_last_log_tag, "TAG_INFO") == 0);
+  assert(strcmp(g_last_formatted_log, "[I][TAG_INFO] Info msg") == 0);
+
+  g_last_log_level = 0;
+  USMP_LOGW("TAG_WARN", "Warn msg");
+  assert(g_last_log_level == 'W');
+  assert(strcmp(g_last_formatted_log, "[W][TAG_WARN] Warn msg") == 0);
+
+  // DEBUG should still be ignored
+  g_last_log_level = 0;
+  USMP_LOGD("TAG_DEBUG", "Debug msg");
+  assert(g_last_log_level == 0);
+
+  // 5. Change log level to DEBUG
+  usmp_set_log_level(USMP_LOG_LEVEL_DEBUG);
+  USMP_LOGD("TAG_DEBUG", "Debug msg");
+  assert(g_last_log_level == 'D');
+  assert(strcmp(g_last_formatted_log, "[D][TAG_DEBUG] Debug msg") == 0);
+
+  // 6. Change log level to NONE
+  usmp_set_log_level(USMP_LOG_LEVEL_NONE);
+  g_last_log_level = 0;
+  USMP_LOGE("TEST_TAG", "Error!");
+  assert(g_last_log_level == 0);  // no log
+
+  // Reset back to default
+  usmp_set_log_level(USMP_LOG_LEVEL_ERROR);
+
+  printf("  - Logging tests passed!\n");
 }
 
 int main(void) {
@@ -424,6 +507,7 @@ int main(void) {
   test_malformed_frames();
   test_fragment_ordering();
   test_replay_window();
+  test_logging();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;
