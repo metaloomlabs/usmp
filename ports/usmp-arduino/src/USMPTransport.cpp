@@ -2,7 +2,9 @@
 
 #include <string.h>
 
+extern "C" {
 #include "mbedtls/constant_time.h"
+}
 #include "mbedtls/md.h"
 
 // S3: session-phase UTACKs (frame type >= 5) carry an 8-byte truncated HMAC-SHA256 over
@@ -256,8 +258,11 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     ctx->udp.endPacket();
 
     // Duplicate detection
-    if (type < 5) {
-      if (ctx->last_rx_type > 0 && type <= ctx->last_rx_type) {
+    if (type < 5 || type == 0x0A) {
+      bool is_duplicate = (type == ctx->last_rx_type) ||
+                          (type == 0x0A && ctx->last_rx_type > 0) ||
+                          (type == 2 && ctx->last_rx_type == 4);
+      if (is_duplicate) {
         continue;  // Discard duplicate/old handshake packet
       }
       ctx->last_rx_type = type;

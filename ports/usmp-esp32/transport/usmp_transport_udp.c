@@ -209,8 +209,11 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     send(udp->sock, utack, utack_len, 0);
 
     // Duplicate detection
-    if (type < 5) {
-      if (udp->last_rx_type > 0 && type <= udp->last_rx_type) {
+    if (type < 5 || type == 0x0A) {
+      bool is_duplicate = (type == udp->last_rx_type) ||
+                          (type == 0x0A && udp->last_rx_type > 0) ||
+                          (type == 2 && udp->last_rx_type == 4);
+      if (is_duplicate) {
         continue;  // Discard duplicate/old handshake packet
       }
       udp->last_rx_type = type;

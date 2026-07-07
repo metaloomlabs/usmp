@@ -127,9 +127,15 @@ class UDPStream:
             utack += self._utack_mac(self._rx_key, utack)
         self._transport.sendto(utack, self._remote_addr)
 
-        # Duplicate detection for handshake packets (types 1-4)
-        if type_val < 5:
-            if self._last_rx_type != -1 and type_val <= self._last_rx_type:
+        # Duplicate detection for handshake packets (types 1-4 and HELLO_RETRY)
+        if type_val < 5 or type_val == 0x0A:
+            is_duplicate = (
+                (type_val == self._last_rx_type)
+                or (type_val == 0x0A and self._last_rx_type != -1)
+                or (type_val == 2 and self._last_rx_type == 4)
+                or (self._is_server and self._last_rx_type != -1 and type_val <= self._last_rx_type)
+            )
+            if is_duplicate:
                 logger.debug(
                     "UDP Duplicate handshake packet discarded: type=%d (last_rx=%d)",
                     type_val,
