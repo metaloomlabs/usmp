@@ -17,7 +17,7 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Locate mbedtls
-find_package(MbedTLS)
+find_package(MbedTLS QUIET)
 if(NOT MbedTLS_FOUND)
     # Manual fallback for standard Linux installations (like apt-get libmbedtls-dev)
     find_path(MBEDTLS_INCLUDE_DIRS mbedtls/ssl.h)
