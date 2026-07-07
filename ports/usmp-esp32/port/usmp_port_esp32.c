@@ -37,7 +37,7 @@ void usmp_port_log(char level, const char* tag, const char* msg) {
       }
     }
     lower_tag[i] = '\0';
-    printf("[usmp] [%s]: %s\n", lower_tag, msg);
+    printf("[%s]: %s\n", lower_tag, msg);
     return;
   }
 

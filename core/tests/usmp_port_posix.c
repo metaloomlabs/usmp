@@ -7,8 +7,8 @@
 #ifdef _WIN32
 /* windows.h must precede wincrypt.h: wincrypt.h uses base Win32 types
    (BOOL, DWORD, WINAPI, ...) that windows.h defines (S8). */
-#include <wincrypt.h>
 #include <windows.h>
+#include <wincrypt.h>
 
 #else
 #include <time.h>
@@ -94,7 +94,7 @@ void usmp_port_log(char level, const char* tag, const char* msg) {
       }
     }
     lower_tag[i] = '\0';
-    snprintf(g_last_formatted_log, sizeof(g_last_formatted_log), "[usmp] [%s]: %s", lower_tag, msg);
+    snprintf(g_last_formatted_log, sizeof(g_last_formatted_log), "[%s]: %s", lower_tag, msg);
     printf("%s\n", g_last_formatted_log);
   } else {
     snprintf(g_last_formatted_log, sizeof(g_last_formatted_log), "[%c][%s] %s", level, tag, msg);

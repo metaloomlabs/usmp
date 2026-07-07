@@ -455,7 +455,7 @@ void test_logging(void) {
   assert(g_last_log_level == 'E');
   assert(strcmp(g_last_log_tag, "TEST_TAG") == 0);
   assert(strcmp(g_last_log_msg, "Error occurred!") == 0);
-  assert(strcmp(g_last_formatted_log, "[usmp] [test_tag]: Error occurred!") == 0);
+  assert(strcmp(g_last_formatted_log, "[test_tag]: Error occurred!") == 0);
 
   // Reset capture
   g_last_log_level = 0;
