@@ -99,10 +99,14 @@ static int arduino_tcp_available(usmp_transport_t* t) {
 
 bool USMPTCPTransport::connectWiFi() const {
   if (!_ssid) return true;  // WiFi managed externally — nothing to do
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(_ssid, _password);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 15000) return false;
+    if (millis() - start > 30000) return false;
     delay(500);
   }
   return true;
@@ -326,10 +330,14 @@ static void arduino_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_
 // USMPUDPTransport methods
 bool USMPUDPTransport::connectWiFi() const {
   if (!_ssid) return true;  // WiFi managed externally — nothing to do
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(_ssid, _password);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 15000) return false;
+    if (millis() - start > 30000) return false;
     delay(500);
   }
   return true;
