@@ -78,7 +78,7 @@ static int posix_tcp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
   posix_tcp_ctx_t* tcp = (posix_tcp_ctx_t*)t->ctx;
   size_t sent = 0;
   while (sent < len) {
-    ssize_t n = send(tcp->sock, (const char*)data + sent, (int)(len - sent), 0);
+    ssize_t n = send(tcp->sock, (const char*)data + sent, len - sent, 0);
     if (n < 0) return -1;
     sent += (size_t)n;
   }
@@ -91,18 +91,18 @@ static int posix_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   if (max_len < USMP_HEADER_SIZE) return -1;
   size_t received = 0;
   while (received < USMP_HEADER_SIZE) {
-    ssize_t n = recv(tcp->sock, (char*)buf + received, (int)(USMP_HEADER_SIZE - received), 0);
+    ssize_t n = recv(tcp->sock, (char*)buf + received, USMP_HEADER_SIZE - received, 0);
     if (n <= 0) return -1;
     received += (size_t)n;
   }
 
   uint16_t payload_len = (uint16_t)(buf[8] | (buf[9] << 8));
   if (payload_len > USMP_MAX_PAYLOAD) return -1;
-  if (USMP_HEADER_SIZE + payload_len > max_len) return -1;
+  if ((size_t)USMP_HEADER_SIZE + payload_len > max_len) return -1;
 
-  while (received < USMP_HEADER_SIZE + payload_len) {
+  while (received < (size_t)USMP_HEADER_SIZE + payload_len) {
     ssize_t n =
-        recv(tcp->sock, (char*)buf + received, (int)(USMP_HEADER_SIZE + payload_len - received), 0);
+        recv(tcp->sock, (char*)buf + received, (size_t)USMP_HEADER_SIZE + payload_len - received, 0);
     if (n <= 0) return -1;
     received += (size_t)n;
   }
@@ -265,14 +265,14 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
   }
 
   if (!expect_ack) {
-    send(udp->sock, (const char*)data, (int)len, 0);
+    send(udp->sock, (const char*)data, len, 0);
     return 0;
   }
 
   // Stop-and-wait ARQ
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
   for (int attempt = 0; attempt < 5; attempt++) {
-    send(udp->sock, (const char*)data, (int)len, 0);
+    send(udp->sock, (const char*)data, len, 0);
 
     uint32_t start_ms = usmp_port_millis();
     while (usmp_port_millis() - start_ms < 500) {
@@ -368,10 +368,10 @@ static int posix_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       utack[0] = 0xAC;
       utack[1] = 0xAC;
       utack[2] = type;
-      utack[3] = seq & 0xFF;
-      utack[4] = (seq >> 8) & 0xFF;
-      utack[5] = (seq >> 16) & 0xFF;
-      utack[6] = (seq >> 24) & 0xFF;
+      utack[3] = (uint8_t)(seq & 0xFF);
+      utack[4] = (uint8_t)((seq >> 8) & 0xFF);
+      utack[5] = (uint8_t)((seq >> 16) & 0xFF);
+      utack[6] = (uint8_t)((seq >> 24) & 0xFF);
       send(udp->sock, (const char*)utack, sizeof(utack), 0);
     } else {
       // Save info for UTACK sending on confirmation (post-handshake authenticated packets)
@@ -421,10 +421,10 @@ static void posix_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
   utack[0] = 0xAC;
   utack[1] = 0xAC;
   utack[2] = udp->last_rx_type;
-  utack[3] = seq & 0xFF;
-  utack[4] = (seq >> 8) & 0xFF;
-  utack[5] = (seq >> 16) & 0xFF;
-  utack[6] = (seq >> 24) & 0xFF;
+  utack[3] = (uint8_t)(seq & 0xFF);
+  utack[4] = (uint8_t)((seq >> 8) & 0xFF);
+  utack[5] = (uint8_t)((seq >> 16) & 0xFF);
+  utack[6] = (uint8_t)(seq >> 24);
 
   // S3: confirm_authenticated only fires for session frames (type >= 5), so authenticate
   // the ACK with rx_key (the key this frame was decrypted with).
@@ -434,7 +434,7 @@ static void posix_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
     utack_len = UTACK_HEADER_LEN + UTACK_MAC_LEN;
   }
 
-  send(udp->sock, (const char*)utack, (int)utack_len, 0);
+  send(udp->sock, (const char*)utack, utack_len, 0);
   udp->last_rx_seq_set = false;
 }
 

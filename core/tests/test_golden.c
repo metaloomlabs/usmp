@@ -12,7 +12,7 @@ void test_golden(void) {
 
   // 1. CRC Cases
   for (size_t i = 0; i < crc_cases_count; i++) {
-    uint16_t computed = usmp_crc16(crc_cases[i].input, crc_cases[i].input_len);
+    uint16_t computed = usmp_crc16(crc_cases[i].input, (uint16_t)crc_cases[i].input_len);
     assert(computed == crc_cases[i].expected_crc);
   }
   printf("  - CRC cases passed (%zu)\n", crc_cases_count);
@@ -20,10 +20,10 @@ void test_golden(void) {
   // 2. Nonce Cases (derived via seq & session_id)
   for (size_t i = 0; i < nonce_cases_count; i++) {
     uint8_t expected_nonce[USMP_GCM_NONCE_LEN];
-    expected_nonce[0] = nonce_cases[i].seq & 0xFF;
-    expected_nonce[1] = (nonce_cases[i].seq >> 8) & 0xFF;
-    expected_nonce[2] = (nonce_cases[i].seq >> 16) & 0xFF;
-    expected_nonce[3] = (nonce_cases[i].seq >> 24) & 0xFF;
+    expected_nonce[0] = (uint8_t)(nonce_cases[i].seq & 0xFF);
+    expected_nonce[1] = (uint8_t)((nonce_cases[i].seq >> 8) & 0xFF);
+    expected_nonce[2] = (uint8_t)((nonce_cases[i].seq >> 16) & 0xFF);
+    expected_nonce[3] = (uint8_t)((nonce_cases[i].seq >> 24) & 0xFF);
     memcpy(expected_nonce + 4, nonce_cases[i].session_id, 8);
 
     assert(memcmp(expected_nonce, nonce_cases[i].expected_nonce, USMP_GCM_NONCE_LEN) == 0);

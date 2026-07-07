@@ -240,14 +240,14 @@ void test_malformed_frames(void) {
   // 4. Payload length exceeds USMP_MAX_PAYLOAD
   {
     uint8_t over_len[USMP_HEADER_SIZE] = {0};
-    over_len[0] = USMP_MAGIC & 0xFF;
-    over_len[1] = (USMP_MAGIC >> 8) & 0xFF;
+    over_len[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    over_len[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
     over_len[2] = USMP_VERSION;
     over_len[3] = USMP_TYPE_DATA;
     // Set length to USMP_MAX_PAYLOAD + 1
     uint16_t too_big = USMP_MAX_PAYLOAD + 1;
-    over_len[8] = too_big & 0xFF;
-    over_len[9] = (too_big >> 8) & 0xFF;
+    over_len[8] = (uint8_t)(too_big & 0xFF);
+    over_len[9] = (uint8_t)((too_big >> 8) & 0xFF);
     assert(usmp_parse_packet(over_len, USMP_HEADER_SIZE, &pkt) != 0);
     printf("  - Oversized payload length rejected\n");
   }
