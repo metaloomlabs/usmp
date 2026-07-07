@@ -62,7 +62,7 @@ static int udp_dial(usmp_udp_ctx_t* udp) {
 
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
-      .sin_port = htons(udp->port),
+      .sin_port = htons((uint16_t)udp->port),
   };
 
   if (inet_pton(AF_INET, udp->server_ip, &addr.sin_addr) != 1) {
@@ -137,7 +137,7 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
 
       // Buffer data packet received while waiting for UTACK
       if (n >= (ssize_t)USMP_HEADER_SIZE && udp->rx_len == 0) {
-        memcpy(udp->rx_buf, temp, n);
+        memcpy(udp->rx_buf, temp, (size_t)n);
         udp->rx_len = (int)n;
       }
     }
@@ -155,7 +155,7 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 
   while (1) {
     if (udp->rx_len > 0) {
-      memcpy(temp, udp->rx_buf, udp->rx_len);
+      memcpy(temp, udp->rx_buf, (size_t)udp->rx_len);
       n = udp->rx_len;
       udp->rx_len = 0;
     } else {
@@ -200,7 +200,13 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     // Send UTACK back immediately. S3: authenticate session-phase UTACKs (type >= 5)
     // with rx_key once keys are established; handshake UTACKs stay plaintext.
     uint8_t utack[UTACK_HEADER_LEN + UTACK_MAC_LEN] = {
-        0xAC, 0xAC, type, seq & 0xFF, (seq >> 8) & 0xFF, (seq >> 16) & 0xFF, (seq >> 24) & 0xFF};
+        0xAC,
+        0xAC,
+        type,
+        (uint8_t)(seq & 0xFF),
+        (uint8_t)((seq >> 8) & 0xFF),
+        (uint8_t)((seq >> 16) & 0xFF),
+        (uint8_t)((seq >> 24) & 0xFF)};
     size_t utack_len = UTACK_HEADER_LEN;
     if (type >= 5 && udp->keys_set) {
       utack_mac(udp->rx_key, utack, utack + UTACK_HEADER_LEN);
@@ -220,7 +226,7 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     }
 
     if ((size_t)n > max_len) return -1;
-    memcpy(buf, temp, n);
+    memcpy(buf, temp, (size_t)n);
     return (int)n;
   }
 }

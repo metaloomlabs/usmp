@@ -22,7 +22,7 @@ int usmp_port_random(uint8_t* out, size_t len) {
 
 void usmp_port_delay_ms(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 
-uint32_t usmp_port_millis(void) { return (uint32_t)(esp_timer_get_time() / 1000ULL); }
+uint32_t usmp_port_millis(void) { return (uint32_t)((uint64_t)esp_timer_get_time() / 1000ULL); }
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
   if (level == 'E') {

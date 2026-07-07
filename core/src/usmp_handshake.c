@@ -170,7 +170,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
 
   len = usmp_build_packet(&pkt, tx_buf, NULL);
-  if (transport->send(transport, tx_buf, len) < 0) {
+  if (transport->send(transport, tx_buf, (size_t)len) < 0) {
     USMP_LOGE(TAG, "Failed to send HELLO");
     goto cleanup;
   }
@@ -207,7 +207,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
     memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE, 16);
 
     len = usmp_build_packet(&pkt, tx_buf, NULL);
-    if (transport->send(transport, tx_buf, len) < 0) {
+    if (transport->send(transport, tx_buf, (size_t)len) < 0) {
       USMP_LOGE(TAG, "Failed to resend HELLO with cookie");
       goto cleanup;
     }
@@ -304,7 +304,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
 
   len = usmp_build_packet(&pkt, tx_buf, NULL);
-  if (transport->send(transport, tx_buf, len) < 0) {
+  if (transport->send(transport, tx_buf, (size_t)len) < 0) {
     USMP_LOGE(TAG, "Failed to send HELLO_ACK");
     goto cleanup;
   }

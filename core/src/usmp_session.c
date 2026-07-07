@@ -21,16 +21,16 @@ static const char* TAG = "USMP_SESSION";
 
 static void build_aad(uint16_t magic, uint8_t version, uint8_t type, uint32_t seq, uint16_t length,
                       uint8_t* aad) {
-  aad[0] = magic & 0xFF;
-  aad[1] = (magic >> 8) & 0xFF;
+  aad[0] = (uint8_t)(magic & 0xFF);
+  aad[1] = (uint8_t)((magic >> 8) & 0xFF);
   aad[2] = version;
   aad[3] = type;
-  aad[4] = seq & 0xFF;
-  aad[5] = (seq >> 8) & 0xFF;
-  aad[6] = (seq >> 16) & 0xFF;
-  aad[7] = (seq >> 24) & 0xFF;
-  aad[8] = length & 0xFF;
-  aad[9] = (length >> 8) & 0xFF;
+  aad[4] = (uint8_t)(seq & 0xFF);
+  aad[5] = (uint8_t)((seq >> 8) & 0xFF);
+  aad[6] = (uint8_t)((seq >> 16) & 0xFF);
+  aad[7] = (uint8_t)((seq >> 24) & 0xFF);
+  aad[8] = (uint8_t)(length & 0xFF);
+  aad[9] = (uint8_t)((length >> 8) & 0xFF);
 }
 
 // Send an encrypted control frame (PING, PONG, BYE) with empty plaintext ───
@@ -51,10 +51,10 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
 
   uint8_t nonce[USMP_GCM_NONCE_LEN];
-  nonce[0] = pkt.seq & 0xFF;
-  nonce[1] = (pkt.seq >> 8) & 0xFF;
-  nonce[2] = (pkt.seq >> 16) & 0xFF;
-  nonce[3] = (pkt.seq >> 24) & 0xFF;
+  nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+  nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+  nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+  nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
   memcpy(nonce + 4, ctx->session_id, 8);
 
   size_t out_len = 0;
@@ -114,10 +114,10 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
 
     uint8_t nonce[USMP_GCM_NONCE_LEN];
-    nonce[0] = pkt.seq & 0xFF;
-    nonce[1] = (pkt.seq >> 8) & 0xFF;
-    nonce[2] = (pkt.seq >> 16) & 0xFF;
-    nonce[3] = (pkt.seq >> 24) & 0xFF;
+    nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+    nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+    nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+    nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
     memcpy(nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
@@ -246,10 +246,10 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, pkt.length, aad);
 
     uint8_t expected_nonce[USMP_GCM_NONCE_LEN];
-    expected_nonce[0] = pkt.seq & 0xFF;
-    expected_nonce[1] = (pkt.seq >> 8) & 0xFF;
-    expected_nonce[2] = (pkt.seq >> 16) & 0xFF;
-    expected_nonce[3] = (pkt.seq >> 24) & 0xFF;
+    expected_nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+    expected_nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+    expected_nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+    expected_nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
