@@ -56,7 +56,7 @@ void usmp_port_log(char level, const char* tag, const char* msg) {
       }
     }
     lower_tag[i] = '\0';
-    Serial.printf("[usmp] [%s]: %s\n", lower_tag, msg);
+    Serial.printf("[%s]: %s\n", lower_tag, msg);
   } else {
     Serial.printf("[%c][%s] %s\n", level, tag, msg);
   }
