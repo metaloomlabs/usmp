@@ -20,3 +20,14 @@ idf_component_register(
         lwip
         esp_timer
 )
+
+# Enable compiler warnings and basic security hardening on component build
+if(TARGET ${COMPONENT_LIB})
+    target_compile_options(${COMPONENT_LIB} PRIVATE
+        -Wall
+        -Wextra
+        -Wconversion
+        -fstack-protector-strong
+        -D_FORTIFY_SOURCE=2
+    )
+endif()

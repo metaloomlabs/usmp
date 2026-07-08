@@ -55,6 +55,9 @@ struct USMPArduinoUdpCtx {
   uint32_t last_rx_seq;
   bool last_rx_seq_set;
   uint8_t last_rx_type;
+  uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
+  uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
+  bool keys_set;
 };
 
 // UDP transport factory ─────────────────────────────────────────────────────

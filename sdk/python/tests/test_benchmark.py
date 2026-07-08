@@ -4,13 +4,13 @@ import asyncio
 import statistics
 import time
 
-from usmp._crypto import decrypt, derive_session_key, encrypt, generate_keypair
+from usmp._crypto import decrypt, derive_session_keys, encrypt, generate_keypair
 from usmp._frame import decode_frame, encode_frame
 from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
 from usmp.types import USMP_MAGIC, USMP_VERSION, PacketType
 
-PSK = b"test-psk-1234"
+PSK = b"test-psk-1234-super-secret"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
 RUNS = 50  # number of iterations per benchmark
 
@@ -95,12 +95,10 @@ def test_bench_session_key_derivation():
 
     for _ in range(RUNS):
         t0 = time.perf_counter()
-        derive_session_key(priv_c, pub_s, nonce, pub_c, pub_s)
+        derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
         times.append(time.perf_counter() - t0)
 
-    passed = print_benchmark(
-        "X25519 + HKDF session key derivation", times, target_ms=10.0
-    )
+    passed = print_benchmark("X25519 + HKDF session key derivation", times, target_ms=10.0)
     assert passed, "Session key derivation p95 exceeded 10ms target"
 
 
@@ -158,7 +156,6 @@ def test_bench_aes_gcm_decrypt():
 
     passed = print_benchmark("AES-256-GCM decrypt (21 bytes)", times, target_ms=2.0)
     assert passed, "AES-GCM decrypt p95 exceeded 2ms target"
-
 
 
 # ── Handshake benchmark ───────────────────────────────────────────────────────

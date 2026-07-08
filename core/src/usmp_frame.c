@@ -25,16 +25,16 @@ uint16_t usmp_crc16(const uint8_t* data, uint16_t len) {
 // CRC over header bytes [0..9] + payload (matches Python SDK)
 static uint16_t compute_crc(usmp_packet_t* pkt) {
   uint8_t header[10];
-  header[0] = pkt->magic & 0xFF;
-  header[1] = (pkt->magic >> 8) & 0xFF;
+  header[0] = (uint8_t)(pkt->magic & 0xFF);
+  header[1] = (uint8_t)((pkt->magic >> 8) & 0xFF);
   header[2] = pkt->version;
   header[3] = pkt->type;
-  header[4] = pkt->seq & 0xFF;
-  header[5] = (pkt->seq >> 8) & 0xFF;
-  header[6] = (pkt->seq >> 16) & 0xFF;
-  header[7] = (pkt->seq >> 24) & 0xFF;
-  header[8] = pkt->length & 0xFF;
-  header[9] = (pkt->length >> 8) & 0xFF;
+  header[4] = (uint8_t)(pkt->seq & 0xFF);
+  header[5] = (uint8_t)((pkt->seq >> 8) & 0xFF);
+  header[6] = (uint8_t)((pkt->seq >> 16) & 0xFF);
+  header[7] = (uint8_t)((pkt->seq >> 24) & 0xFF);
+  header[8] = (uint8_t)(pkt->length & 0xFF);
+  header[9] = (uint8_t)((pkt->length >> 8) & 0xFF);
 
   uint16_t crc = usmp_crc16_step(0xFFFF, header, 10);
   crc = usmp_crc16_step(crc, pkt->payload, pkt->length);
@@ -45,18 +45,18 @@ int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len) {
   pkt->crc = compute_crc(pkt);
 
   // Write header manually (packed, little-endian)
-  out[0] = pkt->magic & 0xFF;
-  out[1] = (pkt->magic >> 8) & 0xFF;
+  out[0] = (uint8_t)(pkt->magic & 0xFF);
+  out[1] = (uint8_t)((pkt->magic >> 8) & 0xFF);
   out[2] = pkt->version;
   out[3] = pkt->type;
-  out[4] = pkt->seq & 0xFF;
-  out[5] = (pkt->seq >> 8) & 0xFF;
-  out[6] = (pkt->seq >> 16) & 0xFF;
-  out[7] = (pkt->seq >> 24) & 0xFF;
-  out[8] = pkt->length & 0xFF;
-  out[9] = (pkt->length >> 8) & 0xFF;
-  out[10] = pkt->crc & 0xFF;
-  out[11] = (pkt->crc >> 8) & 0xFF;
+  out[4] = (uint8_t)(pkt->seq & 0xFF);
+  out[5] = (uint8_t)((pkt->seq >> 8) & 0xFF);
+  out[6] = (uint8_t)((pkt->seq >> 16) & 0xFF);
+  out[7] = (uint8_t)((pkt->seq >> 24) & 0xFF);
+  out[8] = (uint8_t)(pkt->length & 0xFF);
+  out[9] = (uint8_t)((pkt->length >> 8) & 0xFF);
+  out[10] = (uint8_t)(pkt->crc & 0xFF);
+  out[11] = (uint8_t)((pkt->crc >> 8) & 0xFF);
 
   memcpy(out + USMP_HEADER_SIZE, pkt->payload, pkt->length);
 
@@ -71,7 +71,8 @@ int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
   pkt->magic = data[0] | (data[1] << 8);
   pkt->version = data[2];
   pkt->type = data[3];
-  pkt->seq = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+  pkt->seq =
+      data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
   pkt->length = data[8] | (data[9] << 8);
   pkt->crc = data[10] | (data[11] << 8);
 
@@ -85,9 +86,9 @@ int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
 
   memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
 
-  // Verify CRC using constant-time comparison (mitigates timing attacks)
+  // Verify CRC (non-secret integrity check — no need for constant-time comparison)
   uint16_t expected = compute_crc(pkt);
-  if (mbedtls_ct_memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0) return -1;
+  if (memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0) return -1;
 
   return 0;
 }

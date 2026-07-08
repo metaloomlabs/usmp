@@ -16,6 +16,9 @@ USMPClient usmp(PSK);
 void setup() {
   Serial.begin(115200);
 
+  // By default, only errors are logged. Uncomment below to see details.
+  // usmp.setLogLevel(USMP_LOG_LEVEL_INFO);
+
   // Connect WiFi + TCP + handshake in one call
   if (!usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
     Serial.println("USMP connect failed — check server and PSK");

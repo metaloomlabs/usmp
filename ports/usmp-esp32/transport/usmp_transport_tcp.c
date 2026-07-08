@@ -36,7 +36,7 @@ static int tcp_dial(usmp_tcp_ctx_t* tcp) {
 
   struct sockaddr_in addr = {
       .sin_family = AF_INET,
-      .sin_port = htons(tcp->port),
+      .sin_port = htons((uint16_t)tcp->port),
   };
 
   if (inet_pton(AF_INET, tcp->server_ip, &addr.sin_addr) != 1) {
@@ -62,7 +62,7 @@ static int usmp_tcp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   while (sent < len) {
     ssize_t n = send(tcp->sock, data + sent, len - sent, 0);
     if (n < 0) return -1;
-    sent += n;
+    sent += (size_t)n;
   }
   return 0;
 }
@@ -76,11 +76,11 @@ static int usmp_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   while (received < USMP_HEADER_SIZE) {
     ssize_t n = recv(tcp->sock, buf + received, USMP_HEADER_SIZE - received, 0);
     if (n <= 0) return -1;
-    received += n;
+    received += (size_t)n;
   }
 
   // Step 2: parse payload length from header
-  uint16_t payload_len = buf[8] | (buf[9] << 8);
+  uint16_t payload_len = (uint16_t)(buf[8] | (buf[9] << 8));
   if (payload_len > USMP_MAX_PAYLOAD) return -1;
   if (USMP_HEADER_SIZE + payload_len > max_len) return -1;
 
@@ -88,7 +88,7 @@ static int usmp_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   while (received < USMP_HEADER_SIZE + payload_len) {
     ssize_t n = recv(tcp->sock, buf + received, USMP_HEADER_SIZE + payload_len - received, 0);
     if (n <= 0) return -1;
-    received += n;
+    received += (size_t)n;
   }
 
   return (int)received;
@@ -167,6 +167,8 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->reconnect = usmp_tcp_reconnect;
   t->available = usmp_tcp_available;
   t->destroy = usmp_tcp_destroy;
+  t->confirm_authenticated = NULL;
+  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
   t->ctx = tcp;
 
   return 0;

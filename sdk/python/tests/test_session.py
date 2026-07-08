@@ -3,7 +3,7 @@ import asyncio
 from usmp._handshake import client_handshake, server_handshake
 from usmp._session import USMPSession
 
-PSK = b"test-psk-1234"
+PSK = b"test-psk-1234-super-secret"
 DEVICE_ID = b"\x00\x70\x07\x2d\x42\x24"
 
 
@@ -74,9 +74,11 @@ async def test_fragmented_message():
 async def test_fragmentation_limit_exceeded():
     _, client_session = await _connected_pair()
     from usmp.errors import PayloadError
+
     # 2000 bytes needs 5 frames (5 * 452 > 1808 limit of 4 frames), should fail
     too_large_payload = b"B" * 2000
     import pytest
+
     with pytest.raises(PayloadError) as exc_info:
         await client_session.send(too_large_payload)
     assert "Payload too large for fragmentation limits" in str(exc_info.value)
@@ -99,13 +101,13 @@ async def test_control_frame_during_fragmentation():
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]
     ciphertext = encrypt(
-        key=client_session._info.session_key,
+        key=client_session._info.tx_key,
         nonce=nonce,
         seq=seq,
         type_=int(PacketType.DATA_FRAG),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
-        plaintext=b"D" * 452
+        plaintext=b"D" * 452,
     )
     await write_frame(client_session._writer, PacketType.DATA_FRAG, ciphertext, seq=seq)
     client_session._info.tx_seq += 1
@@ -114,13 +116,13 @@ async def test_control_frame_during_fragmentation():
     seq = client_session._info.tx_seq
     nonce = struct.pack("<I", seq) + client_session._info.session_id[:8]
     ciphertext = encrypt(
-        key=client_session._info.session_key,
+        key=client_session._info.tx_key,
         nonce=nonce,
         seq=seq,
         type_=int(PacketType.PING),
         version=USMP_VERSION,
         magic=USMP_MAGIC,
-        plaintext=b""
+        plaintext=b"",
     )
     await write_frame(client_session._writer, PacketType.PING, ciphertext, seq=seq)
     client_session._info.tx_seq += 1

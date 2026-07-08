@@ -7,7 +7,7 @@ from typing import Any
 
 from ._crypto import decrypt, encrypt
 from ._frame import read_frame, write_frame
-from .errors import ConnectionClosedError, PayloadError, SequenceError
+from .errors import ConnectionClosedError, FrameError, PayloadError, SequenceError, USMPError
 from .errors import TimeoutError as USMPTimeoutError
 from .types import (
     USMP_MAGIC,
@@ -57,7 +57,7 @@ class USMPSession:
         offset = 0
         while offset < len(data) or len(data) == 0:
             chunk = data[offset : offset + USMP_MAX_DATA_LEN]
-            is_frag = (offset + len(chunk) < len(data))
+            is_frag = offset + len(chunk) < len(data)
             packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
 
             seq = self._info.tx_seq
@@ -65,7 +65,7 @@ class USMPSession:
                 raise SequenceError("TX sequence overflowed")
             nonce = struct.pack("<I", seq) + self._info.session_id[:8]
             ciphertext = encrypt(
-                key=self._info.session_key,
+                key=self._info.tx_key,
                 nonce=nonce,
                 seq=seq,
                 type_=int(packet_type),
@@ -88,15 +88,27 @@ class USMPSession:
             assembled_payload = bytearray()
             frame_count = 0
             ctrl_count = 0
+            expected_frag_seq = 0
 
             while True:
-                frame = await read_frame(self._reader)
-                self._last_recv = time.monotonic()
-
-                nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                 try:
+                    frame = await read_frame(self._reader)
+                    self._last_recv = time.monotonic()
+
+                    # Sliding replay window check for UDP (L2)
+                    confirm = getattr(self._reader, "confirm_authenticated", None)
+                    is_udp = confirm is not None
+                    if is_udp:
+                        if frame.seq <= self._info.rx_seq - 64:
+                            continue  # too old, drop silently
+                        if frame.seq <= self._info.rx_seq:
+                            offset = self._info.rx_seq - frame.seq
+                            if (self._info.rx_window_bitmap & (1 << offset)) != 0:
+                                continue  # duplicate/replayed seq, drop silently
+
+                    nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                     plaintext = decrypt(
-                        key=self._info.session_key,
+                        key=self._info.rx_key,
                         nonce=nonce,
                         seq=frame.seq,
                         type_=int(frame.type),
@@ -105,62 +117,105 @@ class USMPSession:
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
                     )
-                except Exception:
+                except (USMPError, ValueError):
                     if getattr(self._reader, "confirm_authenticated", None) is not None:
-                        # UDP: drop unauthenticated packet and continue reading
+                        # UDP: drop unauthenticated/malformed packet and continue reading
                         continue
                     raise
 
-                if frame.seq != self._info.rx_seq:
-                    raise SequenceError(
-                        f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
-                    )
-
-                if self._info.rx_seq >= 0xFFFFFFFF:
+                if frame.seq >= 0xFFFFFFFF:
                     raise SequenceError("RX sequence overflowed")
 
-                self._info.rx_seq += 1
-                confirm = getattr(self._reader, "confirm_authenticated", None)
-                if confirm is not None:
-                    confirm(frame.seq)
+                if is_udp:
+                    # Update sliding replay window on successful verification (L2)
+                    if frame.seq > self._info.rx_seq:
+                        shift = frame.seq - self._info.rx_seq
+                        if shift < 64:
+                            self._info.rx_window_bitmap = (
+                                (self._info.rx_window_bitmap << shift) & 0xFFFFFFFFFFFFFFFF
+                            ) | 1
+                        else:
+                            self._info.rx_window_bitmap = 1
+                        self._info.rx_seq = frame.seq
+                    else:
+                        offset = self._info.rx_seq - frame.seq
+                        self._info.rx_window_bitmap |= 1 << offset
 
-                if frame.type == PacketType.BYE:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: BYE received during fragmentation")
-                    raise ConnectionClosedError("Remote sent BYE")
-
-                if frame.type == PacketType.PING:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: PING received during fragmentation")
-                    await self._send_pong()
-                    ctrl_count += 1
-                    if ctrl_count >= 8:
-                        raise ConnectionClosedError(
-                            "Too many consecutive control frames received"
+                    if confirm is not None:
+                        confirm(frame.seq)
+                else:
+                    if frame.seq != self._info.rx_seq:
+                        raise SequenceError(
+                            f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
                         )
-                    continue
 
-                if frame.type == PacketType.PONG:
-                    if len(assembled_payload) > 0:
-                        raise SequenceError("Protocol error: PONG received during fragmentation")
-                    ctrl_count += 1
-                    if ctrl_count >= 8:
-                        raise ConnectionClosedError(
-                            "Too many consecutive control frames received"
-                        )
-                    continue
+                    if self._info.rx_seq >= 0xFFFFFFFF:
+                        raise SequenceError("RX sequence overflowed")
 
-                if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
-                    raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+                    self._info.rx_seq += 1
 
-                assembled_payload.extend(plaintext)
-                frame_count += 1
+                # S5 fix: over UDP a reordered or crafted fragment / control-frame
+                # sequence must not tear down the live session. The ordering and
+                # frame-type checks below are wrapped so that on UDP a violation drops
+                # the partial reassembly state and keeps reading, instead of
+                # propagating. An authenticated BYE — and the too-many-control-frames
+                # guard — still closes the session by raising ConnectionClosedError,
+                # which is deliberately not caught here. On TCP the violation still
+                # propagates (strict in-order delivery).
+                try:
+                    if frame.type == PacketType.BYE:
+                        raise ConnectionClosedError("Remote sent BYE")
 
-                if frame.type == PacketType.DATA:
-                    return bytes(assembled_payload)
+                    if frame.type == PacketType.PING:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError(
+                                "Protocol error: PING received during fragmentation"
+                            )
+                        await self._send_pong()
+                        ctrl_count += 1
+                        if ctrl_count >= 8:
+                            raise ConnectionClosedError(
+                                "Too many consecutive control frames received"
+                            )
+                        continue
 
-                if frame_count >= USMP_MAX_FRAMES:
-                    raise PayloadError("Protocol error: exceeded max fragments limit")
+                    if frame.type == PacketType.PONG:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError(
+                                "Protocol error: PONG received during fragmentation"
+                            )
+                        ctrl_count += 1
+                        if ctrl_count >= 8:
+                            raise ConnectionClosedError(
+                                "Too many consecutive control frames received"
+                            )
+                        continue
+
+                    if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
+                        raise ValueError(f"Unexpected frame type: {frame.type_name()}")
+
+                    if frame_count > 0:
+                        if frame.seq != expected_frag_seq:
+                            raise SequenceError("Protocol error: out-of-order fragment sequence")
+                        expected_frag_seq += 1
+                    else:
+                        expected_frag_seq = frame.seq + 1
+
+                    assembled_payload.extend(plaintext)
+                    frame_count += 1
+
+                    if frame.type == PacketType.DATA:
+                        return bytes(assembled_payload)
+
+                    if frame_count >= USMP_MAX_FRAMES:
+                        raise PayloadError("Protocol error: exceeded max fragments limit")
+                except (FrameError, SequenceError, ValueError):
+                    if is_udp:
+                        assembled_payload = bytearray()
+                        frame_count = 0
+                        expected_frag_seq = 0
+                        continue
+                    raise
 
         if effective_timeout is not None:
             try:
@@ -175,7 +230,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PING),
@@ -191,7 +246,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.BYE),
@@ -207,7 +262,7 @@ class USMPSession:
         seq = self._info.tx_seq
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
-            key=self._info.session_key,
+            key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
             type_=int(PacketType.PONG),

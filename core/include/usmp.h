@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "usmp_frame.h"
+#include "usmp_port.h"
 #include "usmp_transport.h"
 
 #ifdef __cplusplus
@@ -12,9 +13,9 @@ extern "C" {
 #endif
 
 // Version ───────────────────────────────────────────────────────────────────
-#define USMP_VERSION_MAJOR 0
-#define USMP_VERSION_MINOR 5
-#define USMP_VERSION_PATCH 1
+#define USMP_VERSION_MAJOR 1
+#define USMP_VERSION_MINOR 0
+#define USMP_VERSION_PATCH 0
 
 /**
  * Get the library version string at runtime (e.g. "0.5.1").
@@ -83,13 +84,15 @@ const char* usmp_get_version(void);
 typedef struct {
   uint8_t device_id[USMP_DEVICE_ID_LEN];
   uint8_t session_id[USMP_SESSION_ID_LEN];
-  uint8_t session_key[USMP_SESSION_KEY_LEN];
+  uint8_t tx_key[USMP_SESSION_KEY_LEN];
+  uint8_t rx_key[USMP_SESSION_KEY_LEN];
   bool established;
   usmp_transport_t transport;
   uint32_t tx_seq;
   uint32_t rx_seq;
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
+  uint64_t rx_window_bitmap;
 
   /*
    * Runtime PSK — must be set before calling usmp_connect().

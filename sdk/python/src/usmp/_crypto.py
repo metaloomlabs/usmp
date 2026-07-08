@@ -21,33 +21,43 @@ def generate_keypair() -> tuple[X25519PrivateKey, bytes]:
     return priv, pub
 
 
-def derive_session_key(
+def derive_session_keys(
     priv_key: X25519PrivateKey,
     peer_pub: bytes,
     nonce: bytes,
     pub_c: bytes,
     pub_s: bytes,
-) -> bytes:
+) -> tuple[bytes, bytes]:
     """
-    Derive session key via X25519 + HKDF-SHA256.
+    Derive two directional session keys via X25519 + HKDF-SHA256.
 
-    session_key = HKDF-SHA256(
+    key_material = HKDF-SHA256(
         ikm  = X25519(priv, peer_pub),
         salt = nonce,
-        info = "usmp-v1" || pub_C || pub_S,
-        len  = 32
+        info = "usmp-v2" || pub_C || pub_S,
+        len  = 64
     )
+
+    k_c2s = key_material[:32]   (client → server)
+    k_s2c = key_material[32:]   (server → client)
+
+    Returns (k_c2s, k_s2c).
     """
     peer_key = X25519PublicKey.from_public_bytes(peer_pub)
     shared_secret = priv_key.exchange(peer_key)
     try:
-        info = b"usmp-v1" + pub_c + pub_s
-        return HKDF(
+        # L1 fix: reject all-zero shared secret (low-order point input)
+        if shared_secret == b"\x00" * len(shared_secret):
+            raise CryptoError("X25519 produced all-zero shared secret (low-order point)")
+
+        info = b"usmp-v2" + pub_c + pub_s
+        key_material = HKDF(
             algorithm=hashes.SHA256(),
-            length=USMP_SESSION_KEY_LEN,
+            length=USMP_SESSION_KEY_LEN * 2,  # 64 bytes: two 32-byte keys
             salt=nonce,
             info=info,
         ).derive(shared_secret)
+        return key_material[:USMP_SESSION_KEY_LEN], key_material[USMP_SESSION_KEY_LEN:]
     finally:
         if "shared_secret" in locals():
             del shared_secret
@@ -112,6 +122,7 @@ def decrypt(
     Raises CryptoError if authentication fails.
     """
     from cryptography.exceptions import InvalidTag
+
     if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
         raise CryptoError("Payload too short")
 

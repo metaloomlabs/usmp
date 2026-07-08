@@ -14,7 +14,7 @@ from usmp import USMPClient, USMPServer, USMPSession
 from usmp.errors import ConnectionClosedError
 
 PSK = b"usmp-test-psk-integration"
-WRONG_PSK = b"wrong-psk"
+WRONG_PSK = b"wrong-psk-length-16-bytes"
 HOST = "127.0.0.1"
 
 
@@ -272,8 +272,8 @@ async def test_multi_psk_dict():
     device_id_2 = bytes([0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF])
 
     psk_map = {
-        device_id_1: b"psk-device-1",
-        device_id_2: b"psk-device-2",
+        device_id_1: b"psk-device-1-longer-key",
+        device_id_2: b"psk-device-2-longer-key",
     }
 
     server = USMPServer(host=HOST, port=port, psk=psk_map, session_timeout=5.0)
@@ -285,14 +285,18 @@ async def test_multi_psk_dict():
 
     async def client_coro():
         # Connect client 1
-        client1 = USMPClient(host=HOST, port=port, psk=b"psk-device-1", device_id=device_id_1)
+        client1 = USMPClient(
+            host=HOST, port=port, psk=b"psk-device-1-longer-key", device_id=device_id_1
+        )
         await client1.connect()
         await client1.send(b"c1")
         r1 = await client1.recv()
         await client1.disconnect()
 
         # Connect client 2
-        client2 = USMPClient(host=HOST, port=port, psk=b"psk-device-2", device_id=device_id_2)
+        client2 = USMPClient(
+            host=HOST, port=port, psk=b"psk-device-2-longer-key", device_id=device_id_2
+        )
         await client2.connect()
         await client2.send(b"c2")
         r2 = await client2.recv()
@@ -312,8 +316,8 @@ async def test_multi_psk_callable():
 
     def resolve_psk(dev_id: bytes) -> bytes:
         if dev_id == device_id_fixed:
-            return b"dynamic-psk-123"
-        return b"default-psk"
+            return b"dynamic-psk-123-longer-key"
+        return b"default-psk-longer-key"
 
     server = USMPServer(host=HOST, port=port, psk=resolve_psk, session_timeout=5.0)
 
@@ -323,7 +327,9 @@ async def test_multi_psk_callable():
         await session.send(data + b"-dyn-ok")
 
     async def client_coro():
-        client = USMPClient(host=HOST, port=port, psk=b"dynamic-psk-123", device_id=device_id_fixed)
+        client = USMPClient(
+            host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed
+        )
         await client.connect()
         await client.send(b"hello")
         reply = await client.recv()
@@ -379,8 +385,8 @@ async def test_multi_psk_async_callable():
     async def resolve_psk_async(dev_id: bytes) -> bytes:
         await asyncio.sleep(0.01)
         if dev_id == device_id_fixed:
-            return b"dynamic-psk-123"
-        return b"default-psk"
+            return b"dynamic-psk-123-longer-key"
+        return b"default-psk-longer-key"
 
     server = USMPServer(host=HOST, port=port, psk=resolve_psk_async, session_timeout=5.0)
 
@@ -390,7 +396,9 @@ async def test_multi_psk_async_callable():
         await session.send(data + b"-dyn-async-ok")
 
     async def client_coro():
-        client = USMPClient(host=HOST, port=port, psk=b"dynamic-psk-123", device_id=device_id_fixed)
+        client = USMPClient(
+            host=HOST, port=port, psk=b"dynamic-psk-123-longer-key", device_id=device_id_fixed
+        )
         await client.connect()
         await client.send(b"hello")
         reply = await client.recv()
@@ -400,3 +408,43 @@ async def test_multi_psk_async_callable():
     reply = await _run(server, client_coro())
     assert reply == b"hello-dyn-async-ok"
 
+
+@pytest.mark.asyncio
+async def test_tcp_connection_cap():
+    """Verify that concurrent TCP connections are limited globally and per-IP (L1)."""
+    port = _free_port()
+    server = USMPServer(
+        host=HOST,
+        port=port,
+        psk=PSK,
+        max_connections_per_ip=2,
+        session_timeout=5.0,
+    )
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        # Keep connection alive during test
+        try:
+            await asyncio.sleep(5.0)
+        except asyncio.CancelledError:
+            pass
+
+    async def client_coro():
+        # Connect client 1 (active)
+        c1 = USMPClient(host=HOST, port=port, psk=PSK)
+        await c1.connect()
+
+        # Connect client 2 (active)
+        c2 = USMPClient(host=HOST, port=port, psk=PSK)
+        await c2.connect()
+
+        # Connect client 3 (should be rejected/disconnected immediately since limit is 2 per IP)
+        c3 = USMPClient(host=HOST, port=port, psk=PSK)
+        with pytest.raises(Exception):
+            await c3.connect()
+
+        # Clean up
+        await c1.disconnect()
+        await c2.disconnect()
+
+    await _run(server, client_coro())

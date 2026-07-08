@@ -17,6 +17,7 @@ class PacketType(IntEnum):
     PONG = 0x07
     BYE = 0x08
     DATA_FRAG = 0x09
+    HELLO_RETRY = 0x0A
     ERROR = 0xFF
 
 
@@ -32,7 +33,7 @@ class ErrorCode(IntEnum):
 
 # Protocol constants
 USMP_MAGIC = 0xABCD
-USMP_VERSION = 0x01
+USMP_VERSION = 0x02
 USMP_HEADER_SIZE = 12  # magic(2)+ver(1)+type(1)+seq(4)+len(2)+crc(2)
 USMP_MAX_PAYLOAD = 480  # max payload bytes (keeps total frame under 512)
 USMP_MAX_FRAMES = 4  # default maximum fragments per message
@@ -80,17 +81,21 @@ class USMPFrame:
 class SessionInfo:
     device_id: bytes
     session_id: bytes
-    session_key: bytes
+    tx_key: bytes
+    rx_key: bytes
     tx_seq: int = 0
     rx_seq: int = 0
+    rx_window_bitmap: int = 0
 
     def __post_init__(self) -> None:
         if len(self.device_id) != USMP_DEVICE_ID_LEN:
             raise ValueError(f"Invalid device_id length: {len(self.device_id)}")
         if len(self.session_id) != USMP_SESSION_ID_LEN:
             raise ValueError(f"Invalid session_id length: {len(self.session_id)}")
-        if len(self.session_key) != USMP_SESSION_KEY_LEN:
-            raise ValueError(f"Invalid session_key length: {len(self.session_key)}")
+        if len(self.tx_key) != USMP_SESSION_KEY_LEN:
+            raise ValueError(f"Invalid tx_key length: {len(self.tx_key)}")
+        if len(self.rx_key) != USMP_SESSION_KEY_LEN:
+            raise ValueError(f"Invalid rx_key length: {len(self.rx_key)}")
 
     @property
     def device_id_str(self) -> str:

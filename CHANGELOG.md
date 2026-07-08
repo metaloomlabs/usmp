@@ -1,0 +1,90 @@
+# Changelog
+
+All notable changes to USMP are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.0.0] — 2026-07-05
+
+### 🔒 Security
+
+- **Fixed**: Uninitialized `confirm_authenticated` function pointer in TCP transports (ESP32 & Arduino) could cause wild pointer execution on authenticated UDP code paths. Now explicitly initialized to `NULL`.
+- **Fixed**: Signed integer overflow undefined behavior in frame sequence reconstruction across all transports (C Core, ESP32 UDP, Arduino UDP, POSIX test transport). All bit-shift operations on sequence bytes now cast to `(uint32_t)`.
+- **Fixed**: UDP deduplication logic in ESP32 and Arduino ports removed strict `seq <= last_rx_seq` checks that could reject valid out-of-order packets. Now aligned with Core sliding window behavior.
+- **Fixed**: Added receive loop iteration limit (10 attempts) in C `usmp_recv` to mitigate potential infinite-loop CPU exhaustion on UDP floods of malformed packets.
+- **Fixed**: Python SDK rate limiter no longer counts clean disconnects (TCP resets, incomplete reads) as failed handshake attempts, preventing lockout of legitimate clients on flaky networks.
+- **Fixed**: UDP handshake counter (`_udp_in_progress_handshakes`) now decrements immediately upon handshake completion instead of waiting for full session teardown, freeing slots faster.
+- **Added**: Global and per-IP active session limits for UDP server, matching existing TCP enforcement.
+- **Added**: Comprehensive host-side C unit tests for malformed frame rejection, fragment ordering validation, and UDP sliding replay window deduplication.
+
+### Changed
+
+- **Renamed**: Python SDK `TimeoutError` → `USMPTimeoutError` to avoid shadowing Python's builtin `TimeoutError`. A backward-compatible alias is provided and will be removed in 2.0.
+- **Updated**: `psk` parameter type hint in `server_handshake()` and `USMPServer` now accepts `Callable[[bytes], bytes | Awaitable[bytes]]` for async PSK resolvers.
+- **Updated**: Static assertions in `test_main.c` now cover all 13 fields of the `usmp_t` struct for binary compatibility verification between Core and Arduino ports.
+- **Updated**: Loopback test buffer size increased from 4 KiB to 8 KiB to support larger test payloads.
+
+### Added
+
+- `SECURITY.md` — Vulnerability disclosure policy and known security limitations.
+- `CHANGELOG.md` — This file.
+- Python SDK: `license`, `classifiers`, `keywords` metadata in `pyproject.toml`.
+- Python SDK: `Documentation` and `Bug Tracker` URLs.
+- Strengthened `test_udp_off_path_spoofing_resistance` to assert that no spoofed/replayed data leaks through.
+
+### Removed
+
+- Duplicate `[project.optional-dependencies] dev` section from Python SDK `pyproject.toml` (now uses `[dependency-groups]` exclusively).
+
+### Version Bumps
+
+- C Core (`usmp.h`, `usmp_connect.c`): `0.6.0` → `1.0.0`
+- Arduino Port (`usmp_api.h`, `library.json`, `library.properties`): `0.6.0` → `1.0.0`
+- ESP32 Port (`idf_component.yml`): `0.6.0` → `1.0.0`
+- Python SDK (`pyproject.toml`, `__init__.py`): `0.6.0` → `1.0.0`
+- Root workspace (`pyproject.toml`): `0.6.0` → `1.0.0`
+
+---
+
+## [0.6.0] — 2026-06-xx
+
+### Added
+
+- UDP transport support (ESP32, Arduino, Python SDK) — production-ready.
+- UDP stateless cookie-based return-routability verification (HELLO_RETRY).
+- Sliding replay window (64-bit bitmap) for UDP anti-replay protection.
+- Global ECDH handshake semaphore to prevent CPU exhaustion from spoofed-IP floods.
+- Per-IP concurrent handshake limits.
+- Session timeout watchdog.
+
+## [0.5.0] — 2026-05-xx
+
+### Added
+
+- Initial UDP transport implementation.
+- Compile-time PSK removed; runtime PSK enforcement with 16-byte minimum.
+
+## [0.4.7] — 2026-04-xx
+
+### Added
+
+- Deterministic nonces (`seq || session_id[0..7]`).
+- Rate limiting with exponential backoff for failed handshakes.
+- Dynamic payload fragmentation and reassembly.
+
+## [0.4.0] — 2026-03-xx
+
+### Added
+
+- Published on ESP Component Registry and PyPI.
+- TCP transport support.
+- Initial Python SDK.
+
+## [0.3.0] — 2026-02-xx
+
+### Added
+
+- Core protocol implementation.
+- Arduino port.
+- Keepalive mechanism.

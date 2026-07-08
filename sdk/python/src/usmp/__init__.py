@@ -16,6 +16,7 @@ from .errors import (
     SequenceError,
     TimeoutError,
     USMPError,
+    USMPTimeoutError,
     VersionError,
 )
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
@@ -38,7 +39,8 @@ __all__ = [
     "AuthError",
     "CryptoError",
     "SequenceError",
-    "TimeoutError",
+    "USMPTimeoutError",
+    "TimeoutError",  # deprecated alias
     "ConnectionClosedError",
     # Frame
     "encode_frame",
@@ -53,4 +55,4 @@ __all__ = [
     "USMPClient",
 ]
 
-__version__ = "0.5.1"
+__version__ = "1.0.0"

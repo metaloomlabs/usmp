@@ -1,6 +1,6 @@
-# USMP Technical Specification | Version v0.5.1
+# USMP Technical Specification | Version v1.0.0
 
-Welcome to the official technical specification for the **Unified Secure Multi-transport Protocol (USMP) v0.5.1**.
+Welcome to the official technical specification for the **Unified Secure Multi-transport Protocol (USMP) v1.0.0**.
 
 This document serves as the canonical reference for developers implementing USMP client libraries, server SDKs, or alternative transport adapters. It covers frame layouts, cryptographic sequences, state machine rules, and resource limits.
 
@@ -22,6 +22,7 @@ USMP is a lightweight, binary, session-oriented protocol designed to bridge the 
   * `u8`: Unsigned 8-bit integer (1 byte)
   * `u16`: Unsigned 16-bit integer (2 bytes, little-endian)
   * `u32`: Unsigned 32-bit integer (4 bytes, little-endian)
+  * `u64`: Unsigned 64-bit integer (8 bytes, little-endian)
   * `bytes[N]`: Fixed-length array of $N$ bytes
   * `bytes[*]`: Variable-length byte array
 
@@ -46,9 +47,9 @@ Every USMP packet is serialized into a single binary frame. The header occupies 
 ### Field Reference
 
 * **`magic`** *(u16, offset 0)*: Frame boundary marker. Must always be `0xABCD`. If a receiver parses a packet starting with any other value, it must drop the transport connection immediately.
-* **`version`** *(u8, offset 2)*: Protocol version. Currently `0x01`. If a receiver gets an unsupported version, it terminates the connection immediately.
+* **`version`** *(u8, offset 2)*: Wire protocol version. Currently `0x02`. If a receiver gets an unsupported version, it terminates the connection immediately.
 * **`type`** *(u8, offset 3)*: Packet identifier. Determines the payload structure and processing rules (see Section 4).
-* **`seq`** *(u32, offset 4)*: Monotonic sequence number. Starts at `0` for the first post-handshake packet and increments by 1 per frame. Handshake packets always carry `seq = 0`. If a receiver receives an out-of-order sequence number, it terminates the session.
+* **`seq`** *(u32, offset 4)*: Monotonic sequence number. Starts at `0` for the first post-handshake packet and increments by 1 per frame. Handshake packets always carry `seq = 0`. For TCP, if a receiver receives an out-of-order sequence number, it terminates the session. For UDP, a sliding replay window is used instead (see Section 8.1).
 * **`length`** *(u16, offset 8)*: Byte length of the variable `payload` field (maximum `480`).
 * **`crc`** *(u16, offset 10)*: CRC-16/IBM error check (polynomial `0xA001`, initial value `0xFFFF`) calculated over bytes `0..9` (the header excluding the CRC field) plus the variable `payload` bytes.
 * **`payload`** *(bytes[length], offset 12)*: Handshake payloads are plaintext. Post-handshake payloads are encrypted with AES-256-GCM, containing the ciphertext followed by a 16-byte authentication tag:
@@ -58,7 +59,7 @@ Every USMP packet is serialized into a single binary frame. The header occupies 
 
 | Value | Name | Direction | Encrypted? | Description / Role |
 |:---|:---|:---|:---|:---|
-| `0x01` | `PKT_HELLO` | Client → Server | No | Announces Device ID and client public key `pub_C`. |
+| `0x01` | `PKT_HELLO` | Client → Server | No | Announces Device ID and client public key `pub_C`. Over UDP, may include a return-routability cookie (see Section 5.1). |
 | `0x02` | `PKT_CHALLENGE` | Server → Client | No | Pushes server challenge `nonce` and public key `pub_S`. |
 | `0x03` | `PKT_HELLO_ACK` | Client → Server | No | Proves client identity via HMAC, binding handshake keys. |
 | `0x04` | `PKT_SESSION_OK` | Server → Client | No | Confirms server identity, sends Session ID. |
@@ -67,11 +68,14 @@ Every USMP packet is serialized into a single binary frame. The header occupies 
 | `0x07` | `PKT_PONG` | Both | Yes | Keepalive response. |
 | `0x08` | `PKT_BYE` | Both | Yes | Graceful connection exit. |
 | `0x09` | `PKT_DATA_FRAG` | Both | Yes | Payload fragment (initial/middle chunks). |
+| `0x0A` | `PKT_HELLO_RETRY` | Server → Client | No | UDP return-routability cookie challenge (see Section 5.6). |
 | `0xFF` | `PKT_ERROR` | Both | No | Reserved (unused diagnostic telemetry). |
 
 ## 5. The Handshake Sequence
 
-The handshake is a 4-step mutual key-exchange and verification routine. It must complete successfully before any data frames can be sent:
+The handshake is a mutual key-exchange and verification routine. It must complete successfully before any data frames can be sent. Over **TCP**, the handshake is a 4-step sequence. Over **UDP**, an additional return-routability step precedes it (see Section 5.6).
+
+### TCP Handshake (4 steps)
 
 ```text
 Client (Device)                                      Server (Gateway)
@@ -91,10 +95,11 @@ Client (Device)                                      Server (Gateway)
 
 ### 5.1 `PKT_HELLO` (0x01)
 
-* **Payload Length**: 38 bytes
+* **Payload Length**: 38 bytes (TCP) or 54 bytes (UDP with cookie)
 * **Structure**:
   * `0..5` (6 bytes): `device_id` (Station Wi-Fi MAC address).
   * `6..37` (32 bytes): `pub_C` (client's ephemeral Curve25519 public key).
+  * `38..53` (16 bytes, UDP only): `cookie` — return-routability cookie from a prior `PKT_HELLO_RETRY`. Omitted on the initial HELLO over UDP; included on the retry.
 
 ### 5.2 `PKT_CHALLENGE` (0x02)
 
@@ -124,9 +129,31 @@ $$\text{session\_key} = \text{HKDF-SHA256}(\text{ikm}=\text{shared}, \text{salt}
 
 * **Payload Length**: 48 bytes
 * **Structure**:
-  * `0..15` (16 bytes): `session_id` (random 16-byte session identifier).
+  * `0..15` (16 bytes): `session_id` (random 128-bit session identifier).
   * `16..47` (32 bytes): `hmac_server` = $\text{HMAC-SHA256}(\text{PSK}, \text{nonce} \parallel \text{session\_id} \parallel \text{pub\_C} \parallel \text{pub\_S})$
 * *Validation*: The client computes the expected server HMAC and validates it. If it fails, the connection is aborted immediately.
+
+### 5.6 UDP Return-Routability (`PKT_HELLO_RETRY`, 0x0A)
+
+Over connectionless transports (UDP), the server must verify the client's return address before performing expensive ECDH operations. This prevents amplification attacks from spoofed source IPs.
+
+```text
+Client (Device)                                      Server (Gateway)
+      │                                                     │
+      │ ─── 1. PKT_HELLO (device_id, pub_C) ──────────────> │
+      │                                                     │  (server computes
+      │ <── 2. PKT_HELLO_RETRY (cookie) ─────────────────── │   stateless cookie)
+      │                                                     │
+      │ ─── 3. PKT_HELLO (device_id, pub_C, cookie) ──────> │
+      │                                                     │  (server verifies
+      │ <── 4. PKT_CHALLENGE (nonce, pub_S) ─────────────── │   cookie, proceeds)
+      │                                                     │
+      │       ... continues as TCP steps 3–4 ...            │
+```
+
+* **`PKT_HELLO_RETRY` Payload Length**: 16 bytes
+* **Structure**:
+  * `0..15` (16 bytes): `cookie` — a server-generated stateless HMAC-based token binding the client's address and `device_id`. The server does **not** allocate any state until the cookie is returned.
 
 ## 6. Authenticated Encryption (AES-GCM)
 
@@ -169,14 +196,42 @@ The receiver decrypts and appends each chunk sequentially. Reassembly is complet
 * If a control frame (`PING`, `PONG`, `BYE`) is interleaved while reassembly is in progress, the session is terminated due to a protocol violation (`ERR_SEQ`).
 * If the fragment count exceeds 4 frames before completion, the session is dropped (`ERR_BAD_FRAME`).
 
-## 8. Keepalive & Timeout watchdogs
+## 8. Keepalive, Timeout Watchdogs & Anti-Replay
+
+### 8.1 Keepalive Timers
 
 USMP uses asymmetrical timers to verify connections:
 
 * **Client Keepalive (TX-driven)**: The client monitors its own **transmit inactivity** (time elapsed since the client last sent a frame). It sends a `PKT_PING` frame every 30 seconds if it has been idle. **Incoming packets do not reset this timer.**
 * **Server Watchdog (RX-driven)**: The server tracks **receive inactivity** (time elapsed since the server last received a packet from the client). If a client fails to transmit a packet (telemetry or PING) within the configured session timeout (default 60 seconds), the server closes the session. **Outgoing packets sent to the client do not reset this timer.**
 
-## 9. Error Reference (Reserved)
+### 8.2 UDP Sliding Replay Window
+
+Over connectionless transports, strict monotonic sequence enforcement is impractical because packets may arrive out-of-order. USMP uses a 64-bit sliding bitmap window for UDP anti-replay protection:
+
+* The receiver tracks the **highest authenticated sequence number** (`rx_seq`) and a 64-bit bitmap (`rx_window_bitmap`) representing the acceptance state of the 64 most recent sequence numbers.
+* **Acceptance rules**:
+  1. If `pkt.seq > rx_seq`: the packet is **ahead** of the window — accept, slide the window forward, and mark as received.
+  2. If `pkt.seq >= rx_seq - 63` and `pkt.seq <= rx_seq`: the packet is **within** the window — check the corresponding bit. Accept only if the bit is unset (not a duplicate).
+  3. If `pkt.seq < rx_seq - 63`: the packet is **too old** (behind the window) — drop silently.
+* **Critical**: the replay window bitmap is updated **only after** successful AES-GCM authentication, preventing an attacker from advancing the window with forged packets.
+
+### 8.3 Receive Iteration Cap
+
+To mitigate CPU exhaustion from floods of malformed or unauthenticated packets, `usmp_recv` limits the number of receive-and-parse attempts to **10 per call**. If 10 consecutive packets fail validation (parse error, decryption failure, replay duplicate), the call returns 0 (no data) rather than looping indefinitely. This bounds worst-case CPU time on UDP transports.
+
+## 9. Pre-Shared Key (PSK) Requirements
+
+USMP authenticates both endpoints using a **Pre-Shared Key (PSK)** that must be provisioned at runtime:
+
+* **Minimum length**: 16 bytes (128-bit).
+* **Recommended**: 32 bytes generated via a CSPRNG (e.g., `os.urandom(32)` or hardware RNG).
+* **Compile-time PSK is not supported**: Attempting to define `USMP_PSK` at compile time will produce a build error. The PSK must be loaded from secure storage, an HSM, or secure boot provisioning.
+* **Lifetime**: The PSK pointer (`ctx.psk`) must remain valid for the entire session lifetime.
+
+> **⚠️ Known Limitation**: USMP v1.0 relies on offline-provisioned symmetric PSKs. If the PSK is compromised, an attacker can impersonate either endpoint. A PAKE-based key agreement upgrade is planned for a future version to eliminate this gap.
+
+## 10. Error Reference (Reserved)
 
 *Note: The PKT_ERROR frame and error codes are reserved for future diagnostics. In the current reference implementation, errors result in immediate socket teardown without sending diagnostic frames.*
 
@@ -192,13 +247,13 @@ When a session terminates due to an error, a `PKT_ERROR` frame is defined to car
 | `0x06` | `ERR_TIMEOUT` | Inactivity watchdog or handshake timer expired. |
 | `0x07` | `ERR_INTERNAL` | Cryptographic engine or physical hardware failure. |
 
-## 10. Memory & Resource Footprint (C Reference)
+## 11. Memory & Resource Footprint (C Reference)
 
 USMP uses **zero heap allocations** once a session is established.
 
-* **Session Context (`usmp_t`)**:
-  * *32-bit (ESP32)*: **~112 bytes** of persistent RAM.
-  * *64-bit*: **~152 bytes** of persistent RAM.
+* **Session Context (`usmp_t`)** — 13 fields:
+  * *32-bit (ESP32)*: **~168 bytes** of persistent RAM.
+  * *64-bit*: **~216 bytes** of persistent RAM.
 * **Stack Bounding**:
   * Standard `usmp_send` or `usmp_recv` calls allocate transient frame buffers (~492 bytes each) on the stack, consuming up to ~1 KB of stack space.
 * **Handshake Peak Memory**:
@@ -206,3 +261,16 @@ USMP uses **zero heap allocations** once a session is established.
   * Dynamic Heap Allocations (freed and zeroed immediately after handshake):
     * Transient local buffers: **1 KB** (two 512-byte heap-allocated buffers to prevent stack overflows during the expensive key exchange phase).
     * mbedTLS contexts: **~2 KB to 4 KB** dynamic memory for ECDH arithmetic, seeds, and key negotiation.
+
+## 12. Transport Layer Summary
+
+| Transport | Reliability | Handshake | Replay Protection | Session Cap |
+|:---|:---|:---|:---|:---|
+| **TCP** | Stream-ordered | 4-step (Section 5) | Strict monotonic `seq` | Per-IP + global |
+| **UDP** | Datagram, unordered | 5-step with cookie (Section 5.6) | 64-bit sliding window (Section 8.2) | Per-IP + global |
+| **Serial/UART** | Stream-ordered | 4-step (Section 5) | Strict monotonic `seq` | N/A (point-to-point) |
+| **BLE** | Stream-ordered | 4-step (Section 5) | Strict monotonic `seq` | N/A (point-to-point) |
+
+---
+
+*USMP v1.0.0 — Released 2026-07-05. Licensed under Apache-2.0.*

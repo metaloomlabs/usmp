@@ -1,0 +1,76 @@
+cmake_minimum_required(VERSION 3.16)
+project(usmp C)
+
+# Enable C11 standard
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Enable compiler warnings and basic security hardening on GCC/Clang
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    add_compile_options(
+        -Wall
+        -Wextra
+        -Wconversion
+        -fstack-protector-strong
+        -D_FORTIFY_SOURCE=2
+    )
+endif()
+
+# Locate mbedtls
+find_package(MbedTLS QUIET)
+if(NOT MbedTLS_FOUND)
+    # Manual fallback for standard Linux installations (like apt-get libmbedtls-dev)
+    find_path(MBEDTLS_INCLUDE_DIRS mbedtls/ssl.h)
+    find_library(MBEDTLS_LIBRARY mbedtls)
+    find_library(MBEDX509_LIBRARY mbedx509)
+    find_library(MBEDCRYPTO_LIBRARY mbedcrypto)
+    
+    if(MBEDTLS_LIBRARY AND MBEDCRYPTO_LIBRARY)
+        set(MBEDTLS_LIBRARIES ${MBEDTLS_LIBRARY} ${MBEDX509_LIBRARY} ${MBEDCRYPTO_LIBRARY})
+        set(MbedTLS_FOUND TRUE)
+    endif()
+endif()
+
+# Include core library subdirectory
+add_subdirectory(core)
+
+# Build C unit tests target
+add_executable(usmp_tests
+    core/tests/test_main.c
+    core/tests/test_golden.c
+    core/tests/usmp_port_posix.c
+)
+
+target_include_directories(usmp_tests PRIVATE 
+    core/include
+    core/src
+    core/tests
+)
+
+target_link_libraries(usmp_tests PRIVATE usmp-core)
+
+# Build C interop client target
+add_executable(usmp_interop_client
+    core/tests/usmp_interop_client.c
+    core/tests/usmp_transport_posix.c
+    core/tests/usmp_port_posix.c
+)
+
+target_include_directories(usmp_interop_client PRIVATE
+    core/include
+    core/src
+    core/tests
+)
+
+target_link_libraries(usmp_interop_client PRIVATE usmp-core)
+
+# If mbedtls include directories and libraries were found, link them explicitly to the tests
+if(MbedTLS_FOUND)
+    target_include_directories(usmp-core PUBLIC ${MBEDTLS_INCLUDE_DIRS})
+    target_link_libraries(usmp-core PUBLIC ${MBEDTLS_LIBRARIES})
+    target_include_directories(usmp_tests PRIVATE ${MBEDTLS_INCLUDE_DIRS})
+    target_link_libraries(usmp_tests PRIVATE ${MBEDTLS_LIBRARIES})
+    target_include_directories(usmp_interop_client PRIVATE ${MBEDTLS_INCLUDE_DIRS})
+    target_link_libraries(usmp_interop_client PRIVATE ${MBEDTLS_LIBRARIES})
+endif()
+

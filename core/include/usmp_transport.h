@@ -14,6 +14,10 @@ typedef struct usmp_transport_s {
   int (*available)(struct usmp_transport_s* t);  // ← new: bytes waiting, 0=none, NULL=unsupported
   void (*destroy)(struct usmp_transport_s* t);
   void (*confirm_authenticated)(struct usmp_transport_s* t, uint32_t seq);
+  /* S3: install the derived directional session keys (32 bytes each) so a UDP transport
+     can authenticate session-phase UTACKs. NULL for transports that don't need it (TCP). */
+  void (*set_session_keys)(struct usmp_transport_s* t, const uint8_t* tx_key,
+                           const uint8_t* rx_key);
   void* ctx;
 } usmp_transport_t;
 

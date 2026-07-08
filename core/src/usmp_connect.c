@@ -46,7 +46,13 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
 
   memcpy(ctx->device_id, hs.device_id, USMP_DEVICE_ID_LEN);
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
-  memcpy(ctx->session_key, hs.session_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->tx_key, hs.tx_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->rx_key, hs.rx_key, USMP_SESSION_KEY_LEN);
+  /* S3: hand the derived keys to the transport so session-phase UTACKs are
+     authenticated. Synchronous client — keys are set before any session I/O. */
+  if (ctx->transport.set_session_keys) {
+    ctx->transport.set_session_keys(&ctx->transport, ctx->tx_key, ctx->rx_key);
+  }
   ctx->established = true;
   ctx->tx_seq = 0;
   ctx->rx_seq = 0;
@@ -71,7 +77,8 @@ int usmp_reconnect(usmp_t* ctx) {
   if (!ctx) return -1;
 
   /* Zeroise the old session key immediately on entering reconnect */
-  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+  mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
+  mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
 
   if (!ctx->transport.reconnect) {
     USMP_LOGE(TAG, "Transport does not support reconnect");
@@ -100,12 +107,18 @@ int usmp_reconnect(usmp_t* ctx) {
     goto cleanup;
   }
 
-  // device_id comes from hardware — unchanged between sessions
   memcpy(ctx->session_id, hs.session_id, USMP_SESSION_ID_LEN);
-  memcpy(ctx->session_key, hs.session_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->tx_key, hs.tx_key, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->rx_key, hs.rx_key, USMP_SESSION_KEY_LEN);
+  /* S3: hand the derived keys to the transport so session-phase UTACKs are
+     authenticated. Synchronous client — keys are set before any session I/O. */
+  if (ctx->transport.set_session_keys) {
+    ctx->transport.set_session_keys(&ctx->transport, ctx->tx_key, ctx->rx_key);
+  }
   ctx->established = true;
   ctx->tx_seq = 0;
   ctx->rx_seq = 0;
+  ctx->rx_window_bitmap = 0;
   ctx->last_tx_ms = usmp_port_millis();
 
   char _msg[128];
@@ -128,8 +141,37 @@ void usmp_close(usmp_t* ctx) {
   if (!ctx) return;
   if (ctx->transport.close) ctx->transport.close(&ctx->transport);
   ctx->established = false;
-  mbedtls_platform_zeroize(ctx->session_key, sizeof(ctx->session_key));
+  mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
+  mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "0.5.1"; }
+const char* usmp_get_version(void) { return "1.0.0"; }
+
+static usmp_log_level_t g_usmp_log_level = USMP_LOG_LEVEL_ERROR;
+
+void usmp_set_log_level(usmp_log_level_t level) { g_usmp_log_level = level; }
+
+usmp_log_level_t usmp_get_log_level(void) { return g_usmp_log_level; }
+
+static usmp_log_level_t level_char_to_enum(char level) {
+  switch (level) {
+    case 'E':
+      return USMP_LOG_LEVEL_ERROR;
+    case 'W':
+      return USMP_LOG_LEVEL_WARN;
+    case 'I':
+      return USMP_LOG_LEVEL_INFO;
+    case 'D':
+      return USMP_LOG_LEVEL_DEBUG;
+    default:
+      return USMP_LOG_LEVEL_NONE;
+  }
+}
+
+void usmp_log(char level, const char* tag, const char* msg) {
+  if (level_char_to_enum(level) > g_usmp_log_level) {
+    return;
+  }
+  usmp_port_log(level, tag, msg);
+}

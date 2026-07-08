@@ -47,9 +47,7 @@ def encode_frame(
 ) -> bytes:
     """Encode a USMP frame to bytes."""
     if len(payload) > USMP_MAX_PAYLOAD:
-        raise PayloadError(
-            f"Payload too large: {len(payload)} bytes, max {USMP_MAX_PAYLOAD}"
-        )
+        raise PayloadError(f"Payload too large: {len(payload)} bytes, max {USMP_MAX_PAYLOAD}")
 
     length = len(payload)
     crc = compute_frame_crc(USMP_MAGIC, version, int(type_), seq, length, payload)
@@ -81,18 +79,14 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
         raise PayloadError(f"Payload too large: {length} bytes")
 
     if len(data) < USMP_HEADER_SIZE + length:
-        raise PayloadError(
-            f"Payload truncated: have {len(data) - USMP_HEADER_SIZE}, need {length}"
-        )
+        raise PayloadError(f"Payload truncated: have {len(data) - USMP_HEADER_SIZE}, need {length}")
 
     payload = data[USMP_HEADER_SIZE : USMP_HEADER_SIZE + length]
 
     if verify_crc:
         expected_crc = compute_frame_crc(magic, version, type_, seq, length, payload)
         if crc != expected_crc:
-            raise CRCError(
-                f"CRC mismatch: got 0x{crc:04X}, expected 0x{expected_crc:04X}"
-            )
+            raise CRCError(f"CRC mismatch: got 0x{crc:04X}, expected 0x{expected_crc:04X}")
 
     return USMPFrame(
         magic=magic,

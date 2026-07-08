@@ -32,6 +32,9 @@ void app_main(void) {
   ctx.psk = s_psk;
   ctx.psk_len = sizeof(s_psk) - 1;  // exclude null terminator
 
+  // By default, only errors are logged. Uncomment below to see details.
+  // usmp_set_log_level(USMP_LOG_LEVEL_INFO);
+
   // ── Initial connect with retries ──────────────────────────────────────────
   bool connected = false;
   for (int attempt = 1; attempt <= USMP_CONNECT_RETRIES; ++attempt) {

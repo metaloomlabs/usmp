@@ -2,6 +2,25 @@
 
 #include <string.h>
 
+extern "C" {
+#include "mbedtls/constant_time.h"
+}
+#include "mbedtls/md.h"
+
+// S3: session-phase UTACKs (frame type >= 5) carry an 8-byte truncated HMAC-SHA256 over
+// their 7-byte header so an off-path attacker cannot forge an ACK. Handshake-phase UTACKs
+// (types 1-4) predate the session keys and stay unauthenticated.
+#define UTACK_HEADER_LEN 7
+#define UTACK_MAC_LEN 8
+
+// S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
+static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
+  uint8_t full[32];
+  const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  mbedtls_md_hmac(info, key, 32, header, UTACK_HEADER_LEN, full);
+  memcpy(out, full, UTACK_MAC_LEN);
+}
+
 // Transport hook implementations ────────────────────────────────────────────
 
 static int arduino_tcp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
@@ -80,10 +99,14 @@ static int arduino_tcp_available(usmp_transport_t* t) {
 
 bool USMPTCPTransport::connectWiFi() const {
   if (!_ssid) return true;  // WiFi managed externally — nothing to do
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(_ssid, _password);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 15000) return false;
+    if (millis() - start > 30000) return false;
     delay(500);
   }
   return true;
@@ -108,6 +131,8 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   t->reconnect = arduino_tcp_reconnect;
   t->available = arduino_tcp_available;
   t->destroy = arduino_tcp_destroy;
+  t->confirm_authenticated = NULL;
+  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
   t->ctx = ctx;
   return true;
 }
@@ -123,7 +148,8 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
   bool expect_ack = false;
   if (len >= 8) {
     type = data[3];
-    seq = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
+    seq =
+        data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
     expect_ack = true;
   }
 
@@ -152,11 +178,20 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
       if (n <= 0) continue;
 
       // Check if it is a transport UTACK
-      if (n >= 7 && temp[0] == 0xAC && temp[1] == 0xAC) {
+      if (n >= UTACK_HEADER_LEN && temp[0] == 0xAC && temp[1] == 0xAC) {
         uint8_t ack_type = temp[2];
-        uint32_t ack_seq = temp[3] | (temp[4] << 8) | (temp[5] << 16) | (temp[6] << 24);
+        uint32_t ack_seq = temp[3] | ((uint32_t)temp[4] << 8) | ((uint32_t)temp[5] << 16) |
+                           ((uint32_t)temp[6] << 24);
         if (ack_type == type && ack_seq == seq) {
-          return 0;  // Success! ACK received
+          // S3: a session-phase ACK (type >= 5) must carry a valid MAC keyed by tx_key;
+          // drop forged or unauthenticated ACKs so an off-path attacker can't spoof one.
+          if (type >= 5) {
+            if (!ctx->keys_set || n < UTACK_HEADER_LEN + UTACK_MAC_LEN) continue;
+            uint8_t expected[UTACK_MAC_LEN];
+            utack_mac(ctx->tx_key, temp, expected);
+            if (mbedtls_ct_memcmp(expected, temp + UTACK_HEADER_LEN, UTACK_MAC_LEN) != 0) continue;
+          }
+          return 0;  // Success! ACK received (and authenticated for session frames)
         }
         continue;
       }
@@ -205,30 +240,36 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (magic != 0xABCD) continue;
 
     uint8_t type = temp[3];
-    uint32_t seq = temp[4] | (temp[5] << 8) | (temp[6] << 16) | (temp[7] << 24);
+    uint32_t seq =
+        temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
 
-    // Send UTACK back immediately
-    uint8_t utack[7] = {0xAC,
-                        0xAC,
-                        type,
-                        (uint8_t)(seq & 0xFF),
-                        (uint8_t)((seq >> 8) & 0xFF),
-                        (uint8_t)((seq >> 16) & 0xFF),
-                        (uint8_t)((seq >> 24) & 0xFF)};
+    // Send UTACK back immediately. S3: authenticate session-phase UTACKs (type >= 5)
+    // with rx_key once keys are established; handshake UTACKs stay plaintext.
+    uint8_t utack[UTACK_HEADER_LEN + UTACK_MAC_LEN] = {0xAC,
+                                                       0xAC,
+                                                       type,
+                                                       (uint8_t)(seq & 0xFF),
+                                                       (uint8_t)((seq >> 8) & 0xFF),
+                                                       (uint8_t)((seq >> 16) & 0xFF),
+                                                       (uint8_t)((seq >> 24) & 0xFF)};
+    size_t utack_len = UTACK_HEADER_LEN;
+    if (type >= 5 && ctx->keys_set) {
+      utack_mac(ctx->rx_key, utack, utack + UTACK_HEADER_LEN);
+      utack_len = UTACK_HEADER_LEN + UTACK_MAC_LEN;
+    }
     ctx->udp.beginPacket(ctx->host, ctx->port);
-    ctx->udp.write(utack, sizeof(utack));
+    ctx->udp.write(utack, utack_len);
     ctx->udp.endPacket();
 
     // Duplicate detection
-    if (type < 5) {
-      if (ctx->last_rx_type > 0 && type <= ctx->last_rx_type) {
+    if (type < 5 || type == 0x0A) {
+      bool is_duplicate = (type == ctx->last_rx_type) ||
+                          (type == 0x0A && ctx->last_rx_type > 0) ||
+                          (type == 2 && ctx->last_rx_type == 4);
+      if (is_duplicate) {
         continue;  // Discard duplicate/old handshake packet
       }
       ctx->last_rx_type = type;
-    } else {
-      if (ctx->last_rx_seq_set && seq <= ctx->last_rx_seq) {
-        continue;  // Discard duplicate
-      }
     }
 
     if ((size_t)n > max_len) return -1;
@@ -277,13 +318,26 @@ static void arduino_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq)
   }
 }
 
+static void arduino_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
+                                         const uint8_t* rx_key) {
+  USMPArduinoUdpCtx* ctx = (USMPArduinoUdpCtx*)t->ctx;
+  if (!ctx) return;
+  memcpy(ctx->tx_key, tx_key, 32);
+  memcpy(ctx->rx_key, rx_key, 32);
+  ctx->keys_set = true;
+}
+
 // USMPUDPTransport methods
 bool USMPUDPTransport::connectWiFi() const {
   if (!_ssid) return true;  // WiFi managed externally — nothing to do
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
   WiFi.begin(_ssid, _password);
   uint32_t start = millis();
   while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 15000) return false;
+    if (millis() - start > 30000) return false;
     delay(500);
   }
   return true;
@@ -311,6 +365,7 @@ bool USMPUDPTransport::init(usmp_transport_t* t) const {
   t->available = arduino_udp_available;
   t->destroy = arduino_udp_destroy;
   t->confirm_authenticated = arduino_udp_confirm_authenticated;
+  t->set_session_keys = arduino_udp_set_session_keys;
   t->ctx = ctx;
   return true;
 }

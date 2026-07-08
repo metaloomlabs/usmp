@@ -21,16 +21,16 @@ static const char* TAG = "USMP_SESSION";
 
 static void build_aad(uint16_t magic, uint8_t version, uint8_t type, uint32_t seq, uint16_t length,
                       uint8_t* aad) {
-  aad[0] = magic & 0xFF;
-  aad[1] = (magic >> 8) & 0xFF;
+  aad[0] = (uint8_t)(magic & 0xFF);
+  aad[1] = (uint8_t)((magic >> 8) & 0xFF);
   aad[2] = version;
   aad[3] = type;
-  aad[4] = seq & 0xFF;
-  aad[5] = (seq >> 8) & 0xFF;
-  aad[6] = (seq >> 16) & 0xFF;
-  aad[7] = (seq >> 24) & 0xFF;
-  aad[8] = length & 0xFF;
-  aad[9] = (length >> 8) & 0xFF;
+  aad[4] = (uint8_t)(seq & 0xFF);
+  aad[5] = (uint8_t)((seq >> 8) & 0xFF);
+  aad[6] = (uint8_t)((seq >> 16) & 0xFF);
+  aad[7] = (uint8_t)((seq >> 24) & 0xFF);
+  aad[8] = (uint8_t)(length & 0xFF);
+  aad[9] = (uint8_t)((length >> 8) & 0xFF);
 }
 
 // Send an encrypted control frame (PING, PONG, BYE) with empty plaintext ───
@@ -38,7 +38,7 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   usmp_packet_t pkt;
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
-  pkt.version = 1;
+  pkt.version = USMP_VERSION;
   pkt.type = type;
   pkt.seq = ctx->tx_seq;
 
@@ -51,15 +51,14 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
 
   uint8_t nonce[USMP_GCM_NONCE_LEN];
-  nonce[0] = pkt.seq & 0xFF;
-  nonce[1] = (pkt.seq >> 8) & 0xFF;
-  nonce[2] = (pkt.seq >> 16) & 0xFF;
-  nonce[3] = (pkt.seq >> 24) & 0xFF;
+  nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+  nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+  nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+  nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
   memcpy(nonce + 4, ctx->session_id, 8);
 
   size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad), NULL, 0, pkt.payload, &out_len) !=
-      0)
+  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), NULL, 0, pkt.payload, &out_len) != 0)
     return -1;
 
   pkt.length = (uint16_t)out_len;
@@ -80,7 +79,9 @@ static int send_control(usmp_t* ctx, uint8_t type) {
 int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (!ctx || !ctx->established) return -1;
 
-  if (ctx->tx_seq >= 0xFFFFFFFF) {
+  uint32_t num_fragments =
+      (len == 0) ? 1 : (uint32_t)((len + USMP_MAX_DATA_LEN - 1) / USMP_MAX_DATA_LEN);
+  if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
     return -1;
@@ -104,7 +105,7 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     memset(&pkt, 0, sizeof(pkt));
 
     pkt.magic = USMP_MAGIC;
-    pkt.version = 1;
+    pkt.version = USMP_VERSION;
     pkt.type = (offset + chunk_len < len) ? USMP_TYPE_DATA_FRAG : USMP_TYPE_DATA;
     pkt.seq = ctx->tx_seq;
 
@@ -113,14 +114,14 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
 
     uint8_t nonce[USMP_GCM_NONCE_LEN];
-    nonce[0] = pkt.seq & 0xFF;
-    nonce[1] = (pkt.seq >> 8) & 0xFF;
-    nonce[2] = (pkt.seq >> 16) & 0xFF;
-    nonce[3] = (pkt.seq >> 24) & 0xFF;
+    nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+    nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+    nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+    nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
     memcpy(nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_encrypt(ctx->session_key, nonce, aad, sizeof(aad), data + offset, chunk_len,
+    if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data + offset, chunk_len,
                          pkt.payload, &out_len) != 0) {
       USMP_LOGE(TAG, "Encryption failed");
       return -1;
@@ -163,8 +164,14 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 
   uint16_t bytes_written = 0;
   uint8_t frame_count = 0;
+  uint32_t expected_frag_seq = 0;
+  int attempts = 0;
 
   for (int ctrl_count = 0;;) {
+    if (attempts++ >= 10) {
+      USMP_LOGW(TAG, "Max receive attempts reached per call — possible flood");
+      return 0;
+    }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
     if (len < 0) {
       USMP_LOGE(TAG, "Recv failed");
@@ -174,7 +181,30 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 
     if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
       USMP_LOGE(TAG, "Parse failed");
+      if (ctx->transport.confirm_authenticated) {
+        continue;  // UDP: drop unauthenticated packet and continue reading
+      }
       return -1;
+    }
+
+    // Sliding replay window check for UDP (L2)
+    if (ctx->transport.confirm_authenticated) {
+      if (pkt.seq >= 0xFFFFFFFF) {
+        USMP_LOGE(TAG, "RX sequence overflowed");
+        ctx->established = false;
+        return -1;
+      }
+      if (ctx->rx_seq >= 64 && pkt.seq <= ctx->rx_seq - 64) {
+        USMP_LOGD(TAG, "Packet sequence is too old");
+        continue;  // drop silently
+      }
+      if (pkt.seq <= ctx->rx_seq) {
+        uint32_t offset = ctx->rx_seq - pkt.seq;
+        if ((ctx->rx_window_bitmap & ((uint64_t)1 << offset)) != 0) {
+          USMP_LOGD(TAG, "Duplicate packet detected");
+          continue;  // duplicate, drop silently
+        }
+      }
     }
 
     /* Choose output buffer and max length for decryption */
@@ -216,15 +246,15 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, pkt.length, aad);
 
     uint8_t expected_nonce[USMP_GCM_NONCE_LEN];
-    expected_nonce[0] = pkt.seq & 0xFF;
-    expected_nonce[1] = (pkt.seq >> 8) & 0xFF;
-    expected_nonce[2] = (pkt.seq >> 16) & 0xFF;
-    expected_nonce[3] = (pkt.seq >> 24) & 0xFF;
+    expected_nonce[0] = (uint8_t)(pkt.seq & 0xFF);
+    expected_nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
+    expected_nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
+    expected_nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_decrypt(ctx->session_key, expected_nonce, aad, sizeof(aad), pkt.payload,
-                         pkt.length, dec_dest, &out_len) != 0) {
+    if (usmp_gcm_decrypt(ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload, pkt.length,
+                         dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
       if (ctx->transport.confirm_authenticated) {
         continue;  // UDP: drop unauthenticated packet and continue reading
@@ -232,23 +262,35 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       return -1;
     }
 
-    if (ctx->rx_seq >= 0xFFFFFFFF) {
-      USMP_LOGE(TAG, "RX sequence overflowed");
-      ctx->established = false;
-      return -1;
-    }
-
-    if (pkt.seq != ctx->rx_seq) {
-      snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu", (unsigned long)ctx->rx_seq,
-               (unsigned long)pkt.seq);
-      USMP_LOGE(TAG, _msg);
-      return -1;
-    }
-
-    ctx->rx_seq++;
-
     if (ctx->transport.confirm_authenticated) {
+      // Update sliding replay window on successful verification (L2)
+      if (pkt.seq > ctx->rx_seq) {
+        uint32_t shift = pkt.seq - ctx->rx_seq;
+        if (shift < 64) {
+          ctx->rx_window_bitmap = (ctx->rx_window_bitmap << shift) | 1;
+        } else {
+          ctx->rx_window_bitmap = 1;
+        }
+        ctx->rx_seq = pkt.seq;
+      } else {
+        uint32_t offset = ctx->rx_seq - pkt.seq;
+        ctx->rx_window_bitmap |= ((uint64_t)1 << offset);
+      }
       ctx->transport.confirm_authenticated(&ctx->transport, pkt.seq);
+    } else {
+      if (ctx->rx_seq >= 0xFFFFFFFF) {
+        USMP_LOGE(TAG, "RX sequence overflowed");
+        ctx->established = false;
+        return -1;
+      }
+
+      if (pkt.seq != ctx->rx_seq) {
+        snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu",
+                 (unsigned long)ctx->rx_seq, (unsigned long)pkt.seq);
+        USMP_LOGE(TAG, _msg);
+        return -1;
+      }
+      ctx->rx_seq++;
     }
 
     /* Handle control frames and loop back for the next frame */
@@ -286,6 +328,16 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     }
 
     /* It's a DATA or DATA_FRAG frame */
+    if (frame_count > 0) {
+      if (pkt.seq != expected_frag_seq) {
+        USMP_LOGE(TAG, "Protocol error: out-of-order fragment sequence");
+        return -1;
+      }
+      expected_frag_seq++;
+    } else {
+      expected_frag_seq = pkt.seq + 1;
+    }
+
     bytes_written += (uint16_t)out_len;
     frame_count++;
 
