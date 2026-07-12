@@ -1,0 +1,5 @@
+# Enable HKDF support in mbedTLS (required by USMP session key derivation)
+CONFIG_MBEDTLS_HKDF_C=y
+
+# Increase main task stack size to prevent stack overflow during cryptography operations
+CONFIG_MAIN_TASK_STACK_SIZE=16384
