@@ -5,9 +5,15 @@ import hashlib
 import hmac
 import logging
 import struct
+import time
 import typing
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from ..types import USMP_HEADER_SIZE
+from .._frame import encode_frame
+from .._frame import read_frame as _read_frame
+from ..types import USMP_HEADER_SIZE, PacketType, USMPFrame
+from .base import USMPListener, USMPTransport
 
 logger = logging.getLogger("usmp.transport.udp")
 
@@ -23,7 +29,7 @@ UTACK_HEADER_LEN = 7
 MAX_READ_BUFFER = 4096
 
 
-class UDPStream:
+class UDPStream(USMPTransport):
     """
     Adapter providing an asyncio stream-like interface over UDP.
     Implements a stop-and-wait ARQ reliability layer with UTACKs.
@@ -55,6 +61,18 @@ class UDPStream:
         self._tx_key: bytes | None = None
         self._rx_key: bytes | None = None
 
+    @property
+    def is_reliable(self) -> bool:
+        return False
+
+    async def read_frame(self, verify_crc: bool = True) -> USMPFrame:
+        return await _read_frame(self, verify_crc=verify_crc)
+
+    async def write_frame(self, type_: PacketType, payload: bytes, seq: int = 0) -> None:
+        data = encode_frame(type_, payload, seq)
+        self.write(data)
+        await self.drain()
+
     def set_session_keys(self, tx_key: bytes, rx_key: bytes) -> None:
         """S3: install the directional session keys once the handshake completes.
 
@@ -69,6 +87,13 @@ class UDPStream:
     def _utack_mac(key: bytes, header: bytes) -> bytes:
         """S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header."""
         return hmac.new(key, header, hashlib.sha256).digest()[:UTACK_MAC_LEN]
+
+    def _build_utack(self, type_val: int, seq_val: int) -> bytes:
+        """Build a UTACK packet, adding HMAC for session-phase types (>= 5)."""
+        header = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
+        if type_val >= 5 and self._rx_key is not None:
+            header += self._utack_mac(self._rx_key, header)
+        return header
 
     def feed_packet(self, data: bytes) -> None:
         """Feed an incoming datagram from the network."""
@@ -105,8 +130,6 @@ class UDPStream:
             return
 
         # U2 fix: enforce one-frame-per-datagram on UDP
-        if len(data) < USMP_HEADER_SIZE:
-            return
         length = struct.unpack("<H", data[8:10])[0]
         if len(data) != USMP_HEADER_SIZE + length:
             logger.debug(
@@ -120,12 +143,7 @@ class UDPStream:
         seq_val = struct.unpack("<I", data[4:8])[0]
 
         # Send UTACK back immediately
-        utack = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
-        # S3: authenticate session-phase UTACKs (type >= 5) once keys are established,
-        # keyed by rx_key (the key we decrypted this frame with).
-        if type_val >= 5 and self._rx_key is not None:
-            utack += self._utack_mac(self._rx_key, utack)
-        self._transport.sendto(utack, self._remote_addr)
+        self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
 
         # Duplicate detection for handshake packets (types 1-4 and HELLO_RETRY)
         if type_val < 5 or type_val == 0x0A:
@@ -206,7 +224,7 @@ class UDPStream:
             try:
                 await asyncio.wait_for(self._ack_received_event.wait(), timeout=0.5)
                 return  # Success, ACK received!
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.debug(
                     "UDP Timeout on seq=%d, attempt=%d",
                     self._pending_send_seq,
@@ -233,6 +251,18 @@ class UDPStream:
             return self._remote_addr
         return self._transport.get_extra_info(name)
 
+    @classmethod
+    async def connect(cls, host: str, port: int) -> "UDPStream":
+        """Connect to a USMP server and complete the handshake."""
+        loop = asyncio.get_running_loop()
+        stream_future = loop.create_future()
+        # Note: DatagramEndpoint will be closed automatically on client disconnection
+        await loop.create_datagram_endpoint(
+            lambda: ClientUDPProtocol(stream_future),
+            remote_addr=(host, port),
+        )
+        return await stream_future
+
 
 class ClientUDPProtocol(asyncio.DatagramProtocol):
     def __init__(self, stream_future: asyncio.Future["UDPStream"]):
@@ -240,7 +270,8 @@ class ClientUDPProtocol(asyncio.DatagramProtocol):
         self.stream: UDPStream | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        assert isinstance(transport, asyncio.DatagramTransport)
+        if not isinstance(transport, asyncio.DatagramTransport):
+            raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
         remote_addr = transport.get_extra_info("peername")
         self.stream = UDPStream(transport, remote_addr, is_server=False)
         self.stream_future.set_result(self.stream)
@@ -259,14 +290,153 @@ class ClientUDPProtocol(asyncio.DatagramProtocol):
 
 
 class ServerUDPProtocol(asyncio.DatagramProtocol):
-    def __init__(self, server: typing.Any):
-        self.server = server
+    def __init__(self, listener: Any):
+        self.listener = listener
         self.transport: asyncio.DatagramTransport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        assert isinstance(transport, asyncio.DatagramTransport)
+        if not isinstance(transport, asyncio.DatagramTransport):
+            raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
         self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         if self.transport:
-            self.server._handle_udp_datagram(self.transport, data, addr)
+            self.listener._handle_udp_datagram(self.transport, data, addr)
+
+
+class UDPListener(USMPListener):
+    """UDP Server Listener implementing stateless cookie handshake and demultiplexing."""
+
+    def __init__(self, host: str, port: int, server: Any) -> None:
+        self._host = host
+        self._port = port
+        self._server = server
+        self._transport: asyncio.DatagramTransport | None = None
+        self._handler: Callable[[USMPTransport], Awaitable[None]] | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    @property
+    def _udp_sessions(self) -> dict[tuple[str, int], UDPStream]:
+        return self._server._udp_sessions
+
+    @property
+    def _udp_handshakes(self) -> dict[tuple[str, int], UDPStream]:
+        return self._server._udp_handshakes
+
+    async def start(self, handler: Callable[[USMPTransport], Awaitable[None]]) -> None:
+        self._handler = handler
+        loop = asyncio.get_running_loop()
+        self._transport, _ = await loop.create_datagram_endpoint(
+            lambda: ServerUDPProtocol(self),
+            local_addr=(self._host, self._port),
+        )
+        logger.info("Listening on UDP %s:%d", self._host, self._port)
+
+    async def stop(self) -> None:
+        if self._transport:
+            self._transport.close()
+            self._transport = None
+        # Close all active sessions
+        for stream in list(self._udp_sessions.values()):
+            stream.close()
+        for stream in list(self._udp_handshakes.values()):
+            stream.close()
+        self._udp_sessions.clear()
+        self._udp_handshakes.clear()
+
+    def _handle_udp_datagram(
+        self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]
+    ) -> None:
+        # Local import breaks the udp <-> _handshake import cycle.
+        from .._handshake import _failed_handshakes
+
+        # 1. Parse packet type
+        is_utack = len(data) >= 7 and data[:2] == b"\xac\xac"
+        type_val = data[2] if is_utack else data[3] if len(data) >= 12 else None
+
+        # 2. Route handshake packets (type_val < 5) to self._udp_handshakes
+        if type_val is not None and type_val < 5:
+            stream = self._udp_handshakes.get(addr)
+            if stream is not None:
+                stream.feed_packet(data)
+                return
+
+            # Only HELLO packet (type 0x01) can initiate a new handshake
+            if type_val != 0x01:
+                return
+
+            # Enforce UDP stateless cookie return-routability verification (U3/U4)
+            if len(data) == 50:
+                # S4 fix: rate-limit the cookie path before any HMAC or sendto work,
+                # keyed on the (still-unverified) source IP.
+                if not self._server._allow_udp_cookie(addr[0]):
+                    return
+
+                # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
+                type_val = data[3]
+                seq_val = struct.unpack("<I", data[4:8])[0]
+                utack = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
+                transport.sendto(utack, addr)
+
+                time_bucket = int(time.time() // 30)
+                msg = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                cookie = hmac.new(self._server._cookie_secret, msg, hashlib.sha256).digest()[:16]
+
+                retry_packet = encode_frame(PacketType.HELLO_RETRY, cookie)
+                transport.sendto(retry_packet, addr)
+                return
+            elif len(data) == 66:
+                cookie = data[50:66]
+                time_bucket = int(time.time() // 30)
+                msg1 = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
+                msg2 = f"{addr[0]}:{addr[1]}:{time_bucket - 1}".encode()
+                expected1 = hmac.new(self._server._cookie_secret, msg1, hashlib.sha256).digest()[
+                    :16
+                ]
+                expected2 = hmac.new(self._server._cookie_secret, msg2, hashlib.sha256).digest()[
+                    :16
+                ]
+
+                if not (
+                    hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)
+                ):
+                    # Invalid cookie, silently ignore
+                    return
+            else:
+                # Invalid size for initial HELLO, ignore
+                return
+
+            # Check rate limiter lockout
+            limiter_key = addr[0]
+            now = time.monotonic()
+            entry = _failed_handshakes.get(limiter_key)
+            if entry:
+                _, lockout_until, _ = entry
+                if lockout_until > now:
+                    return
+
+            # Check concurrent handshakes limit to prevent task exhaustion
+            in_progress = self._server._udp_in_progress_handshakes.get(limiter_key, 0)
+            if in_progress >= 3:
+                return
+
+            # Increment concurrent count
+            self._server._udp_in_progress_handshakes[limiter_key] = in_progress + 1
+
+            stream = UDPStream(transport, addr, is_server=True)
+            self._udp_handshakes[addr] = stream
+            stream.feed_packet(data)
+            task = asyncio.create_task(self._handle_udp_client(stream, addr))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            return
+
+        # 3. Route data packets (type_val >= 5 or UTACK for type_val >= 5) to self._udp_sessions
+        else:
+            stream = self._udp_handshakes.get(addr) or self._udp_sessions.get(addr)
+            if stream is not None:
+                stream.feed_packet(data)
+
+    async def _handle_udp_client(self, stream: UDPStream, addr: tuple[str, int]) -> None:
+        if self._handler:
+            await self._handler(stream)

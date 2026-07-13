@@ -1,13 +1,17 @@
+# src/usmp/_handshake.py
+
 import asyncio
 import hashlib
 import hmac
 import os
+import struct
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any, overload
 
 from ._crypto import derive_session_keys, generate_keypair
-from ._frame import read_frame, write_frame
 from .errors import AuthError, HandshakeError
+from .transport.base import USMPTransport, coerce_transport
 from .types import (
     USMP_DEVICE_ID_LEN,
     USMP_HMAC_LEN,
@@ -31,30 +35,43 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
     return hmac.new(psk, data, hashlib.sha256).digest()
 
 
-def _install_udp_keys(transport: Any, tx_key: bytes, rx_key: bytes) -> None:
-    """S3: hand session keys to a UDP transport so it can authenticate session-phase
-    UTACKs. No-op for transports (e.g. TCP) without a set_session_keys() method."""
-    setter = getattr(transport, "set_session_keys", None)
-    if setter is not None:
-        setter(tx_key, rx_key)
+_PSK = bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]]
+
+
+@overload
+async def server_handshake(transport: USMPTransport, psk: _PSK, /) -> SessionInfo: ...
+
+
+@overload
+async def server_handshake(reader: Any, writer: Any, psk: _PSK) -> SessionInfo: ...
 
 
 async def server_handshake(
     reader: Any,
     writer: Any,
-    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]],
+    psk: _PSK | None = None,
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
     Returns SessionInfo on success, raises HandshakeError on failure.
     """
-    addr = writer.get_extra_info("peername")
+    if psk is None:
+        # Transport form: server_handshake(transport, psk)
+        transport = reader
+        resolved_psk_input = writer
+    else:
+        # Legacy stream form: server_handshake(reader, writer, psk)
+        transport = coerce_transport(reader, writer)
+        resolved_psk_input = psk
+
+    addr = transport.get_extra_info("peername")
     if addr and isinstance(addr, tuple):
         limiter_key = addr[0]
     elif addr:
         limiter_key = str(addr)
     else:
-        limiter_key = f"conn_{id(writer)}"
+        underlying_writer = getattr(transport, "_writer", transport)
+        limiter_key = f"conn_{id(underlying_writer)}"
 
     now = time.monotonic()
     entry = _failed_handshakes.get(limiter_key)
@@ -67,7 +84,7 @@ async def server_handshake(
     try:
         # ── Step 1: Receive HELLO [device_id(6) || pub_C(32)] ────────────────────
         try:
-            frame = await read_frame(reader, verify_crc=False)
+            frame = await transport.read_frame(verify_crc=False)
         except asyncio.IncompleteReadError as e:
             raise HandshakeError("Connection closed before HELLO") from e
 
@@ -80,41 +97,45 @@ async def server_handshake(
         device_id = frame.payload[:USMP_DEVICE_ID_LEN]
         pub_c = frame.payload[USMP_DEVICE_ID_LEN : USMP_DEVICE_ID_LEN + USMP_PUB_KEY_LEN]
 
-        if isinstance(psk, dict):
-            resolved_psk = psk.get(device_id)
+        if isinstance(resolved_psk_input, dict):
+            resolved_psk = resolved_psk_input.get(device_id)
             if resolved_psk is None:
-                resolved_psk = psk.get(b"")
+                resolved_psk = resolved_psk_input.get(b"")
             if resolved_psk is None:
                 raise HandshakeError("Device ID not registered")
-        elif isinstance(psk, bytes):
-            resolved_psk = psk
-        elif callable(psk):
-            res = psk(device_id)
+        elif isinstance(resolved_psk_input, bytes):
+            resolved_psk = resolved_psk_input
+        elif callable(resolved_psk_input):
+            res = resolved_psk_input(device_id)
             if isinstance(res, bytes):
                 resolved_psk = res
-            else:
+            elif isinstance(res, Awaitable):
                 resolved_psk = await res
+            else:
+                raise HandshakeError("Callable PSK did not return bytes or Awaitable")
         else:
             raise HandshakeError("Invalid PSK type")
 
-        if not resolved_psk or len(resolved_psk) < 16:
-            raise HandshakeError("Resolved PSK must be at least 16 bytes long")
+        # Validate type before length so length is only ever measured on bytes.
+        if not isinstance(resolved_psk, bytes):
+            raise HandshakeError("Resolved PSK must be bytes")
 
-        assert isinstance(resolved_psk, bytes)
+        if len(resolved_psk) < 16:
+            raise HandshakeError("Resolved PSK must be at least 16 bytes long")
 
         # ── Generate server keypair ───────────────────────────────────────────────
         priv_s, pub_s = generate_keypair()
 
         # ── Step 2: Send CHALLENGE [nonce(32) || pub_S(32)] ──────────────────────
         nonce = os.urandom(USMP_NONCE_LEN)
-        await write_frame(writer, PacketType.CHALLENGE, nonce + pub_s)
+        await transport.write_frame(PacketType.CHALLENGE, nonce + pub_s)
 
         # ── Derive session key ────────────────────────────────────────────────────
         session_key = derive_session_keys(priv_s, pub_c, nonce, pub_c, pub_s)
 
         # ── Step 3: Receive HELLO_ACK [hmac_client(32)] ──────────────────────────
         try:
-            frame = await read_frame(reader, verify_crc=False)
+            frame = await transport.read_frame(verify_crc=False)
         except asyncio.IncompleteReadError as e:
             raise HandshakeError("Connection closed before HELLO_ACK") from e
 
@@ -125,8 +146,6 @@ async def server_handshake(
             raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
         # ── Verify client HMAC ────────────────────────────────────────────────────
-        import struct
-
         prefix_client = struct.pack("<H", USMP_MAGIC) + bytes(
             [USMP_VERSION, int(PacketType.HELLO_ACK)]
         )
@@ -148,12 +167,11 @@ async def server_handshake(
         # able to authenticate the UTACK for it — otherwise it sends a plaintext UTACK the
         # client rejects. (tx=k_s2c, rx=k_c2s — see the SessionInfo mapping below.)
         k_c2s, k_s2c = session_key
-        _install_udp_keys(writer, tx_key=k_s2c, rx_key=k_c2s)
+        transport.set_session_keys(tx_key=k_s2c, rx_key=k_c2s)
 
-        await write_frame(writer, PacketType.SESSION_OK, session_id + hmac_server)
+        await transport.write_frame(PacketType.SESSION_OK, session_id + hmac_server)
 
-        if limiter_key in _failed_handshakes:
-            del _failed_handshakes[limiter_key]
+        _failed_handshakes.pop(limiter_key, None)
 
         k_c2s, k_s2c = session_key
 
@@ -207,27 +225,52 @@ async def server_handshake(
         raise
 
 
+@overload
+async def client_handshake(
+    transport: USMPTransport, psk: bytes, device_id: bytes, /
+) -> SessionInfo: ...
+
+
+@overload
+async def client_handshake(
+    reader: Any, writer: Any, psk: bytes, device_id: bytes
+) -> SessionInfo: ...
+
+
 async def client_handshake(
     reader: Any,
     writer: Any,
-    psk: bytes,
-    device_id: bytes,
+    psk: bytes | None = None,
+    device_id: bytes | None = None,
 ) -> SessionInfo:
     """
     Run the client side of the USMP handshake.
     """
-    if not psk or len(psk) < 16:
+    if device_id is None:
+        # Transport form: client_handshake(transport, psk, device_id)
+        transport = reader
+        actual_psk = writer
+        actual_device_id = psk
+    else:
+        # Legacy stream form: client_handshake(reader, writer, psk, device_id)
+        transport = coerce_transport(reader, writer)
+        actual_psk = psk
+        actual_device_id = device_id
+
+    if not actual_psk or len(actual_psk) < 16:
         raise ValueError("PSK must be configured and at least 16 bytes long")
+    if actual_device_id is None:
+        raise ValueError("device_id must be configured")
 
     # ── Generate client keypair ───────────────────────────────────────────────
     priv_c, pub_c = generate_keypair()
 
     # ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
-    await write_frame(writer, PacketType.HELLO, device_id + pub_c)
+    await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c)
 
     # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
     try:
-        frame = await read_frame(reader, verify_crc=False)
+        frame = await transport.read_frame(verify_crc=False)
     except asyncio.IncompleteReadError as e:
         raise HandshakeError("Connection closed before CHALLENGE") from e
 
@@ -236,11 +279,11 @@ async def client_handshake(
             raise HandshakeError(f"Bad HELLO_RETRY length: {frame.length}")
         cookie = frame.payload[:16]
         # Resend HELLO with cookie appended
-        await write_frame(writer, PacketType.HELLO, device_id + pub_c + cookie)
+        await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c + cookie)
 
         # Read the actual CHALLENGE
         try:
-            frame = await read_frame(reader, verify_crc=False)
+            frame = await transport.read_frame(verify_crc=False)
         except asyncio.IncompleteReadError as e:
             raise HandshakeError("Connection closed before CHALLENGE (after retry)") from e
 
@@ -257,15 +300,13 @@ async def client_handshake(
     session_key = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-    import struct
-
     prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
-    hmac_client = _compute_hmac(psk, prefix_client, nonce, device_id, pub_c, pub_s)
-    await write_frame(writer, PacketType.HELLO_ACK, hmac_client)
+    hmac_client = _compute_hmac(actual_psk, prefix_client, nonce, actual_device_id, pub_c, pub_s)
+    await transport.write_frame(PacketType.HELLO_ACK, hmac_client)
 
     # ── Step 4: Receive SESSION_OK [session_id(16) || hmac_server(32)] ────────
     try:
-        frame = await read_frame(reader, verify_crc=False)
+        frame = await transport.read_frame(verify_crc=False)
     except asyncio.IncompleteReadError as e:
         raise HandshakeError("Connection closed by server — PSK rejected or server error") from e
 
@@ -283,7 +324,7 @@ async def client_handshake(
     prefix_server = struct.pack("<H", USMP_MAGIC) + bytes(
         [USMP_VERSION, int(PacketType.SESSION_OK)]
     )
-    expected_server = _compute_hmac(psk, prefix_server, nonce, session_id, pub_c, pub_s)
+    expected_server = _compute_hmac(actual_psk, prefix_server, nonce, session_id, pub_c, pub_s)
     if not hmac.compare_digest(expected_server, hmac_server):
         raise AuthError("Server HMAC verification failed — possible rogue server")
 
@@ -291,10 +332,10 @@ async def client_handshake(
 
     # S3: authenticate session-phase UTACKs now that keys are derived and the server is
     # verified. Done before returning, so keys are set before any client session I/O.
-    _install_udp_keys(writer, tx_key=k_c2s, rx_key=k_s2c)
+    transport.set_session_keys(tx_key=k_c2s, rx_key=k_s2c)
 
     return SessionInfo(
-        device_id=device_id,
+        device_id=actual_device_id,
         session_id=session_id,
         tx_key=k_c2s,  # client sends with client-to-server key
         rx_key=k_s2c,  # client receives with server-to-client key
