@@ -1,6 +1,6 @@
 [project]
 name = "usmp"
-version = "1.0.0"
+version = "1.0.1"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 license = "Apache-2.0"
