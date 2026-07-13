@@ -17,3 +17,11 @@ dev = ["mkdocs-material>=9.7.6", "mkdocs-minify-plugin>=0.8.0"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+warn_redundant_casts = true
+warn_unused_configs = true
+ignore_missing_imports = true
+files = ["sdk/python/src", "sdk/python/tests"]
+

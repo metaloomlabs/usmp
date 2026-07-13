@@ -1,5 +1,5 @@
-import asyncio
 import struct
+from typing import Any
 
 from .errors import CRCError, FrameError, MagicError, PayloadError, VersionError
 from .types import (
@@ -99,7 +99,7 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
     )
 
 
-async def read_frame(reader: asyncio.StreamReader, verify_crc: bool = True) -> USMPFrame:
+async def read_frame(reader: Any, verify_crc: bool = True) -> USMPFrame:
     """
     Read exactly one USMP frame from an asyncio StreamReader.
     Reads header first, then exact payload bytes — handles TCP stream fragmentation.
@@ -120,7 +120,7 @@ async def read_frame(reader: asyncio.StreamReader, verify_crc: bool = True) -> U
 
 
 async def write_frame(
-    writer: asyncio.StreamWriter,
+    writer: Any,
     type_: PacketType,
     payload: bytes,
     seq: int = 0,

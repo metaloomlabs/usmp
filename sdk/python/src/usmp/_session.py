@@ -6,7 +6,6 @@ import time
 from typing import Any
 
 from ._crypto import decrypt, encrypt
-from ._frame import read_frame, write_frame
 from .errors import ConnectionClosedError, FrameError, PayloadError, SequenceError, USMPError
 from .errors import TimeoutError as USMPTimeoutError
 from .types import (
@@ -28,14 +27,35 @@ class USMPSession:
     def __init__(
         self,
         reader: Any,
-        writer: Any,
-        info: SessionInfo,
+        writer: Any = None,
+        info: SessionInfo | None = None,
         recv_timeout: float | None = None,
     ):
-        self._reader = reader
-        self._writer = writer
-        self._info = info
-        self._recv_timeout = recv_timeout
+        if info is None:
+            # Caller passed USMPSession(transport, info, recv_timeout)
+            transport = reader
+            actual_info = writer
+            actual_recv_timeout = info
+        else:
+            # Caller passed USMPSession(reader, writer, info, recv_timeout)
+            from .transport.base import USMPTransport
+
+            if isinstance(reader, USMPTransport):
+                transport = reader
+            elif hasattr(reader, "set_session_keys"):
+                transport = reader
+            else:
+                from .transport.tcp import TCPTransport
+
+                transport = TCPTransport(reader, writer)
+            actual_info = info
+            actual_recv_timeout = recv_timeout
+
+        self._transport = transport
+        self._reader = transport  # legacy alias
+        self._writer = transport  # legacy alias
+        self._info = actual_info
+        self._recv_timeout = actual_recv_timeout
         self._last_recv: float = time.monotonic()  # updated on every inbound frame
 
     @property
@@ -73,7 +93,7 @@ class USMPSession:
                 magic=USMP_MAGIC,
                 plaintext=chunk,
             )
-            await write_frame(self._writer, packet_type, ciphertext, seq=seq)
+            await self._transport.write_frame(packet_type, ciphertext, seq=seq)
             self._info.tx_seq += 1
             offset += len(chunk)
 
@@ -92,12 +112,11 @@ class USMPSession:
 
             while True:
                 try:
-                    frame = await read_frame(self._reader)
+                    frame = await self._transport.read_frame()
                     self._last_recv = time.monotonic()
 
                     # Sliding replay window check for UDP (L2)
-                    confirm = getattr(self._reader, "confirm_authenticated", None)
-                    is_udp = confirm is not None
+                    is_udp = not self._transport.is_reliable
                     if is_udp:
                         if frame.seq <= self._info.rx_seq - 64:
                             continue  # too old, drop silently
@@ -118,7 +137,7 @@ class USMPSession:
                         nonce_ct_tag=frame.payload,
                     )
                 except (USMPError, ValueError):
-                    if getattr(self._reader, "confirm_authenticated", None) is not None:
+                    if not self._transport.is_reliable:
                         # UDP: drop unauthenticated/malformed packet and continue reading
                         continue
                     raise
@@ -141,8 +160,7 @@ class USMPSession:
                         offset = self._info.rx_seq - frame.seq
                         self._info.rx_window_bitmap |= 1 << offset
 
-                    if confirm is not None:
-                        confirm(frame.seq)
+                    self._transport.confirm_authenticated(frame.seq)
                 else:
                     if frame.seq != self._info.rx_seq:
                         raise SequenceError(
@@ -210,7 +228,7 @@ class USMPSession:
                     if frame_count >= USMP_MAX_FRAMES:
                         raise PayloadError("Protocol error: exceeded max fragments limit")
                 except (FrameError, SequenceError, ValueError):
-                    if is_udp:
+                    if not self._transport.is_reliable:
                         assembled_payload = bytearray()
                         frame_count = 0
                         expected_frag_seq = 0
@@ -238,7 +256,7 @@ class USMPSession:
             magic=USMP_MAGIC,
             plaintext=b"",
         )
-        await write_frame(self._writer, PacketType.PING, ciphertext, seq=seq)
+        await self._transport.write_frame(PacketType.PING, ciphertext, seq=seq)
         self._info.tx_seq += 1
 
     async def bye(self) -> None:
@@ -254,9 +272,9 @@ class USMPSession:
             magic=USMP_MAGIC,
             plaintext=b"",
         )
-        await write_frame(self._writer, PacketType.BYE, ciphertext, seq=seq)
+        await self._transport.write_frame(PacketType.BYE, ciphertext, seq=seq)
         self._info.tx_seq += 1
-        self._writer.close()
+        self._transport.close()
 
     async def _send_pong(self) -> None:
         seq = self._info.tx_seq
@@ -270,5 +288,5 @@ class USMPSession:
             magic=USMP_MAGIC,
             plaintext=b"",
         )
-        await write_frame(self._writer, PacketType.PONG, ciphertext, seq=seq)
+        await self._transport.write_frame(PacketType.PONG, ciphertext, seq=seq)
         self._info.tx_seq += 1

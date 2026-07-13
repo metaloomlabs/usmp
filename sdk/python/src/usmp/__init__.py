@@ -19,6 +19,7 @@ from .errors import (
     USMPTimeoutError,
     VersionError,
 )
+from .transport import register_transport
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
 __all__ = [
@@ -53,6 +54,8 @@ __all__ = [
     "USMPServer",
     # Client
     "USMPClient",
+    # Transport registry
+    "register_transport",
 ]
 
 __version__ = "1.0.0"

@@ -1,9 +1,9 @@
-import asyncio
 import logging
 import os
 
 from ._handshake import client_handshake
 from ._session import USMPSession
+from .transport.base import USMPTransport
 from .types import USMP_DEVICE_ID_LEN, USMPProtocol
 
 logger = logging.getLogger("usmp.client")
@@ -36,27 +36,17 @@ class USMPClient:
         self._device_id = device_id or os.urandom(USMP_DEVICE_ID_LEN)
         self._session: USMPSession | None = None
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
-        if self._protocol not in ("tcp", "udp"):
-            raise ValueError("Protocol must be 'tcp' or 'udp'")
+        self._transport: USMPTransport | None = None
 
     async def connect(self) -> None:
         """Connect to a USMP server and complete the handshake."""
-        if self._protocol == "udp":
-            from .transport.udp import ClientUDPProtocol
+        from .transport import get_transport_class
 
-            loop = asyncio.get_running_loop()
-            stream_future = loop.create_future()
-            transport, protocol = await loop.create_datagram_endpoint(
-                lambda: ClientUDPProtocol(stream_future),
-                remote_addr=(self._host, self._port),
-            )
-            stream = await stream_future
-            info = await client_handshake(stream, stream, self._psk, self._device_id)
-            self._session = USMPSession(stream, stream, info)
-        else:
-            reader, writer = await asyncio.open_connection(self._host, self._port)
-            info = await client_handshake(reader, writer, self._psk, self._device_id)
-            self._session = USMPSession(reader, writer, info)
+        transport_cls = get_transport_class(self._protocol)
+        # Using connect interface to set up connection
+        self._transport = await transport_cls.connect(self._host, self._port)
+        info = await client_handshake(self._transport, self._psk, self._device_id)
+        self._session = USMPSession(self._transport, info)
         logger.info(f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}")
 
     async def send(self, data: bytes) -> None:
@@ -75,6 +65,7 @@ class USMPClient:
         if self._session:
             await self._session.bye()
             self._session = None
+        self._transport = None
 
     def _ensure_connected(self) -> USMPSession:
         if self._session is None:

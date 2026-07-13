@@ -1,20 +1,15 @@
 # src/usmp/_server.py
 
 import asyncio
-import hashlib
-import hmac
 import logging
 import os
-import struct
 import time
-from typing import TYPE_CHECKING, Awaitable, Callable
-
-if TYPE_CHECKING:
-    from .transport.udp import UDPStream
+from typing import Any, Awaitable, Callable, cast
 
 from ._handshake import server_handshake
 from ._session import USMPSession
 from .errors import HandshakeError, USMPError
+from .transport.base import USMPListener, USMPTransport
 from .types import USMPProtocol
 
 logger = logging.getLogger("usmp")
@@ -76,21 +71,18 @@ class USMPServer:
         self._tcp_connections: dict[str, int] = {}
         self._handler: Callable[[USMPSession], Awaitable[None]] | None = None
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
-        if self._protocol not in ("tcp", "udp"):
-            raise ValueError("Protocol must be 'tcp' or 'udp'")
-        self._udp_sessions: dict[tuple[str, int], "UDPStream"] = {}
-        self._udp_handshakes: dict[tuple[str, int], "UDPStream"] = {}
+
+        # UDP state trackers preserved for test-suite compatibility
+        from .transport.udp import UDPStream
+
+        self._udp_sessions: dict[tuple[str, int], UDPStream] = {}
+        self._udp_handshakes: dict[tuple[str, int], UDPStream] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
-        # Ephemeral cookie secret for UDP return-routability
         self._cookie_secret = os.urandom(32)
-        # S4 fix: per-IP token bucket capping the pre-routability cookie-issuance path
-        # (one HMAC-SHA256 + two sendto()s per 50-byte HELLO). Without it a spoofed-source
-        # HELLO flood forces unbounded CPU/bandwidth. 10 tokens, refilled at 5/s, keyed on
-        # the (still-unverified) source IP. maps ip -> (tokens, last_refill_monotonic).
         self._udp_cookie_rate_limiter: dict[str, tuple[float, float]] = {}
-        # M2 fix: global cap on concurrent handshakes to prevent ECDH CPU exhaustion
-        # from spoofed-IP UDP floods. Per-IP limits are still enforced separately.
+
         self._handshake_semaphore = asyncio.Semaphore(10)
+        self._listener: USMPListener | None = None
 
     def on_session(
         self,
@@ -104,7 +96,6 @@ class USMPServer:
         """
         Monitors session activity. Closes the session if no DATA or PING
         is received within session_timeout seconds.
-        Checks every session_timeout/2 seconds to keep the window tight.
         """
         interval = self._session_timeout / 2
         while True:
@@ -122,18 +113,13 @@ class USMPServer:
                         await self._on_timeout(session.device_id, session.session_id)
                     except Exception as e:
                         logger.error("on_timeout callback raised: %s", e)
-                # Close the underlying writer — causes read_frame to raise in the
+                # Close the underlying transport — causes read_frame to raise in the
                 # handler, which unblocks and exits the session naturally
-                session._writer.close()
+                session._transport.close()
                 return
 
     def _allow_udp_cookie(self, ip: str) -> bool:
-        """S4: token-bucket rate limit for the UDP cookie-issuance path.
-
-        Returns True and consumes one token if a HELLO from ``ip`` may be answered, or
-        False if the per-IP budget is exhausted and the datagram must be dropped before
-        any HMAC/sendto work. Bucket: 10 tokens, refilled at 5 tokens/sec.
-        """
+        """Token-bucket rate limit for the UDP cookie-issuance path."""
         capacity = 10.0
         refill_per_sec = 5.0
         now = time.monotonic()
@@ -147,8 +133,7 @@ class USMPServer:
 
         self._udp_cookie_rate_limiter[ip] = (tokens - 1.0, now)
 
-        # Bound memory under a spoofed-source flood: once the map grows large, drop
-        # fully-refilled (idle) entries — a fresh entry defaults to a full bucket anyway.
+        # Bound memory under a spoofed-source flood
         if len(self._udp_cookie_rate_limiter) > 1000:
             self._udp_cookie_rate_limiter = {
                 k: v for k, v in self._udp_cookie_rate_limiter.items() if v[0] < capacity
@@ -156,253 +141,100 @@ class USMPServer:
 
         return True
 
-    def _handle_udp_datagram(
-        self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]
-    ) -> None:
-        from ._handshake import _failed_handshakes
-        from .transport.udp import UDPStream
+    def _handle_udp_datagram(self, transport: Any, data: bytes, addr: tuple[str, int]) -> None:
+        """Delegates UDP datagram handling to the current listener. For test compatibility."""
+        if self._listener and hasattr(self._listener, "_handle_udp_datagram"):
+            self._listener._handle_udp_datagram(transport, data, addr)
 
-        # 1. Parse packet type
-        is_utack = len(data) >= 7 and data[:2] == b"\xac\xac"
-        type_val = data[2] if is_utack else data[3] if len(data) >= 12 else None
+    async def _on_transport_connect(self, transport: USMPTransport) -> None:
+        addr = transport.get_extra_info("peername")
+        ip = addr[0] if addr and isinstance(addr, tuple) else str(addr)
 
-        # 2. Route handshake packets (type_val < 5) to self._udp_handshakes
-        if type_val is not None and type_val < 5:
-            stream = self._udp_handshakes.get(addr)
-            if stream is not None:
-                stream.feed_packet(data)
+        if transport.is_reliable:
+            # Enforce global connection limit
+            global_count = sum(self._tcp_connections.values())
+            if global_count >= self._max_connections:
+                logger.warning(
+                    "Global TCP connection limit reached (%d). Rejecting %s",
+                    self._max_connections,
+                    ip,
+                )
+                transport.close()
                 return
 
-            # Only HELLO packet (type 0x01) can initiate a new handshake
-            if type_val != 0x01:
+            # Enforce per-IP connection limit
+            ip_count = self._tcp_connections.get(ip, 0)
+            if ip_count >= self._max_connections_per_ip:
+                logger.warning(
+                    "Per-IP TCP connection limit reached for %s (%d). Rejecting",
+                    ip,
+                    self._max_connections_per_ip,
+                )
+                transport.close()
                 return
 
-            # Enforce UDP stateless cookie return-routability verification (U3/U4)
-            if len(data) == 50:
-                # S4 fix: rate-limit the cookie path before any HMAC or sendto work,
-                # keyed on the (still-unverified) source IP.
-                if not self._allow_udp_cookie(addr[0]):
-                    return
+            self._tcp_connections[ip] = ip_count + 1
 
-                from ._frame import encode_frame
-                from .types import PacketType
-
-                # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
-                type_val = data[3]
-                seq_val = struct.unpack("<I", data[4:8])[0]
-                utack = b"\xac\xac" + bytes([type_val]) + struct.pack("<I", seq_val)
-                transport.sendto(utack, addr)
-
-                time_bucket = int(time.time() // 30)
-                msg = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
-                cookie = hmac.new(self._cookie_secret, msg, hashlib.sha256).digest()[:16]
-
-                retry_packet = encode_frame(PacketType.HELLO_RETRY, cookie)
-                transport.sendto(retry_packet, addr)
-                return
-            elif len(data) == 66:
-                cookie = data[50:66]
-                time_bucket = int(time.time() // 30)
-                msg1 = f"{addr[0]}:{addr[1]}:{time_bucket}".encode()
-                msg2 = f"{addr[0]}:{addr[1]}:{time_bucket - 1}".encode()
-                expected1 = hmac.new(self._cookie_secret, msg1, hashlib.sha256).digest()[:16]
-                expected2 = hmac.new(self._cookie_secret, msg2, hashlib.sha256).digest()[:16]
-
-                if not (
-                    hmac.compare_digest(cookie, expected1) or hmac.compare_digest(cookie, expected2)
-                ):
-                    # Invalid cookie, silently ignore
-                    return
-            else:
-                # Invalid size for initial HELLO, ignore
-                return
-
-            # Check rate limiter lockout
-            limiter_key = addr[0]
-            now = time.monotonic()
-            entry = _failed_handshakes.get(limiter_key)
-            if entry:
-                _, lockout_until, _ = entry
-                if lockout_until > now:
-                    return
-
-            # Check concurrent handshakes limit to prevent task exhaustion
-            in_progress = self._udp_in_progress_handshakes.get(limiter_key, 0)
-            if in_progress >= 3:
-                return
-
-            # Increment concurrent count
-            self._udp_in_progress_handshakes[limiter_key] = in_progress + 1
-
-            stream = UDPStream(transport, addr, is_server=True)
-            self._udp_handshakes[addr] = stream
-            stream.feed_packet(data)
-            asyncio.create_task(self._handle_udp_client(stream, addr))
-            return
-
-        # 3. Route data packets (type_val >= 5 or UTACK for type_val >= 5) to self._udp_sessions
-        else:
-            stream = self._udp_handshakes.get(addr) or self._udp_sessions.get(addr)
-            if stream is not None:
-                stream.feed_packet(data)
-
-    async def _handle_udp_client(self, stream: "UDPStream", addr: tuple[str, int]) -> None:
         watchdog_task: asyncio.Task[None] | None = None
-        limiter_key = addr[0]
         handshake_decremented = False
+        limiter_key = ip
+
         try:
             async with self._handshake_semaphore:
                 info = await asyncio.wait_for(
-                    server_handshake(stream, stream, self._psk),
+                    server_handshake(transport, self._psk),
                     timeout=self._handshake_timeout,
                 )
 
-            # Immediately decrement handshake counter upon completion
-            if limiter_key in self._udp_in_progress_handshakes:
-                self._udp_in_progress_handshakes[limiter_key] -= 1
-                if self._udp_in_progress_handshakes[limiter_key] <= 0:
-                    self._udp_in_progress_handshakes.pop(limiter_key, None)
-            handshake_decremented = True
-
-            # Enforce global UDP active session limit
-            if len(self._udp_sessions) >= self._max_connections:
-                logger.warning(
-                    "Global UDP session limit reached (%d). Rejecting %s",
-                    self._max_connections,
-                    addr,
-                )
-                stream.close()
-                return
-
-            # Enforce per-IP UDP active session limit
-            ip_count = sum(1 for a in self._udp_sessions if a[0] == limiter_key)
-            if ip_count >= self._max_connections_per_ip:
-                logger.warning(
-                    "Per-IP UDP session limit reached for %s (%d). Rejecting",
-                    limiter_key,
-                    self._max_connections_per_ip,
-                )
-                stream.close()
-                return
-
-            # Clean up any existing active session for this client address
-            old_session_stream = self._udp_sessions.get(addr)
-            if old_session_stream is not None:
-                logger.info("Closing existing UDP session for %s to establish new one", addr)
-                old_session_stream.close()
-
-            # Promote handshake to active session
-            self._udp_sessions[addr] = stream
-            self._udp_handshakes.pop(addr, None)
-
-            logger.info(
-                "Session established (UDP): device=%s session=%s",
-                info.device_id_str,
-                info.session_id_str,
-            )
-
-            session = USMPSession(stream, stream, info)
-
-            # Start watchdog alongside the handler
-            watchdog_task = asyncio.create_task(
-                self._watchdog(session),
-                name=f"usmp-watchdog-{info.session_id_str}",
-            )
-
-            if self._handler:
-                await self._handler(session)
-
-        except HandshakeError as e:
-            logger.warning("Handshake failed (UDP/%s): %s", addr, e)
-        except asyncio.TimeoutError:
-            logger.warning("Handshake timeout (UDP/%s)", addr)
-        except USMPError as e:
-            logger.warning("Protocol error (UDP/%s): %s", addr, e)
-        except asyncio.IncompleteReadError:
-            logger.warning("Connection closed mid-frame (UDP/%s)", addr)
-        except (OSError, ConnectionResetError, EOFError) as e:
-            logger.warning("Connection lost (UDP/%s): %s", addr, e)
-        except Exception as e:
-            logger.error("Unexpected error (UDP/%s): %s", addr, e)
-        finally:
-            if watchdog_task is not None and not watchdog_task.done():
-                watchdog_task.cancel()
-                try:
-                    await watchdog_task
-                except asyncio.CancelledError:
-                    pass
-            stream.close()
-            if self._udp_handshakes.get(addr) is stream:
-                self._udp_handshakes.pop(addr, None)
-            if self._udp_sessions.get(addr) is stream:
-                self._udp_sessions.pop(addr, None)
-
-            # Decrement concurrent handshakes count (if not already done)
-            if not handshake_decremented:
+            if not transport.is_reliable:
+                # Decrement concurrent handshakes count
                 if limiter_key in self._udp_in_progress_handshakes:
                     self._udp_in_progress_handshakes[limiter_key] -= 1
                     if self._udp_in_progress_handshakes[limiter_key] <= 0:
                         self._udp_in_progress_handshakes.pop(limiter_key, None)
+                handshake_decremented = True
 
-            logger.info("Disconnected (UDP): %s", addr)
+                # Enforce global UDP active session limit
+                if len(self._udp_sessions) >= self._max_connections:
+                    logger.warning(
+                        "Global UDP session limit reached (%d). Rejecting %s",
+                        self._max_connections,
+                        addr,
+                    )
+                    transport.close()
+                    return
 
-    async def _handle_client(
-        self,
-        reader: asyncio.StreamReader,
-        writer: asyncio.StreamWriter,
-    ) -> None:
-        addr = writer.get_extra_info("peername")
-        logger.info("TCP connected: %s", addr)
+                # Enforce per-IP UDP active session limit
+                ip_count = sum(1 for a in self._udp_sessions if a[0] == limiter_key)
+                if ip_count >= self._max_connections_per_ip:
+                    logger.warning(
+                        "Per-IP UDP session limit reached for %s (%d). Rejecting",
+                        limiter_key,
+                        self._max_connections_per_ip,
+                    )
+                    transport.close()
+                    return
 
-        ip = addr[0] if addr and isinstance(addr, tuple) else str(addr)
+                # Clean up any existing active session for this client address
+                old_session_stream = self._udp_sessions.get(addr)
+                if old_session_stream is not None:
+                    logger.info("Closing existing UDP session for %s to establish new one", addr)
+                    old_session_stream.close()
 
-        # Enforce global connection limit (L1)
-        global_count = sum(self._tcp_connections.values())
-        if global_count >= self._max_connections:
-            logger.warning(
-                "Global TCP connection limit reached (%d). Rejecting %s",
-                self._max_connections,
-                ip,
-            )
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-            return
+                from .transport.udp import UDPStream
 
-        # Enforce per-IP connection limit (L1)
-        ip_count = self._tcp_connections.get(ip, 0)
-        if ip_count >= self._max_connections_per_ip:
-            logger.warning(
-                "Per-IP TCP connection limit reached for %s (%d). Rejecting",
-                ip,
-                self._max_connections_per_ip,
-            )
-            writer.close()
-            try:
-                await writer.wait_closed()
-            except Exception:
-                pass
-            return
+                self._udp_sessions[addr] = cast(UDPStream, transport)
+                self._udp_handshakes.pop(addr, None)
 
-        self._tcp_connections[ip] = ip_count + 1
-
-        watchdog_task: asyncio.Task[None] | None = None
-
-        try:
-            async with self._handshake_semaphore:
-                info = await asyncio.wait_for(
-                    server_handshake(reader, writer, self._psk),
-                    timeout=self._handshake_timeout,
-                )
+            proto_str = "TCP" if transport.is_reliable else "UDP"
             logger.info(
-                "Session established: device=%s session=%s",
+                "Session established (%s): device=%s session=%s",
+                proto_str,
                 info.device_id_str,
                 info.session_id_str,
             )
 
-            session = USMPSession(reader, writer, info)
+            session = USMPSession(transport, info)
 
             # Start watchdog alongside the handler
             watchdog_task = asyncio.create_task(
@@ -414,67 +246,79 @@ class USMPServer:
                 await self._handler(session)
 
         except HandshakeError as e:
-            logger.warning("Handshake failed (%s): %s", addr, e)
+            logger.warning(
+                "Handshake failed (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
+            )
         except asyncio.TimeoutError:
-            logger.warning("Handshake timeout (%s)", addr)
+            logger.warning(
+                "Handshake timeout (%s/%s)", "TCP" if transport.is_reliable else "UDP", addr
+            )
         except USMPError as e:
-            logger.warning("Protocol error (%s): %s", addr, e)
+            logger.warning(
+                "Protocol error (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
+            )
         except asyncio.IncompleteReadError:
-            logger.warning("Connection closed mid-frame (%s)", addr)
+            logger.warning(
+                "Connection closed mid-frame (%s/%s)",
+                "TCP" if transport.is_reliable else "UDP",
+                addr,
+            )
         except (OSError, ConnectionResetError, EOFError) as e:
-            logger.warning("Connection lost (%s): %s", addr, e)
+            logger.warning(
+                "Connection lost (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
+            )
         except Exception as e:
-            logger.error("Unexpected error (%s): %s", addr, e)
-
+            logger.error(
+                "Unexpected error (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
+            )
         finally:
-            # Decrement connection count (L1)
-            if ip in self._tcp_connections:
-                self._tcp_connections[ip] -= 1
-                if self._tcp_connections[ip] <= 0:
-                    self._tcp_connections.pop(ip, None)
-
-            # Always cancel watchdog when handler exits for any reason
             if watchdog_task is not None and not watchdog_task.done():
                 watchdog_task.cancel()
                 try:
                     await watchdog_task
                 except asyncio.CancelledError:
                     pass
-
-            writer.close()
+            transport.close()
             try:
-                await writer.wait_closed()
+                await transport.wait_closed()
             except Exception:
                 pass
-            logger.info("Disconnected: %s", addr)
+
+            if transport.is_reliable:
+                # Decrement TCP connection count
+                if ip in self._tcp_connections:
+                    self._tcp_connections[ip] -= 1
+                    if self._tcp_connections[ip] <= 0:
+                        self._tcp_connections.pop(ip, None)
+            else:
+                # Decrement concurrent handshakes count (if not already done)
+                if not handshake_decremented:
+                    if limiter_key in self._udp_in_progress_handshakes:
+                        self._udp_in_progress_handshakes[limiter_key] -= 1
+                        if self._udp_in_progress_handshakes[limiter_key] <= 0:
+                            self._udp_in_progress_handshakes.pop(limiter_key, None)
+                if self._udp_handshakes.get(addr) is transport:
+                    self._udp_handshakes.pop(addr, None)
+                if self._udp_sessions.get(addr) is transport:
+                    self._udp_sessions.pop(addr, None)
+
+            logger.info("Disconnected (%s): %s", "TCP" if transport.is_reliable else "UDP", addr)
 
     async def serve(self) -> None:
         """Start the server and serve forever."""
         if self._handler is None:
             raise RuntimeError("No session handler registered. Use @server.on_session")
 
-        if self._protocol == "udp":
-            from .transport.udp import ServerUDPProtocol
+        from .transport import get_listener_class
 
-            loop = asyncio.get_running_loop()
-            transport, protocol = await loop.create_datagram_endpoint(
-                lambda: ServerUDPProtocol(self),
-                local_addr=(self._host, self._port),
-            )
-            logger.info("Listening on UDP %s:%d", self._host, self._port)
-            try:
-                while True:
-                    await asyncio.sleep(3600)
-            finally:
-                transport.close()
-        else:
-            srv = await asyncio.start_server(
-                self._handle_client,
-                self._host,
-                self._port,
-            )
-            addr = srv.sockets[0].getsockname()
-            logger.info("Listening on TCP %s:%d", addr[0], addr[1])
-
-            async with srv:
-                await srv.serve_forever()
+        listener_cls = get_listener_class(self._protocol)
+        self._listener = listener_cls(
+            host=self._host,
+            port=self._port,
+            server=self,
+        )
+        await self._listener.start(self._on_transport_connect)
+        try:
+            await asyncio.Event().wait()
+        finally:
+            await self._listener.stop()
