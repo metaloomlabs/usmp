@@ -55,7 +55,7 @@ const char* usmp_get_version(void);
 /*
  * USMP_CONNECT_RETRIES / USMP_CONNECT_RETRY_MS
  * Defined for user convenience — not yet used internally by the library.
- * Callers can use these in their own retry loops (see firmware/main/app.c).
+ * Callers can use these in their own retry loops (see examples/project_tcp/esp32/main/app.c).
  */
 #ifndef USMP_CONNECT_RETRIES
 #define USMP_CONNECT_RETRIES 10  // Unused internally (caller convenience only)
