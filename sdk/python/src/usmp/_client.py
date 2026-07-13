@@ -3,6 +3,7 @@ import os
 
 from ._handshake import client_handshake
 from ._session import USMPSession
+from .transport import get_transport_class
 from .transport.base import USMPTransport
 from .types import USMP_DEVICE_ID_LEN, USMPProtocol
 
@@ -40,14 +41,14 @@ class USMPClient:
 
     async def connect(self) -> None:
         """Connect to a USMP server and complete the handshake."""
-        from .transport import get_transport_class
-
         transport_cls = get_transport_class(self._protocol)
         # Using connect interface to set up connection
         self._transport = await transport_cls.connect(self._host, self._port)
         info = await client_handshake(self._transport, self._psk, self._device_id)
         self._session = USMPSession(self._transport, info)
-        logger.info(f"[USMP] Connected to {self._host}:{self._port} session={info.session_id_str}")
+        logger.info(
+            "[USMP] Connected to %s:%d session=%s", self._host, self._port, info.session_id_str
+        )
 
     async def send(self, data: bytes) -> None:
         session = self._ensure_connected()

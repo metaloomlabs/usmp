@@ -7,6 +7,25 @@ from typing import Any
 from ..types import PacketType, USMPFrame
 
 
+def coerce_transport(reader: Any, writer: Any) -> "USMPTransport":
+    """Resolve a legacy ``(reader, writer)`` argument pair into a USMPTransport.
+
+    Accepts either an already-constructed transport as ``reader`` (``writer`` is
+    then ignored), or a raw asyncio ``StreamReader``/``StreamWriter`` pair, which
+    is wrapped in a :class:`TCPTransport`. This is the single place that bridges
+    the legacy stream-based call form to the transport-based one.
+    """
+    if isinstance(reader, USMPTransport):
+        return reader
+    if hasattr(reader, "set_session_keys"):
+        # Duck-typed transport (e.g. a UDPStream) that isn't an ABC subclass.
+        return reader
+    # Local import breaks the transport.tcp -> transport.base import cycle.
+    from .tcp import TCPTransport
+
+    return TCPTransport(reader, writer)
+
+
 class USMPTransport(abc.ABC):
     """Abstract Base Class for USMP Transports."""
 

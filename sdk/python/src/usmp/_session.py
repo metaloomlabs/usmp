@@ -3,11 +3,18 @@
 import asyncio
 import struct
 import time
-from typing import Any
+from typing import Any, overload
 
 from ._crypto import decrypt, encrypt
-from .errors import ConnectionClosedError, FrameError, PayloadError, SequenceError, USMPError
-from .errors import TimeoutError as USMPTimeoutError
+from .errors import (
+    ConnectionClosedError,
+    FrameError,
+    PayloadError,
+    SequenceError,
+    USMPError,
+    USMPTimeoutError,
+)
+from .transport.base import USMPTransport, coerce_transport
 from .types import (
     USMP_MAGIC,
     USMP_MAX_DATA_LEN,
@@ -24,30 +31,33 @@ class USMPSession:
     Handles encrypted send/recv with sequence number tracking.
     """
 
+    @overload
+    def __init__(self, transport: USMPTransport, info: SessionInfo, /) -> None: ...
+
+    @overload
+    def __init__(
+        self,
+        reader: Any,
+        writer: Any,
+        info: SessionInfo,
+        recv_timeout: float | None = None,
+    ) -> None: ...
+
     def __init__(
         self,
         reader: Any,
         writer: Any = None,
         info: SessionInfo | None = None,
         recv_timeout: float | None = None,
-    ):
+    ) -> None:
         if info is None:
-            # Caller passed USMPSession(transport, info, recv_timeout)
+            # Transport form: USMPSession(transport, info)
             transport = reader
             actual_info = writer
-            actual_recv_timeout = info
+            actual_recv_timeout = None
         else:
-            # Caller passed USMPSession(reader, writer, info, recv_timeout)
-            from .transport.base import USMPTransport
-
-            if isinstance(reader, USMPTransport):
-                transport = reader
-            elif hasattr(reader, "set_session_keys"):
-                transport = reader
-            else:
-                from .transport.tcp import TCPTransport
-
-                transport = TCPTransport(reader, writer)
+            # Legacy stream form: USMPSession(reader, writer, info, recv_timeout)
+            transport = coerce_transport(reader, writer)
             actual_info = info
             actual_recv_timeout = recv_timeout
 
@@ -79,22 +89,7 @@ class USMPSession:
             chunk = data[offset : offset + USMP_MAX_DATA_LEN]
             is_frag = offset + len(chunk) < len(data)
             packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
-
-            seq = self._info.tx_seq
-            if seq >= 0xFFFFFFFF:
-                raise SequenceError("TX sequence overflowed")
-            nonce = struct.pack("<I", seq) + self._info.session_id[:8]
-            ciphertext = encrypt(
-                key=self._info.tx_key,
-                nonce=nonce,
-                seq=seq,
-                type_=int(packet_type),
-                version=USMP_VERSION,
-                magic=USMP_MAGIC,
-                plaintext=chunk,
-            )
-            await self._transport.write_frame(packet_type, ciphertext, seq=seq)
-            self._info.tx_seq += 1
+            await self._send_encrypted(packet_type, chunk)
             offset += len(chunk)
 
             if len(data) == 0:
@@ -142,6 +137,9 @@ class USMPSession:
                         continue
                     raise
 
+                # At max sequence the session is spent: any further frame —
+                # including a peer's terminal BYE — is treated as overflow and
+                # tears the session down (see test_session_sequence_overflow).
                 if frame.seq >= 0xFFFFFFFF:
                     raise SequenceError("RX sequence overflowed")
 
@@ -167,9 +165,7 @@ class USMPSession:
                             f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
                         )
 
-                    if self._info.rx_seq >= 0xFFFFFFFF:
-                        raise SequenceError("RX sequence overflowed")
-
+                    # Overflow is already guarded above (frame.seq == rx_seq here).
                     self._info.rx_seq += 1
 
                 # S5 fix: over UDP a reordered or crafted fragment / control-frame
@@ -238,55 +234,37 @@ class USMPSession:
         if effective_timeout is not None:
             try:
                 return await asyncio.wait_for(_recv_internal(), timeout=effective_timeout)
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 raise USMPTimeoutError("Receive timed out") from e
         else:
             return await _recv_internal()
 
     async def ping(self) -> None:
         """Send a PING frame."""
-        seq = self._info.tx_seq
-        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
-        ciphertext = encrypt(
-            key=self._info.tx_key,
-            nonce=nonce,
-            seq=seq,
-            type_=int(PacketType.PING),
-            version=USMP_VERSION,
-            magic=USMP_MAGIC,
-            plaintext=b"",
-        )
-        await self._transport.write_frame(PacketType.PING, ciphertext, seq=seq)
-        self._info.tx_seq += 1
+        await self._send_encrypted(PacketType.PING)
 
     async def bye(self) -> None:
         """Send a BYE frame and close the connection."""
-        seq = self._info.tx_seq
-        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
-        ciphertext = encrypt(
-            key=self._info.tx_key,
-            nonce=nonce,
-            seq=seq,
-            type_=int(PacketType.BYE),
-            version=USMP_VERSION,
-            magic=USMP_MAGIC,
-            plaintext=b"",
-        )
-        await self._transport.write_frame(PacketType.BYE, ciphertext, seq=seq)
-        self._info.tx_seq += 1
+        await self._send_encrypted(PacketType.BYE)
         self._transport.close()
 
     async def _send_pong(self) -> None:
+        await self._send_encrypted(PacketType.PONG)
+
+    async def _send_encrypted(self, ptype: PacketType, plaintext: bytes = b"") -> None:
+        """Encrypt plaintext, wrap in a USMP frame, send, and bump tx_seq."""
         seq = self._info.tx_seq
+        if seq >= 0xFFFFFFFF and ptype != PacketType.BYE:
+            raise SequenceError("TX sequence overflowed")
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
-            type_=int(PacketType.PONG),
+            type_=int(ptype),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
-            plaintext=b"",
+            plaintext=plaintext,
         )
-        await self._transport.write_frame(PacketType.PONG, ciphertext, seq=seq)
+        await self._transport.write_frame(ptype, ciphertext, seq=seq)
         self._info.tx_seq += 1

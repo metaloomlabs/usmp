@@ -59,8 +59,14 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N"]
-ignore = ["E501"]
+select = ["E", "F", "W", "I", "N", "B", "UP", "C90", "S", "BLE", "RUF"]
+ignore = ["E501", "S101"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 32
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "SLF001", "ANN", "BLE001", "S110", "B017", "RUF059", "S603", "S607", "UP015", "S104", "UP022"]
 
 
 [tool.mypy]

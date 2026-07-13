@@ -23,39 +23,39 @@ from .transport import register_transport
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
 __all__ = [
-    # Types
-    "USMPFrame",
-    "SessionInfo",
-    "PacketType",
-    "ErrorCode",
-    "USMPProtocol",
-    # Errors
-    "USMPError",
-    "FrameError",
-    "CRCError",
-    "MagicError",
-    "VersionError",
-    "PayloadError",
-    "HandshakeError",
     "AuthError",
-    "CryptoError",
-    "SequenceError",
-    "USMPTimeoutError",
-    "TimeoutError",  # deprecated alias
+    "CRCError",
     "ConnectionClosedError",
-    # Frame
-    "encode_frame",
-    "decode_frame",
-    "read_frame",
-    "write_frame",
-    # Session
-    "USMPSession",
-    # Server
-    "USMPServer",
+    "CryptoError",
+    "ErrorCode",
+    "FrameError",
+    "HandshakeError",
+    "MagicError",
+    "PacketType",
+    "PayloadError",
+    "SequenceError",
+    "SessionInfo",
+    "TimeoutError",  # deprecated alias
     # Client
     "USMPClient",
+    # Errors
+    "USMPError",
+    # Types
+    "USMPFrame",
+    "USMPProtocol",
+    # Server
+    "USMPServer",
+    # Session
+    "USMPSession",
+    "USMPTimeoutError",
+    "VersionError",
+    "decode_frame",
+    # Frame
+    "encode_frame",
+    "read_frame",
     # Transport registry
     "register_transport",
+    "write_frame",
 ]
 
 __version__ = "1.0.0"

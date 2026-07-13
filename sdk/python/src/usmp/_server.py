@@ -4,12 +4,15 @@ import asyncio
 import logging
 import os
 import time
-from typing import Any, Awaitable, Callable, cast
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 from ._handshake import server_handshake
 from ._session import USMPSession
 from .errors import HandshakeError, USMPError
+from .transport import get_listener_class
 from .transport.base import USMPListener, USMPTransport
+from .transport.udp import UDPStream
 from .types import USMPProtocol
 
 logger = logging.getLogger("usmp")
@@ -38,7 +41,7 @@ class USMPServer:
 
     def __init__(
         self,
-        host: str = "0.0.0.0",
+        host: str = "0.0.0.0",  # noqa: S104
         port: int = 9000,
         psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]] = b"",
         handshake_timeout: float = 10.0,
@@ -73,8 +76,6 @@ class USMPServer:
         self._protocol = protocol.lower() if isinstance(protocol, str) else protocol.value
 
         # UDP state trackers preserved for test-suite compatibility
-        from .transport.udp import UDPStream
-
         self._udp_sessions: dict[tuple[str, int], UDPStream] = {}
         self._udp_handshakes: dict[tuple[str, int], UDPStream] = {}
         self._udp_in_progress_handshakes: dict[str, int] = {}
@@ -111,7 +112,7 @@ class USMPServer:
                 if self._on_timeout is not None:
                     try:
                         await self._on_timeout(session.device_id, session.session_id)
-                    except Exception as e:
+                    except Exception as e:  # noqa: BLE001
                         logger.error("on_timeout callback raised: %s", e)
                 # Close the underlying transport — causes read_frame to raise in the
                 # handler, which unblocks and exits the session naturally
@@ -221,8 +222,6 @@ class USMPServer:
                     logger.info("Closing existing UDP session for %s to establish new one", addr)
                     old_session_stream.close()
 
-                from .transport.udp import UDPStream
-
                 self._udp_sessions[addr] = cast(UDPStream, transport)
                 self._udp_handshakes.pop(addr, None)
 
@@ -249,7 +248,7 @@ class USMPServer:
             logger.warning(
                 "Handshake failed (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.warning(
                 "Handshake timeout (%s/%s)", "TCP" if transport.is_reliable else "UDP", addr
             )
@@ -267,7 +266,7 @@ class USMPServer:
             logger.warning(
                 "Connection lost (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             logger.error(
                 "Unexpected error (%s/%s): %s", "TCP" if transport.is_reliable else "UDP", addr, e
             )
@@ -281,8 +280,8 @@ class USMPServer:
             transport.close()
             try:
                 await transport.wait_closed()
-            except Exception:
-                pass
+            except Exception as e:  # noqa: BLE001
+                logger.debug("Error during transport wait_closed: %s", e)
 
             if transport.is_reliable:
                 # Decrement TCP connection count
@@ -308,8 +307,6 @@ class USMPServer:
         """Start the server and serve forever."""
         if self._handler is None:
             raise RuntimeError("No session handler registered. Use @server.on_session")
-
-        from .transport import get_listener_class
 
         listener_cls = get_listener_class(self._protocol)
         self._listener = listener_cls(

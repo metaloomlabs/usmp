@@ -4,11 +4,14 @@ import asyncio
 import hashlib
 import hmac
 import os
+import struct
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any, overload
 
 from ._crypto import derive_session_keys, generate_keypair
 from .errors import AuthError, HandshakeError
+from .transport.base import USMPTransport, coerce_transport
 from .types import (
     USMP_DEVICE_ID_LEN,
     USMP_HMAC_LEN,
@@ -32,31 +35,33 @@ def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
     return hmac.new(psk, data, hashlib.sha256).digest()
 
 
+_PSK = bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]]
+
+
+@overload
+async def server_handshake(transport: USMPTransport, psk: _PSK, /) -> SessionInfo: ...
+
+
+@overload
+async def server_handshake(reader: Any, writer: Any, psk: _PSK) -> SessionInfo: ...
+
+
 async def server_handshake(
     reader: Any,
     writer: Any,
-    psk: bytes | dict[bytes, bytes] | Callable[[bytes], bytes | Awaitable[bytes]] | None = None,
+    psk: _PSK | None = None,
 ) -> SessionInfo:
     """
     Run the server side of the USMP handshake.
     Returns SessionInfo on success, raises HandshakeError on failure.
     """
     if psk is None:
-        # Signature: server_handshake(transport, psk)
+        # Transport form: server_handshake(transport, psk)
         transport = reader
         resolved_psk_input = writer
     else:
-        # Signature: server_handshake(reader, writer, psk)
-        from .transport.base import USMPTransport
-
-        if isinstance(reader, USMPTransport):
-            transport = reader
-        elif hasattr(reader, "set_session_keys"):
-            transport = reader
-        else:
-            from .transport.tcp import TCPTransport
-
-            transport = TCPTransport(reader, writer)
+        # Legacy stream form: server_handshake(reader, writer, psk)
+        transport = coerce_transport(reader, writer)
         resolved_psk_input = psk
 
     addr = transport.get_extra_info("peername")
@@ -104,20 +109,19 @@ async def server_handshake(
             res = resolved_psk_input(device_id)
             if isinstance(res, bytes):
                 resolved_psk = res
+            elif isinstance(res, Awaitable):
+                resolved_psk = await res
             else:
-                import collections.abc
-
-                if isinstance(res, collections.abc.Awaitable):
-                    resolved_psk = await res
-                else:
-                    raise HandshakeError("Callable PSK did not return bytes or Awaitable")
+                raise HandshakeError("Callable PSK did not return bytes or Awaitable")
         else:
             raise HandshakeError("Invalid PSK type")
 
-        if not resolved_psk or len(resolved_psk) < 16:
-            raise HandshakeError("Resolved PSK must be at least 16 bytes long")
+        # Validate type before length so length is only ever measured on bytes.
+        if not isinstance(resolved_psk, bytes):
+            raise HandshakeError("Resolved PSK must be bytes")
 
-        assert isinstance(resolved_psk, bytes)
+        if len(resolved_psk) < 16:
+            raise HandshakeError("Resolved PSK must be at least 16 bytes long")
 
         # ── Generate server keypair ───────────────────────────────────────────────
         priv_s, pub_s = generate_keypair()
@@ -142,8 +146,6 @@ async def server_handshake(
             raise HandshakeError(f"Bad HELLO_ACK length: {frame.length}")
 
         # ── Verify client HMAC ────────────────────────────────────────────────────
-        import struct
-
         prefix_client = struct.pack("<H", USMP_MAGIC) + bytes(
             [USMP_VERSION, int(PacketType.HELLO_ACK)]
         )
@@ -169,8 +171,7 @@ async def server_handshake(
 
         await transport.write_frame(PacketType.SESSION_OK, session_id + hmac_server)
 
-        if limiter_key in _failed_handshakes:
-            del _failed_handshakes[limiter_key]
+        _failed_handshakes.pop(limiter_key, None)
 
         k_c2s, k_s2c = session_key
 
@@ -224,6 +225,18 @@ async def server_handshake(
         raise
 
 
+@overload
+async def client_handshake(
+    transport: USMPTransport, psk: bytes, device_id: bytes, /
+) -> SessionInfo: ...
+
+
+@overload
+async def client_handshake(
+    reader: Any, writer: Any, psk: bytes, device_id: bytes
+) -> SessionInfo: ...
+
+
 async def client_handshake(
     reader: Any,
     writer: Any,
@@ -234,22 +247,13 @@ async def client_handshake(
     Run the client side of the USMP handshake.
     """
     if device_id is None:
-        # Signature: client_handshake(transport, psk, device_id)
+        # Transport form: client_handshake(transport, psk, device_id)
         transport = reader
         actual_psk = writer
         actual_device_id = psk
     else:
-        # Signature: client_handshake(reader, writer, psk, device_id)
-        from .transport.base import USMPTransport
-
-        if isinstance(reader, USMPTransport):
-            transport = reader
-        elif hasattr(reader, "set_session_keys"):
-            transport = reader
-        else:
-            from .transport.tcp import TCPTransport
-
-            transport = TCPTransport(reader, writer)
+        # Legacy stream form: client_handshake(reader, writer, psk, device_id)
+        transport = coerce_transport(reader, writer)
         actual_psk = psk
         actual_device_id = device_id
 
@@ -296,8 +300,6 @@ async def client_handshake(
     session_key = derive_session_keys(priv_c, pub_s, nonce, pub_c, pub_s)
 
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-    import struct
-
     prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
     hmac_client = _compute_hmac(actual_psk, prefix_client, nonce, actual_device_id, pub_c, pub_s)
     await transport.write_frame(PacketType.HELLO_ACK, hmac_client)

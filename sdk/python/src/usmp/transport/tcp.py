@@ -1,11 +1,12 @@
 # src/usmp/transport/tcp.py
 
 import asyncio
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from .base import USMPTransport, USMPListener
 from .._frame import read_frame, write_frame
 from ..types import PacketType, USMPFrame
+from .base import USMPListener, USMPTransport
 
 
 class TCPTransport(USMPTransport):

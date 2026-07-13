@@ -5,9 +5,13 @@ import hashlib
 import hmac
 import logging
 import struct
+import time
 import typing
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
+from .._frame import encode_frame
+from .._frame import read_frame as _read_frame
 from ..types import USMP_HEADER_SIZE, PacketType, USMPFrame
 from .base import USMPListener, USMPTransport
 
@@ -62,13 +66,9 @@ class UDPStream(USMPTransport):
         return False
 
     async def read_frame(self, verify_crc: bool = True) -> USMPFrame:
-        from .._frame import read_frame
-
-        return await read_frame(self, verify_crc=verify_crc)
+        return await _read_frame(self, verify_crc=verify_crc)
 
     async def write_frame(self, type_: PacketType, payload: bytes, seq: int = 0) -> None:
-        from .._frame import encode_frame
-
         data = encode_frame(type_, payload, seq)
         self.write(data)
         await self.drain()
@@ -87,6 +87,13 @@ class UDPStream(USMPTransport):
     def _utack_mac(key: bytes, header: bytes) -> bytes:
         """S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header."""
         return hmac.new(key, header, hashlib.sha256).digest()[:UTACK_MAC_LEN]
+
+    def _build_utack(self, type_val: int, seq_val: int) -> bytes:
+        """Build a UTACK packet, adding HMAC for session-phase types (>= 5)."""
+        header = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
+        if type_val >= 5 and self._rx_key is not None:
+            header += self._utack_mac(self._rx_key, header)
+        return header
 
     def feed_packet(self, data: bytes) -> None:
         """Feed an incoming datagram from the network."""
@@ -123,8 +130,6 @@ class UDPStream(USMPTransport):
             return
 
         # U2 fix: enforce one-frame-per-datagram on UDP
-        if len(data) < USMP_HEADER_SIZE:
-            return
         length = struct.unpack("<H", data[8:10])[0]
         if len(data) != USMP_HEADER_SIZE + length:
             logger.debug(
@@ -138,12 +143,7 @@ class UDPStream(USMPTransport):
         seq_val = struct.unpack("<I", data[4:8])[0]
 
         # Send UTACK back immediately
-        utack = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
-        # S3: authenticate session-phase UTACKs (type >= 5) once keys are established,
-        # keyed by rx_key (the key we decrypted this frame with).
-        if type_val >= 5 and self._rx_key is not None:
-            utack += self._utack_mac(self._rx_key, utack)
-        self._transport.sendto(utack, self._remote_addr)
+        self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
 
         # Duplicate detection for handshake packets (types 1-4 and HELLO_RETRY)
         if type_val < 5 or type_val == 0x0A:
@@ -224,7 +224,7 @@ class UDPStream(USMPTransport):
             try:
                 await asyncio.wait_for(self._ack_received_event.wait(), timeout=0.5)
                 return  # Success, ACK received!
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.debug(
                     "UDP Timeout on seq=%d, attempt=%d",
                     self._pending_send_seq,
@@ -270,7 +270,8 @@ class ClientUDPProtocol(asyncio.DatagramProtocol):
         self.stream: UDPStream | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        assert isinstance(transport, asyncio.DatagramTransport)
+        if not isinstance(transport, asyncio.DatagramTransport):
+            raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
         remote_addr = transport.get_extra_info("peername")
         self.stream = UDPStream(transport, remote_addr, is_server=False)
         self.stream_future.set_result(self.stream)
@@ -294,7 +295,8 @@ class ServerUDPProtocol(asyncio.DatagramProtocol):
         self.transport: asyncio.DatagramTransport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        assert isinstance(transport, asyncio.DatagramTransport)
+        if not isinstance(transport, asyncio.DatagramTransport):
+            raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
         self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
@@ -311,6 +313,7 @@ class UDPListener(USMPListener):
         self._server = server
         self._transport: asyncio.DatagramTransport | None = None
         self._handler: Callable[[USMPTransport], Awaitable[None]] | None = None
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def _udp_sessions(self) -> dict[tuple[str, int], UDPStream]:
@@ -344,8 +347,7 @@ class UDPListener(USMPListener):
     def _handle_udp_datagram(
         self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]
     ) -> None:
-        import time
-
+        # Local import breaks the udp <-> _handshake import cycle.
         from .._handshake import _failed_handshakes
 
         # 1. Parse packet type
@@ -370,13 +372,10 @@ class UDPListener(USMPListener):
                 if not self._server._allow_udp_cookie(addr[0]):
                     return
 
-                from .._frame import encode_frame
-                from ..types import PacketType
-
                 # Send UTACK back to client immediately so its stop-and-wait ARQ doesn't timeout
                 type_val = data[3]
                 seq_val = struct.unpack("<I", data[4:8])[0]
-                utack = b"\xac\xac" + bytes([type_val]) + struct.pack("<I", seq_val)
+                utack = UTACK_MAGIC + bytes([type_val]) + struct.pack("<I", seq_val)
                 transport.sendto(utack, addr)
 
                 time_bucket = int(time.time() // 30)
@@ -427,7 +426,9 @@ class UDPListener(USMPListener):
             stream = UDPStream(transport, addr, is_server=True)
             self._udp_handshakes[addr] = stream
             stream.feed_packet(data)
-            asyncio.create_task(self._handle_udp_client(stream, addr))
+            task = asyncio.create_task(self._handle_udp_client(stream, addr))
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
             return
 
         # 3. Route data packets (type_val >= 5 or UTACK for type_val >= 5) to self._udp_sessions
