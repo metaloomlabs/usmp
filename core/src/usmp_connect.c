@@ -11,6 +11,18 @@
 
 static const char* TAG = "USMP";
 
+/* Log `prefix` followed by the 16-byte session id as lowercase hex. */
+static void log_session_id(const char* prefix, const uint8_t* session_id) {
+  char _msg[128];
+  snprintf(_msg, sizeof(_msg),
+           "%s%02x%02x%02x%02x%02x%02x%02x%02x"
+           "%02x%02x%02x%02x%02x%02x%02x%02x",
+           prefix, session_id[0], session_id[1], session_id[2], session_id[3], session_id[4],
+           session_id[5], session_id[6], session_id[7], session_id[8], session_id[9], session_id[10],
+           session_id[11], session_id[12], session_id[13], session_id[14], session_id[15]);
+  USMP_LOGI(TAG, _msg);
+}
+
 int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   if (!ctx || !transport) return -1;
 
@@ -20,7 +32,6 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
     return -1;
   }
 
-  char _msg[128];
   const uint8_t* psk = ctx->psk;
   size_t psk_len = ctx->psk_len;
   uint32_t keepalive_ms = ctx->keepalive_ms;
@@ -58,14 +69,7 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   ctx->rx_seq = 0;
   ctx->last_tx_ms = usmp_port_millis();
 
-  snprintf(_msg, sizeof(_msg),
-           "Session established — id: %02x%02x%02x%02x%02x%02x%02x%02x"
-           "%02x%02x%02x%02x%02x%02x%02x%02x",
-           ctx->session_id[0], ctx->session_id[1], ctx->session_id[2], ctx->session_id[3],
-           ctx->session_id[4], ctx->session_id[5], ctx->session_id[6], ctx->session_id[7],
-           ctx->session_id[8], ctx->session_id[9], ctx->session_id[10], ctx->session_id[11],
-           ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
-  USMP_LOGI(TAG, _msg);
+  log_session_id("Session established — id: ", ctx->session_id);
   ret = 0;
 
 cleanup:
@@ -121,15 +125,7 @@ int usmp_reconnect(usmp_t* ctx) {
   ctx->rx_window_bitmap = 0;
   ctx->last_tx_ms = usmp_port_millis();
 
-  char _msg[128];
-  snprintf(_msg, sizeof(_msg),
-           "Reconnected — new session: %02x%02x%02x%02x%02x%02x%02x%02x"
-           "%02x%02x%02x%02x%02x%02x%02x%02x",
-           ctx->session_id[0], ctx->session_id[1], ctx->session_id[2], ctx->session_id[3],
-           ctx->session_id[4], ctx->session_id[5], ctx->session_id[6], ctx->session_id[7],
-           ctx->session_id[8], ctx->session_id[9], ctx->session_id[10], ctx->session_id[11],
-           ctx->session_id[12], ctx->session_id[13], ctx->session_id[14], ctx->session_id[15]);
-  USMP_LOGI(TAG, _msg);
+  log_session_id("Reconnected — new session: ", ctx->session_id);
   ret = 0;
 
 cleanup:
