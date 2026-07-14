@@ -2,16 +2,63 @@
 
 #include <string.h>
 
-extern "C" {
 #include "mbedtls/constant_time.h"
-}
 #include "mbedtls/md.h"
+
+// Shared WiFi bring-up (identical for TCP and UDP) ───────────────────────────
+bool USMPTransportBase::connectWiFi() const {
+  if (!_ssid) return true;  // WiFi managed externally — nothing to do
+  WiFi.disconnect(true);
+  delay(100);
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  WiFi.begin(_ssid, _password);
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - start > 30000) return false;
+    delay(500);
+  }
+  return true;
+}
 
 // S3: session-phase UTACKs (frame type >= 5) carry an 8-byte truncated HMAC-SHA256 over
 // their 7-byte header so an off-path attacker cannot forge an ACK. Handshake-phase UTACKs
 // (types 1-4) predate the session keys and stay unauthenticated.
 #define UTACK_HEADER_LEN 7
 #define UTACK_MAC_LEN 8
+
+/*
+ * Session-phase UDP recv timeout (ms).
+ *
+ * Handshake reads are unbounded — they MUST block for the server's CHALLENGE /
+ * SESSION_OK reply. Session reads (after keys are installed) are bounded so a
+ * stray/duplicate UTACK or idle socket can't wedge maintain() in an infinite
+ * parsePacket() spin. On timeout the recv returns 0 ("no data"), which the core
+ * treats as a non-fatal empty read.
+ *
+ * The core's usmp_recv() retries the transport up to ~10x per call, so the
+ * effective budget for an in-flight fragment to arrive is ~10x this value
+ * (≈500 ms at the default). That comfortably covers WiFi round-trips while
+ * keeping the worst-case maintain() stall bounded.
+ */
+#ifndef USMP_UDP_RECV_TIMEOUT_MS
+#define USMP_UDP_RECV_TIMEOUT_MS 50
+#endif
+
+/*
+ * Session-phase TCP no-progress stall timeout (ms).
+ *
+ * Like the UDP timeout, handshake reads are unbounded (they must wait for the
+ * server reply). Once the session is established, a peer that sends a partial
+ * frame and then stalls must not wedge maintain() forever. This is a *no-
+ * progress* timeout: it only fires when zero bytes arrive for this long, so a
+ * large-but-progressing frame is never cut off. A stall before any byte is a
+ * non-fatal empty read (0); a stall mid-frame tears down (partial bytes are
+ * already consumed from the stream and cannot be un-read, so we must resync).
+ */
+#ifndef USMP_TCP_RECV_TIMEOUT_MS
+#define USMP_TCP_RECV_TIMEOUT_MS 2000
+#endif
 
 // S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
 static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
@@ -37,6 +84,12 @@ static int arduino_tcp_send(usmp_transport_t* t, const uint8_t* data, size_t len
 static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
 
+  // Session reads use a no-progress stall timeout (see USMP_TCP_RECV_TIMEOUT_MS);
+  // handshake reads stay unbounded. last_progress advances on every byte read, so
+  // a large-but-flowing frame never times out. millis() subtraction is wrap-safe.
+  const bool bounded = ctx->session_active;
+  uint32_t last_progress = millis();
+
   // Step 1: read header exactly
   if (max_len < USMP_HEADER_SIZE) return -1;
   size_t received = 0;
@@ -44,7 +97,15 @@ static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (!ctx->client.connected()) return -1;
     if (ctx->client.available()) {
       int n = ctx->client.read(buf + received, USMP_HEADER_SIZE - received);
-      if (n > 0) received += n;
+      if (n > 0) {
+        received += n;
+        last_progress = millis();
+      }
+    }
+    if (bounded && (millis() - last_progress) >= USMP_TCP_RECV_TIMEOUT_MS) {
+      // Stall before any byte is a non-fatal empty read; stall after partial
+      // bytes were consumed forces a resync (we can't un-read a TCP stream).
+      return received == 0 ? 0 : -1;
     }
     delay(1);
   }
@@ -59,7 +120,13 @@ static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     if (!ctx->client.connected()) return -1;
     if (ctx->client.available()) {
       int n = ctx->client.read(buf + received, USMP_HEADER_SIZE + payload_len - received);
-      if (n > 0) received += n;
+      if (n > 0) {
+        received += n;
+        last_progress = millis();
+      }
+    }
+    if (bounded && (millis() - last_progress) >= USMP_TCP_RECV_TIMEOUT_MS) {
+      return -1;  // stalled mid-frame — header already consumed, must resync
     }
     delay(1);
   }
@@ -86,6 +153,9 @@ static int arduino_tcp_reconnect(usmp_transport_t* t) {
   USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
   if (!ctx) return -1;
   ctx->client.stop();
+  // Back to handshake phase: recv must block unbounded for the server reply
+  // until set_session_keys() re-marks the session active on success.
+  ctx->session_active = false;
   return ctx->client.connect(ctx->host, ctx->port) ? 0 : -1;
 }
 
@@ -95,22 +165,19 @@ static int arduino_tcp_available(usmp_transport_t* t) {
   return ctx->client.available();
 }
 
-// USMPTCPTransport methods
-
-bool USMPTCPTransport::connectWiFi() const {
-  if (!_ssid) return true;  // WiFi managed externally — nothing to do
-  WiFi.disconnect(true);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  delay(100);
-  WiFi.begin(_ssid, _password);
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 30000) return false;
-    delay(500);
-  }
-  return true;
+// TCP does not authenticate UTACKs, so the derived keys are unused here. We wire
+// this core callback (fired once the handshake completes) only to mark the
+// session active, which switches recv() from the unbounded handshake path to the
+// bounded stall-timeout path.
+static void arduino_tcp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
+                                         const uint8_t* rx_key) {
+  (void)tx_key;
+  (void)rx_key;
+  USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
+  if (ctx) ctx->session_active = true;
 }
+
+// USMPTCPTransport methods
 
 bool USMPTCPTransport::init(usmp_transport_t* t) const {
   USMPArduinoTcpCtx* ctx = new USMPArduinoTcpCtx();
@@ -119,6 +186,7 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   strncpy(ctx->host, _host, sizeof(ctx->host) - 1);
   ctx->host[sizeof(ctx->host) - 1] = '\0';
   ctx->port = _port;
+  ctx->session_active = false;  // handshake runs first with unbounded recv
 
   if (!ctx->client.connect(_host, _port)) {
     delete ctx;
@@ -132,7 +200,9 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   t->available = arduino_tcp_available;
   t->destroy = arduino_tcp_destroy;
   t->confirm_authenticated = NULL;
-  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
+  // Not for UTACK auth (TCP has none) — only to flip recv() to its bounded
+  // stall-timeout path once the handshake completes. See arduino_tcp_recv.
+  t->set_session_keys = arduino_tcp_set_session_keys;
   t->ctx = ctx;
   return true;
 }
@@ -214,6 +284,12 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
   int n = 0;
 
+  // Bound the wait once session keys are installed so maintain() can't spin
+  // forever on a stray UTACK / idle socket; the handshake keeps the original
+  // unbounded wait for the server reply. millis() subtraction is wrap-safe.
+  const bool bounded = ctx->keys_set;
+  const uint32_t start = millis();
+
   while (1) {
     if (ctx->rx_len > 0) {
       memcpy(temp, ctx->rx_buf, ctx->rx_len);
@@ -222,6 +298,9 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     } else {
       int packetSize = ctx->udp.parsePacket();
       if (packetSize <= 0) {
+        if (bounded && (millis() - start) >= USMP_UDP_RECV_TIMEOUT_MS) {
+          return 0;  // no data within budget — non-fatal empty read
+        }
         delay(1);
         continue;
       }
@@ -263,8 +342,7 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 
     // Duplicate detection
     if (type < 5 || type == 0x0A) {
-      bool is_duplicate = (type == ctx->last_rx_type) ||
-                          (type == 0x0A && ctx->last_rx_type > 0) ||
+      bool is_duplicate = (type == ctx->last_rx_type) || (type == 0x0A && ctx->last_rx_type > 0) ||
                           (type == 2 && ctx->last_rx_type == 4);
       if (is_duplicate) {
         continue;  // Discard duplicate/old handshake packet
@@ -301,13 +379,43 @@ static int arduino_udp_reconnect(usmp_transport_t* t) {
   ctx->rx_len = 0;
   ctx->last_rx_seq_set = false;
   ctx->last_rx_type = 0;
+  // Drop stale session keys: the reconnect handshake runs unauthenticated (types
+  // 1-4) and must use the unbounded recv path, exactly like the first connect.
+  // usmp_connect() reinstalls fresh keys via set_session_keys() on success.
+  ctx->keys_set = false;
   return ctx->udp.begin(0) ? 0 : -1;
 }
 
 static int arduino_udp_available(usmp_transport_t* t) {
   USMPArduinoUdpCtx* ctx = (USMPArduinoUdpCtx*)t->ctx;
   if (!ctx) return 0;
-  return (ctx->rx_len > 0 || ctx->udp.available() > 0) ? 1 : 0;
+
+  // Already have a datagram staged for recv() to consume.
+  if (ctx->rx_len > 0) return 1;
+
+  /*
+   * WiFiUDP::available() only reports bytes left in the packet a prior
+   * parsePacket() already pulled in — it does NOT peek the socket for queued
+   * datagrams. So checking it here never sees an unsolicited server->device
+   * message; the datagram would sit unread until the next send() happened to
+   * pull it in. Instead, actively poll: parsePacket() the next datagram and
+   * stage it into rx_buf so recv() (which reads rx_len first) can deliver it.
+   *
+   * This has the side effect of consuming one datagram from the socket, but
+   * that datagram is preserved in rx_buf — nothing is lost. Stray transport
+   * UTACKs and non-USMP junk are dropped here rather than staged, so
+   * available() only reports genuinely deliverable frames. (Arduino is
+   * single-threaded, so this never races arduino_udp_send()'s ARQ loop.)
+   */
+  int ps = ctx->udp.parsePacket();
+  if (ps <= 0) return 0;
+  int n = ctx->udp.read(ctx->rx_buf, sizeof(ctx->rx_buf));
+  if (n < USMP_HEADER_SIZE) return 0;                      // too short (incl. UTACKs) — drop
+  if (ctx->rx_buf[0] == 0xAC && ctx->rx_buf[1] == 0xAC) return 0;  // stray UTACK — drop
+  uint16_t magic = ctx->rx_buf[0] | (ctx->rx_buf[1] << 8);
+  if (magic != 0xABCD) return 0;                           // not a USMP frame — drop
+  ctx->rx_len = n;
+  return 1;
 }
 
 static void arduino_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
@@ -328,21 +436,6 @@ static void arduino_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_
 }
 
 // USMPUDPTransport methods
-bool USMPUDPTransport::connectWiFi() const {
-  if (!_ssid) return true;  // WiFi managed externally — nothing to do
-  WiFi.disconnect(true);
-  delay(100);
-  WiFi.mode(WIFI_STA);
-  delay(100);
-  WiFi.begin(_ssid, _password);
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED) {
-    if (millis() - start > 30000) return false;
-    delay(500);
-  }
-  return true;
-}
-
 bool USMPUDPTransport::init(usmp_transport_t* t) const {
   USMPArduinoUdpCtx* ctx = new USMPArduinoUdpCtx();
   if (!ctx) return false;

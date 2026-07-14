@@ -20,6 +20,10 @@ or port-interface changes — core, ports, and SDK remain protocol-compatible wi
 - **Fixed** (C Core): `usmp_recv` returned `0` ("no data") when the 10-attempt receive cap was reached in the middle of reassembling a fragmented message, silently discarding the partial payload while the rx state had already advanced — the next call would then reassemble from mid-message and produce corrupt data. It now fails hard (`-1`, session marked not-established) when the cap is hit mid-reassembly so the caller reconnects; the idle case still returns `0`.
 - **Fixed** (Python SDK): Corrected `UDPStream` UTACK packet building and duplicate-handshake-packet detection logic.
 - **Fixed** (Python SDK): `UDPListener` now keeps references to its background tasks so they are not garbage-collected mid-flight.
+- **Fixed** (Arduino Port): Unsolicited server→device UDP messages were not delivered through `available()` / `maintain()`. `WiFiUDP::available()` only reports bytes left in an already-parsed packet, so queued datagrams were never seen and inbound data surfaced only as a side effect of the next `send()` (up to the keepalive interval late, or never with keepalive off). `available()` now actively polls the socket and stages the datagram for `read()`/`onMessage`. Fixes the `remote_control` example over UDP.
+- **Fixed** (Arduino Port): A stray or duplicate UDP UTACK (or an idle socket) could wedge `maintain()` in an unbounded `recv` spin. Session-phase UDP reads now use a bounded wait and return "no data"; handshake reads stay unbounded.
+- **Fixed** (Arduino Port): TCP `recv` had no timeout — a peer that sent a partial frame and stalled could block `maintain()` indefinitely. Session-phase TCP reads now use a no-progress stall timeout; handshake reads stay unbounded.
+- **Fixed** (Arduino Port): `read(uint8_t*, size_t)` no longer narrows the caller's buffer length when passing it to the `uint16_t`-typed core `usmp_recv`.
 
 ### Changed
 
@@ -28,14 +32,18 @@ or port-interface changes — core, ports, and SDK remain protocol-compatible wi
 - **Changed** (Python SDK): Refactored the server, client, session, and handshake modules for clearer structure, improved type hints, and better error handling.
 - **Changed** (Python SDK): Replaced `assert`s with explicit type checks in the datagram protocol classes (asserts are stripped under `python -O`).
 - **Changed** (Python SDK): Expanded the Ruff lint rule set (`B`, `UP`, `C90`, `S`, `BLE`, `RUF`) and addressed the resulting warnings; adjusted the mypy configuration (now checks `src` and `tests`). Cleaned up imports and alphabetized `__all__` in `usmp/__init__.py`.
+- **Internal refactor, no behavior change** (Arduino Port): Deduplicated the two `begin()` overloads into one shared template and extracted a `USMPTransportBase` so the WiFi bring-up lives in one place; centralized level-gated logging in one helper (which also fixed a doubled `[usmp] [usmp]:` log prefix). Replaced the hand-maintained copy of the core public header with a one-line shim that forwards to `core/include/usmp.h`, removing a drift source.
+- **Documented** (Arduino Port): Clarified the connection-callback firing semantics in `USMP.h` — `onConnect` fires on every session establishment (initial and reconnect); `onReconnect` fires additionally on reconnects. Behavior unchanged.
 
 ### Added
 
 - **Python SDK**: Transport-layer abstraction — a new `usmp.transport` package with a transport base class and dedicated TCP and UDP transport modules.
+- **CI**: An `arduino-esp32-compile` job that assembles the Arduino library exactly as it ships and compiles all four examples for ESP32 — the first automated build gate for the Arduino wrappers.
 
 ### Version Bumps
 
 - C Core (`usmp.h`, `usmp_connect.c`): `1.0.0` → `1.0.1`
+- Arduino Port (`library.json`, `library.properties`): `1.0.0` → `1.0.1` (the port's `usmp_api.h` is now a shim forwarding to `core/include/usmp.h`, so the version is inherited from core)
 - Python SDK (`pyproject.toml`): `1.0.0` → `1.0.1`
 
 ---

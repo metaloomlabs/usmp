@@ -1,5 +1,6 @@
 #include "USMP.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -26,6 +27,16 @@ void USMPClient::_apply_psk() {
   _ctx.psk_len = strlen(_psk);
 }
 
+void USMPClient::_logf(usmp_log_level_t level, const char* fmt, ...) {
+  if (usmp_get_log_level() < level) return;
+  char buf[128];
+  va_list ap;
+  va_start(ap, fmt);
+  vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  Serial.println(buf);
+}
+
 bool USMPClient::_do_reconnect() {
   _apply_psk();
   return usmp_reconnect(&_ctx) == 0;
@@ -33,29 +44,23 @@ bool USMPClient::_do_reconnect() {
 
 // begin ─────────────────────────────────────────────────────────────────────
 
-bool USMPClient::begin(USMPTCPTransport transport) {
-  // WiFi
+template <typename Transport>
+bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
+  // WiFi — only if USMP is managing it (SSID was supplied via .wifi()).
   if (transport._ssid) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
-      Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
-    }
+    _logf(USMP_LOG_LEVEL_INFO, "[USMP] Connecting to WiFi: %s", transport._ssid);
     if (!transport.connectWiFi()) {
-      if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-        Serial.println("[usmp] [usmp]: WiFi connect failed");
-      }
+      _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: WiFi connect failed");
       return false;
     }
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
-      Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
-    }
+    _logf(USMP_LOG_LEVEL_INFO, "[USMP] WiFi connected — IP: %s",
+          WiFi.localIP().toString().c_str());
   }
 
-  // TCP transport init ────────────────────────────────────────────────────
+  // Transport init ─────────────────────────────────────────────────────────
   memset(&_transport, 0, sizeof(_transport));
   if (!transport.init(&_transport)) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-      Serial.println("[usmp] [usmp]: TCP connect failed");
-    }
+    _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: %s connect failed", proto);
     return false;
   }
 
@@ -65,9 +70,7 @@ bool USMPClient::begin(USMPTCPTransport transport) {
   _ctx.keepalive_ms = 30000;  // 30s default
 
   if (usmp_connect(&_ctx, &_transport) != 0) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-      Serial.println("[usmp] [usmp]: Handshake failed");
-    }
+    _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
     return false;
   }
 
@@ -79,51 +82,9 @@ bool USMPClient::begin(USMPTCPTransport transport) {
   return true;
 }
 
-bool USMPClient::begin(USMPUDPTransport transport) {
-  // WiFi
-  if (transport._ssid) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
-      Serial.printf("[USMP] Connecting to WiFi: %s\n", transport._ssid);
-    }
-    if (!transport.connectWiFi()) {
-      if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-        Serial.println("[usmp] [usmp]: WiFi connect failed");
-      }
-      return false;
-    }
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_INFO) {
-      Serial.printf("[USMP] WiFi connected — IP: %s\n", WiFi.localIP().toString().c_str());
-    }
-  }
+bool USMPClient::begin(USMPTCPTransport transport) { return _beginImpl(transport, "TCP"); }
 
-  // UDP transport init ────────────────────────────────────────────────────
-  memset(&_transport, 0, sizeof(_transport));
-  if (!transport.init(&_transport)) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-      Serial.println("[usmp] [usmp]: UDP connect failed");
-    }
-    return false;
-  }
-
-  // USMP handshake ─────────────────────────────────────────────────────────
-  memset(&_ctx, 0, sizeof(_ctx));
-  _apply_psk();
-  _ctx.keepalive_ms = 30000;  // 30s default
-
-  if (usmp_connect(&_ctx, &_transport) != 0) {
-    if (usmp_get_log_level() >= USMP_LOG_LEVEL_ERROR) {
-      Serial.println("[usmp] [usmp]: Handshake failed");
-    }
-    return false;
-  }
-
-  _initialized = true;
-  _backoff_ms = 2000;
-  _last_attempt_ms = 0;
-
-  if (_on_connect) _on_connect();
-  return true;
-}
+bool USMPClient::begin(USMPUDPTransport transport) { return _beginImpl(transport, "UDP"); }
 
 // send ──────────────────────────────────────────────────────────────────────
 
@@ -163,7 +124,10 @@ String USMPClient::read() {
 }
 
 int USMPClient::read(uint8_t* buf, size_t max_len) {
-  int n = usmp_recv(&_ctx, buf, max_len);
+  // usmp_recv() takes a uint16_t length; clamp so a large size_t can't silently
+  // wrap and make the core write past what the caller actually asked for.
+  uint16_t capped = (max_len > 0xFFFF) ? 0xFFFF : (uint16_t)max_len;
+  int n = usmp_recv(&_ctx, buf, capped);
   if (n < 0) {
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();

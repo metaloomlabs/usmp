@@ -64,3 +64,48 @@ jobs:
         run: |
           cd sdk/python
           uv run --with pip-audit pip-audit
+
+  arduino-esp32-compile:
+    name: Arduino ESP32 Compile
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install zip utility
+        run: sudo apt-get update && sudo apt-get install -y zip
+
+      # Assemble the Arduino library exactly as it ships (vendors core/ into a
+      # flat src/), then unpack it so we compile the real published artifact.
+      - name: Assemble Arduino library
+        run: |
+          chmod +x scripts/build-arduino-zip.sh
+          ./scripts/build-arduino-zip.sh
+          unzip -q usmp-*-arduino.zip -d assembled
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="$PWD/bin" sh -s 1.1.1
+          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Install ESP32 core
+        run: |
+          arduino-cli config init --additional-urls \
+            https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32
+
+      - name: Install assembled USMP library
+        run: |
+          mkdir -p "$HOME/Arduino/libraries"
+          cp -r assembled/usmp-arduino "$HOME/Arduino/libraries/USMP"
+
+      - name: Compile examples for ESP32
+        run: |
+          for ex in ports/usmp-arduino/examples/*/*.ino; do
+            echo "::group::Compiling $ex"
+            arduino-cli compile --fqbn esp32:esp32:esp32 --warnings all \
+              --libraries "$HOME/Arduino/libraries" "$(dirname "$ex")"
+            echo "::endgroup::"
+          done
