@@ -52,6 +52,7 @@ or port-interface changes — core, ports, and SDK remain protocol-compatible wi
 - Arduino Port (`library.json`, `library.properties`): `1.0.0` → `1.0.1` (the port's `usmp_api.h` is now a shim forwarding to `core/include/usmp.h`, so the version is inherited from core)
 - Python SDK (`pyproject.toml`): `1.0.0` → `1.0.1`
 - ESP32 Port (`idf_component.yml`): `1.0.0` → `1.0.1`
+- Root workspace (`pyproject.toml`): `1.0.0` → `1.0.1`
 
 ---
 
