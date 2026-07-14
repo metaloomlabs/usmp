@@ -8,7 +8,9 @@
 #define WIFI_SSID "YourNetwork"
 #define WIFI_PASS "YourPassword"
 
-#define LED_PIN LED_BUILTIN
+// Most ESP32 dev boards use GPIO 2 for the built-in LED.
+// We use a literal to avoid lambda capture and board-specific header definition issues.
+#define LED_PIN 2
 
 USMPClient usmp(PSK);
 
