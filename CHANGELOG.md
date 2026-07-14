@@ -24,6 +24,9 @@ or port-interface changes — core, ports, and SDK remain protocol-compatible wi
 - **Fixed** (Arduino Port): A stray or duplicate UDP UTACK (or an idle socket) could wedge `maintain()` in an unbounded `recv` spin. Session-phase UDP reads now use a bounded wait and return "no data"; handshake reads stay unbounded.
 - **Fixed** (Arduino Port): TCP `recv` had no timeout — a peer that sent a partial frame and stalled could block `maintain()` indefinitely. Session-phase TCP reads now use a no-progress stall timeout; handshake reads stay unbounded.
 - **Fixed** (Arduino Port): `read(uint8_t*, size_t)` no longer narrows the caller's buffer length when passing it to the `uint16_t`-typed core `usmp_recv`.
+- **Fixed** (ESP32 Port): Treated socket read timeouts on idle TCP streams as non-fatal empty reads (`0`) instead of returning fatal errors (`-1`), preventing the connection from dropping and reconnecting every 500ms of inactivity.
+- **Fixed** (ESP32 Port): Bound session-phase UDP receive select timeout to 50ms (non-fatal empty read on timeout) so the thread is not blocked indefinitely and keepalive ticks can execute regularly.
+- **Fixed** (ESP32 Port): Corrected `keys_set` state resetting in `usmp_udp_reconnect` so reconnect handshakes use the correct unbounded timeout.
 
 ### Changed
 
@@ -34,17 +37,21 @@ or port-interface changes — core, ports, and SDK remain protocol-compatible wi
 - **Changed** (Python SDK): Expanded the Ruff lint rule set (`B`, `UP`, `C90`, `S`, `BLE`, `RUF`) and addressed the resulting warnings; adjusted the mypy configuration (now checks `src` and `tests`). Cleaned up imports and alphabetized `__all__` in `usmp/__init__.py`.
 - **Internal refactor, no behavior change** (Arduino Port): Deduplicated the two `begin()` overloads into one shared template and extracted a `USMPTransportBase` so the WiFi bring-up lives in one place; centralized level-gated logging in one helper (which also fixed a doubled `[usmp] [usmp]:` log prefix). Replaced the hand-maintained copy of the core public header with a one-line shim that forwards to `core/include/usmp.h`, removing a drift source.
 - **Documented** (Arduino Port): Clarified the connection-callback firing semantics in `USMP.h` — `onConnect` fires on every session establishment (initial and reconnect); `onReconnect` fires additionally on reconnects. Behavior unchanged.
+- **Changed** (ESP32 Port): Standardized error level logs to route through standard `ESP_LOGE` macros instead of `printf` with manual lowercase tag conversion.
+- **Changed** (ESP32 Port): Modified the build configuration (`CMakeLists.txt`) to dynamically resolve the core directory path to support standalone component builds.
 
 ### Added
 
 - **Python SDK**: Transport-layer abstraction — a new `usmp.transport` package with a transport base class and dedicated TCP and UDP transport modules.
 - **CI**: An `arduino-esp32-compile` job that assembles the Arduino library exactly as it ships and compiles all four examples for ESP32 — the first automated build gate for the Arduino wrappers.
+- **ESP32 Port**: Implemented DNS hostname resolution (via `getaddrinfo`) support in both TCP and UDP transports, allowing devices to connect to hostnames (e.g. `usmp.mycompany.com`) as well as numeric IPv4 addresses.
 
 ### Version Bumps
 
 - C Core (`usmp.h`, `usmp_connect.c`): `1.0.0` → `1.0.1`
 - Arduino Port (`library.json`, `library.properties`): `1.0.0` → `1.0.1` (the port's `usmp_api.h` is now a shim forwarding to `core/include/usmp.h`, so the version is inherited from core)
 - Python SDK (`pyproject.toml`): `1.0.0` → `1.0.1`
+- ESP32 Port (`idf_component.yml`): `1.0.0` → `1.0.1`
 
 ---
 
