@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -18,37 +19,41 @@ typedef struct {
   int sock;
   char server_ip[64];
   int port;
+  bool session_active;
 } usmp_tcp_ctx_t;
 
 // ── Internal helpers
 // ──────────────────────────────────────────────────────────
 
 static int tcp_dial(usmp_tcp_ctx_t* tcp) {
-  int sock = socket(AF_INET, SOCK_STREAM, 0);
-  if (sock < 0) return -1;
+  struct addrinfo hints, *res;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+
+  char port_str[16];
+  snprintf(port_str, sizeof(port_str), "%d", tcp->port);
+
+  if (getaddrinfo(tcp->server_ip, port_str, &hints, &res) != 0) {
+    return -1;
+  }
+
+  int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+  if (sock < 0) {
+    freeaddrinfo(res);
+    return -1;
+  }
 
   int flag = 1;
   setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
-  // Set receive timeout to 500ms to prevent long blocking
-  struct timeval tv = {.tv_sec = 0, .tv_usec = 500000};
-  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-  struct sockaddr_in addr = {
-      .sin_family = AF_INET,
-      .sin_port = htons((uint16_t)tcp->port),
-  };
-
-  if (inet_pton(AF_INET, tcp->server_ip, &addr.sin_addr) != 1) {
+  if (connect(sock, res->ai_addr, res->ai_addrlen) != 0) {
+    freeaddrinfo(res);
     close(sock);
     return -1;
   }
 
-  if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-    close(sock);
-    return -1;
-  }
-
+  freeaddrinfo(res);
   tcp->sock = sock;
   return 0;
 }
@@ -67,16 +72,66 @@ static int usmp_tcp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   return 0;
 }
 
+#ifndef USMP_TCP_RECV_TIMEOUT_MS
+#define USMP_TCP_RECV_TIMEOUT_MS 2000
+#endif
+
 static int usmp_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)t->ctx;
+  if (!tcp || tcp->sock < 0) return -1;
 
   // Step 1: read header exactly
   if (max_len < USMP_HEADER_SIZE) return -1;
   size_t received = 0;
+  uint32_t last_progress = usmp_port_millis();
+  const bool bounded = tcp->session_active;
+
   while (received < USMP_HEADER_SIZE) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(tcp->sock, &rfds);
+
+    struct timeval tv;
+    struct timeval* p_tv = NULL;
+
+    if (bounded) {
+      uint32_t now = usmp_port_millis();
+      uint32_t elapsed = now - last_progress;
+      if (elapsed >= USMP_TCP_RECV_TIMEOUT_MS) {
+        // Stall before any byte is a non-fatal empty read; stall after partial
+        // bytes were consumed forces a resync (we can't un-read a TCP stream).
+        return received == 0 ? 0 : -1;
+      }
+      uint32_t remaining = USMP_TCP_RECV_TIMEOUT_MS - elapsed;
+      tv.tv_sec = (long)(remaining / 1000);
+      tv.tv_usec = (long)((remaining % 1000) * 1000);
+      p_tv = &tv;
+    }
+
+    int ret = select(tcp->sock + 1, &rfds, NULL, NULL, p_tv);
+    if (ret < 0) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (ret == 0) {
+      if (bounded) {
+        return received == 0 ? 0 : -1;
+      }
+      continue;
+    }
+
     ssize_t n = recv(tcp->sock, buf + received, USMP_HEADER_SIZE - received, 0);
-    if (n <= 0) return -1;
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue;
+      }
+      return -1;
+    }
+    if (n == 0) {
+      return -1; // Connection closed
+    }
     received += (size_t)n;
+    last_progress = usmp_port_millis();
   }
 
   // Step 2: parse payload length from header
@@ -86,9 +141,46 @@ static int usmp_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
 
   // Step 3: read payload exactly
   while (received < USMP_HEADER_SIZE + payload_len) {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(tcp->sock, &rfds);
+
+    struct timeval tv;
+    struct timeval* p_tv = NULL;
+
+    if (bounded) {
+      uint32_t now = usmp_port_millis();
+      uint32_t elapsed = now - last_progress;
+      if (elapsed >= USMP_TCP_RECV_TIMEOUT_MS) {
+        return -1; // stalled mid-frame (fatal)
+      }
+      uint32_t remaining = USMP_TCP_RECV_TIMEOUT_MS - elapsed;
+      tv.tv_sec = (long)(remaining / 1000);
+      tv.tv_usec = (long)((remaining % 1000) * 1000);
+      p_tv = &tv;
+    }
+
+    int ret = select(tcp->sock + 1, &rfds, NULL, NULL, p_tv);
+    if (ret < 0) {
+      if (errno == EINTR) continue;
+      return -1;
+    }
+    if (ret == 0) {
+      return -1; // stalled mid-frame (fatal)
+    }
+
     ssize_t n = recv(tcp->sock, buf + received, USMP_HEADER_SIZE + payload_len - received, 0);
-    if (n <= 0) return -1;
+    if (n < 0) {
+      if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+        continue;
+      }
+      return -1;
+    }
+    if (n == 0) {
+      return -1; // Connection closed
+    }
     received += (size_t)n;
+    last_progress = usmp_port_millis();
   }
 
   return (int)received;
@@ -124,6 +216,7 @@ static int usmp_tcp_reconnect(usmp_transport_t* t) {
     tcp->sock = -1;
   }
 
+  tcp->session_active = false;
   return tcp_dial(tcp);
 }
 
@@ -147,12 +240,23 @@ static int usmp_tcp_available(usmp_transport_t* t) {
 // ── Factory
 // ───────────────────────────────────────────────────────────────────
 
+static void usmp_tcp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
+                                      const uint8_t* rx_key) {
+  (void)tx_key;
+  (void)rx_key;
+  usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)t->ctx;
+  if (tcp) {
+    tcp->session_active = true;
+  }
+}
+
 int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port) {
   usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)malloc(sizeof(usmp_tcp_ctx_t));
   if (!tcp) return -1;
 
   tcp->sock = -1;
   tcp->port = port;
+  tcp->session_active = false;
   strncpy(tcp->server_ip, server_ip, sizeof(tcp->server_ip) - 1);
   tcp->server_ip[sizeof(tcp->server_ip) - 1] = '\0';
 
@@ -168,7 +272,7 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->available = usmp_tcp_available;
   t->destroy = usmp_tcp_destroy;
   t->confirm_authenticated = NULL;
-  t->set_session_keys = NULL;  // TCP needs no UTACK authentication
+  t->set_session_keys = usmp_tcp_set_session_keys;
   t->ctx = tcp;
 
   return 0;
