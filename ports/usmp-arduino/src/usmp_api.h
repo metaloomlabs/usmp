@@ -18,4 +18,6 @@
  * header) instead of core's usmp.h — the very collision the packaging step works
  * around.
  */
+#ifndef USMP_TEST_MAIN
 #include "../../../core/include/usmp.h"
+#endif

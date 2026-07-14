@@ -1,5 +1,7 @@
 #include <stddef.h>
 
+#define USMP_TEST_MAIN
+
 // Rename Arduino usmp_t and functions to prevent case-insensitive / double definition conflicts
 #define usmp_t arduino_usmp_t
 #define usmp_get_version arduino_usmp_get_version
@@ -30,7 +32,17 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef USMP_VERSION_MAJOR
+// usmp_api.h was a repository shim and did not define anything because USMP_TEST_MAIN was set.
+// Include the real usmp.h first, then alias arduino_usmp_t to usmp_t.
 #include "usmp.h"
+typedef usmp_t arduino_usmp_t;
+#else
+// usmp_api.h was the actual header copy (packaged version).
+// We include usmp.h to get the core definitions.
+#include "usmp.h"
+#endif
+
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
 
