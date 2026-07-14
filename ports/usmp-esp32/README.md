@@ -94,8 +94,8 @@ void app_main(void) {
     ctx.psk_len = strlen(PSK);
     ctx.keepalive_ms = 15000; // PING every 15s when idle
 
-    // Initialize TCP transport
-    if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) != 0) {
+    // Initialize TCP transport (supports IPs and DNS hostnames)
+    if (usmp_transport_tcp_init(&transport, "usmp.mycompany.com", 9000) != 0) {
         ESP_LOGE("APP", "Failed to connect TCP transport");
         return;
     }
@@ -204,8 +204,8 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 | v0.4.0  | Published on ESP Component Registry and PyPI, making it stable | Released |
 | v0.4.7  | Hardening (Deterministic Nonces, Rate Limiting, Fragmentation) | Released |
 | v0.5.0  | UDP transport support fully complete and production-ready | Released |
-| v0.5.5  | CLI tools and auto-discovery (mDNS / UDP) | Planned |
-| v0.6.0  | Secure OTA firmware updates with Ed25519 signatures | Planned |
+| v1.1.0  | CLI tools and auto-discovery (mDNS / UDP) | Planned |
+| v1.2.0  | Secure OTA firmware updates with Ed25519 signatures | Planned |
 
 ## License
 

@@ -47,7 +47,7 @@ Choose **either** the ESP-IDF variant or the Arduino IDE variant below.
 ### Option A: Arduino Client (ESP32)
 
 1. Open your Arduino IDE.
-2. Zip the [ports/usmp-arduino/](../../ports/usmp-arduino) directory to build `usmp-arduino.zip`, or copy the directory directly to your Arduino `libraries/USMP` folder.
+2. Build the Arduino library zip by running `.\scripts\build-arduino-zip.ps1` in PowerShell (which outputs `usmp-1.0.1-arduino.zip`), or copy the `ports/usmp-arduino/` directory directly to your Arduino `libraries/USMP` folder.
 3. Open the sketch file [arduino.ino](arduino/arduino.ino) in your IDE.
 4. Modify the config block at the top of the file:
 

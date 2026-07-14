@@ -35,6 +35,7 @@ examples/aws_ec2_test/
 ## Prerequisites
 
 Before starting, make sure you have:
+
 1. An active **AWS Account**.
 2. An **ESP32 development board** connected to your local machine.
 3. Depending on your preferred framework:
@@ -81,14 +82,19 @@ By default, AWS blocks all incoming traffic to your EC2 instance except SSH (Por
 
 1. Open a terminal (PowerShell, Command Prompt, or Bash) on your local machine and navigate to the directory where your downloaded `.pem` private key is saved.
 2. Update permissions for your key (on Linux/macOS only):
+
    ```bash
    chmod 400 your-key.pem
    ```
+
 3. Connect to the EC2 instance via SSH (replace `your-key.pem` and the IP address with your actual details):
+
    ```bash
    ssh -i your-key.pem ubuntu@your-ec2-public-ip
    ```
+
 4. Once logged in, update the package manager and install Python 3 and its virtual environment environment package:
+
    ```bash
    sudo apt update && sudo apt upgrade -y
    sudo apt install python3 python3-pip python3-venv git -y
@@ -101,19 +107,25 @@ By default, AWS blocks all incoming traffic to your EC2 instance except SSH (Por
 To run the server, we will install `usmp` from PyPI and run the server script directly on your EC2 instance.
 
 ### Option A: Using standard pip
+
 1. Create a directory and virtual environment:
+
    ```bash
    mkdir usmp-server && cd usmp-server
    python3 -m venv .venv
    source .venv/bin/activate
    ```
+
 2. Install the `usmp` package from PyPI:
+
    ```bash
    pip install usmp
    ```
 
 ### Option B: Using uv (Recommended for speed)
+
 1. Initialize a new project and add the `usmp` dependency:
+
    ```bash
    mkdir usmp-server && cd usmp-server
    uv init
@@ -121,16 +133,21 @@ To run the server, we will install `usmp` from PyPI and run the server script di
    ```
 
 ### Running the server script
+
 1. Create the `server.py` file on your EC2 instance (e.g., run `nano server.py` and paste the contents of [server.py](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/aws_ec2_test/server/server.py) into it).
 2. Start the server:
-   * **If using pip/venv**:
+   - **If using pip/venv**:
+
      ```bash
      python3 server.py
      ```
-   * **If using uv**:
+
+   - **If using uv**:
+
      ```bash
      uv run server.py
      ```
+
    *You should see a message indicating the server is listening on port 9000 and displaying the local IP address.*
 
 ---
@@ -158,24 +175,33 @@ Choose **one** of the client options below to flash onto your ESP32.
 ### Option B: Using ESP-IDF (Native C)
 
 1. Open a command line on your local machine and navigate to the ESP-IDF example directory:
+
    ```bash
    cd examples/aws_ec2_test/esp32
    ```
+
 2. Open the file [wifi.c](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/aws_ec2_test/esp32/main/wifi.c) and configure your Wi-Fi credentials:
+
    ```c
    #define WIFI_SSID "YOUR_WIFI_SSID"
    #define WIFI_PASS "YOUR_WIFI_PASSWORD"
    ```
+
 3. Open the file [app.c](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/aws_ec2_test/esp32/main/app.c) and configure your EC2 details and Pre-Shared Key (PSK):
+
    ```c
    #define EC2_PUBLIC_IP "YOUR_EC2_PUBLIC_IP"
    #define PSK "usmp-dev-psk-change-me-before-prod"
    ```
+
 4. Set your ESP-IDF build target (e.g. for standard ESP32):
+
    ```bash
    idf.py set-target esp32
    ```
+
 5. Build, flash, and open the serial monitor (replace `COMx` or `/dev/ttyUSBx` with your ESP32's serial port):
+
    ```bash
    idf.py -p COMx flash monitor
    ```
@@ -185,7 +211,9 @@ Choose **one** of the client options below to flash onto your ESP32.
 ## Step 6: Verify Connection and Logs
 
 ### On the ESP32 Serial Monitor
+
 You should see output similar to this as the handshake completes:
+
 ```text
 Connecting to Wi-Fi: YourNetwork
 Connecting to USMP EC2 Server: 13.62.222.96:9000
@@ -201,7 +229,9 @@ Received from EC2: Echo from EC2: ESP32 Ping #1 (Uptime: 5s)
 ```
 
 ### On the EC2 Instance (Python Terminal)
+
 You will see session logs appearing in real-time as the connection is made:
+
 ```text
 ============================================================
                 USMP SECURE SERVER (EC2)

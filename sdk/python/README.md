@@ -114,8 +114,9 @@ Requires Python 3.11+.
 ## ESP32 / Arduino library
 
 The Arduino library and ESP-IDF component are available directly through their respective package registries:
+
 - **ESP-IDF Component**: Add as a dependency by running `idf.py add-dependency "metaloomlabs/usmp"` in your project directory.
-- **Arduino Library**: Import the packaged release ZIP archive `usmp-X.Y.Z-arduino.zip` via **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
+- **Arduino Library**: Import the packaged release ZIP archive `usmp-1.0.1-arduino.zip` via **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
 
 <p align="center">
   <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong>
