@@ -191,6 +191,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING || pkt.type == USMP_TYPE_BYE) {
       if (bytes_written > 0) {
         USMP_LOGE(TAG, "Protocol error: control frame during fragmentation");
+        if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
         return -1;
       }
       dec_dest = dummy_out;
@@ -205,17 +206,20 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     } else {
       snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
       USMP_LOGE(TAG, _msg);
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
 
     /* Verify payload length is valid for AES-GCM (contains at least nonce + tag) */
     if (pkt.length < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN) {
       USMP_LOGE(TAG, "Payload too short");
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
     uint16_t plain_len = pkt.length - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
     if (plain_len > dec_max) {
       USMP_LOGE(TAG, "Buffer too small for payload");
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
 
