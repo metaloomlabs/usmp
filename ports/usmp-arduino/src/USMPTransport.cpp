@@ -2,8 +2,10 @@
 
 #include <string.h>
 
+extern "C" {
 #include "mbedtls/constant_time.h"
 #include "mbedtls/md.h"
+}
 
 // Shared WiFi bring-up (identical for TCP and UDP) ───────────────────────────
 bool USMPTransportBase::connectWiFi() const {
