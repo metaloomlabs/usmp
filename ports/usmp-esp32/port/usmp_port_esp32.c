@@ -25,23 +25,10 @@ void usmp_port_delay_ms(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 uint32_t usmp_port_millis(void) { return (uint32_t)((uint64_t)esp_timer_get_time() / 1000ULL); }
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
-  if (level == 'E') {
-    char lower_tag[64];
-    size_t i;
-    for (i = 0; i < sizeof(lower_tag) - 1 && tag[i] != '\0'; i++) {
-      char c = tag[i];
-      if (c >= 'A' && c <= 'Z') {
-        lower_tag[i] = (char)(c + ('a' - 'A'));
-      } else {
-        lower_tag[i] = c;
-      }
-    }
-    lower_tag[i] = '\0';
-    printf("[%s]: %s\n", lower_tag, msg);
-    return;
-  }
-
   switch (level) {
+    case 'E':
+      ESP_LOGE(tag, "%s", msg);
+      break;
     case 'I':
       ESP_LOGI(tag, "%s", msg);
       break;
