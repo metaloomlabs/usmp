@@ -19,6 +19,7 @@
 static const char* TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
+#define USMP_COOKIE_LEN 16  // HELLO_RETRY anti-DoS cookie length
 
 static int derive_session_keys(const uint8_t* shared_secret, size_t secret_len,
                                const uint8_t* nonce, size_t nonce_len, const uint8_t* pub_c,
@@ -226,7 +227,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   }
 
   if (pkt.type == USMP_TYPE_HELLO_RETRY) {
-    if (pkt.length != 16) {
+    if (pkt.length != USMP_COOKIE_LEN) {
       USMP_LOGE(TAG, "Bad HELLO_RETRY length");
       goto cleanup;
     }
@@ -236,11 +237,12 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
     pkt.version = USMP_VERSION;
     pkt.type = USMP_TYPE_HELLO;
     pkt.seq = 0;
-    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + 16;
+    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + USMP_COOKIE_LEN;
     memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
     memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
     // Copy cookie from previous packet's payload
-    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE, 16);
+    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE,
+           USMP_COOKIE_LEN);
 
     len = usmp_build_packet(&pkt, tx_buf, NULL);
     if (transport->send(transport, tx_buf, (size_t)len) < 0) {

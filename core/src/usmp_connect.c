@@ -18,8 +18,9 @@ static void log_session_id(const char* prefix, const uint8_t* session_id) {
            "%s%02x%02x%02x%02x%02x%02x%02x%02x"
            "%02x%02x%02x%02x%02x%02x%02x%02x",
            prefix, session_id[0], session_id[1], session_id[2], session_id[3], session_id[4],
-           session_id[5], session_id[6], session_id[7], session_id[8], session_id[9], session_id[10],
-           session_id[11], session_id[12], session_id[13], session_id[14], session_id[15]);
+           session_id[5], session_id[6], session_id[7], session_id[8], session_id[9],
+           session_id[10], session_id[11], session_id[12], session_id[13], session_id[14],
+           session_id[15]);
   USMP_LOGI(TAG, _msg);
 }
 
@@ -142,7 +143,7 @@ void usmp_close(usmp_t* ctx) {
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "1.0.0"; }
+const char* usmp_get_version(void) { return "1.0.1"; }
 
 static usmp_log_level_t g_usmp_log_level = USMP_LOG_LEVEL_ERROR;
 

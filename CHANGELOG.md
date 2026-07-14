@@ -5,6 +5,41 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-07-14
+
+Core C library bug fixes plus a Python SDK refactor. No wire-format, public API,
+or port-interface changes — core, ports, and SDK remain protocol-compatible with
+1.0.0. Ports pick up the core fixes on rebuild.
+
+### 🔒 Security
+
+- **Fixed** (C Core): A live UDP session could be torn down by a single spoofed datagram. `usmp_recv` already dropped-and-continued on CRC/parse and AES-GCM failures for UDP, but four structural checks between them (unexpected frame type, payload shorter than nonce+tag, payload larger than the caller buffer, and control-frame-during-fragmentation) still returned `-1`. Because the CRC is not secret, an off-path attacker spoofing the server's address could hit one of these and kill the session. These checks now drop the frame and keep reading on UDP, matching the surrounding logic. TCP behavior is unchanged.
+
+### Fixed
+
+- **Fixed** (C Core): `usmp_recv` returned `0` ("no data") when the 10-attempt receive cap was reached in the middle of reassembling a fragmented message, silently discarding the partial payload while the rx state had already advanced — the next call would then reassemble from mid-message and produce corrupt data. It now fails hard (`-1`, session marked not-established) when the cap is hit mid-reassembly so the caller reconnects; the idle case still returns `0`.
+- **Fixed** (Python SDK): Corrected `UDPStream` UTACK packet building and duplicate-handshake-packet detection logic.
+- **Fixed** (Python SDK): `UDPListener` now keeps references to its background tasks so they are not garbage-collected mid-flight.
+
+### Changed
+
+- **Internal refactor, no behavior change** (C Core): Consolidated duplicated serialization logic into single shared helpers — the 10-byte frame header (`usmp_serialize_header`, previously hand-written in CRC, packet-build, and GCM-AAD paths), the GCM nonce (`build_nonce`), the encrypt-and-transmit path shared by data and control frames (`emit_frame`), the session-id hex log (`log_session_id`), and the handshake HMAC transcript shared by the client and server HMACs (`compute_transcript_hmac`). Byte-for-byte identical output on the wire.
+- **Changed** (C Core): Named the HELLO_RETRY cookie length constant (`USMP_COOKIE_LEN`) instead of the bare literal `16`.
+- **Changed** (Python SDK): Refactored the server, client, session, and handshake modules for clearer structure, improved type hints, and better error handling.
+- **Changed** (Python SDK): Replaced `assert`s with explicit type checks in the datagram protocol classes (asserts are stripped under `python -O`).
+- **Changed** (Python SDK): Expanded the Ruff lint rule set (`B`, `UP`, `C90`, `S`, `BLE`, `RUF`) and addressed the resulting warnings; adjusted the mypy configuration (now checks `src` and `tests`). Cleaned up imports and alphabetized `__all__` in `usmp/__init__.py`.
+
+### Added
+
+- **Python SDK**: Transport-layer abstraction — a new `usmp.transport` package with a transport base class and dedicated TCP and UDP transport modules.
+
+### Version Bumps
+
+- C Core (`usmp.h`, `usmp_connect.c`): `1.0.0` → `1.0.1`
+- Python SDK (`pyproject.toml`): `1.0.0` → `1.0.1`
+
+---
+
 ## [1.0.0] — 2026-07-05
 
 ### 🔒 Security

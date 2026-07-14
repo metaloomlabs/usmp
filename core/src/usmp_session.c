@@ -147,6 +147,18 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
   for (int ctrl_count = 0;;) {
     if (attempts++ >= 10) {
       USMP_LOGW(TAG, "Max receive attempts reached per call — possible flood");
+      if (frame_count > 0) {
+        /*
+         * We already consumed part of a fragmented message and advanced the
+         * rx state. Returning 0 here would look like "no data" while silently
+         * dropping the partial payload, and the next call would try to
+         * reassemble from the middle of the message — corrupt data. Fail hard
+         * so the caller reconnects instead.
+         */
+        USMP_LOGE(TAG, "Incomplete reassembly after max attempts — session desynced");
+        ctx->established = false;
+        return -1;
+      }
       return 0;
     }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
