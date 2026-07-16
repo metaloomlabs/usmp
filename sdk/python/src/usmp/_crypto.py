@@ -140,4 +140,6 @@ def decrypt(
         # Expected on tampering / wrong key — don't echo library internals.
         raise CryptoError("Authentication tag verification failed") from e
     except Exception as e:
-        raise CryptoError(f"Decryption failed: {e}") from e
+        # Keep the underlying detail as the exception cause, not in the message,
+        # so we don't echo library internals to callers/logs.
+        raise CryptoError("Decryption failed") from e

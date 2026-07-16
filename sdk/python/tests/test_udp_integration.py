@@ -674,3 +674,409 @@ async def test_udp_utack_authentication_s3():
     stream._ack_received_event.clear()
     stream.feed_packet(header + good_mac)
     assert stream._ack_received_event.is_set()
+
+
+# ── Security Audit Findings 1-13 Regression Tests ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_finding_1_lock_nonce_reuse():
+    """Finding 1: Concurrent sends must be serialized under a lock to prevent nonce reuse."""
+    import struct
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+    nonces_seen = []
+    sequences_seen = []
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        original_write_frame = session._transport.write_frame
+        async def mock_write_frame(ptype, ciphertext, seq=0):
+            sequences_seen.append(seq)
+            nonce = struct.pack("<I", seq) + session._info.session_id[:8]
+            nonces_seen.append(nonce)
+            await original_write_frame(ptype, ciphertext, seq=seq)
+
+        session._transport.write_frame = mock_write_frame
+
+        await asyncio.gather(
+            session.send(b"payload A"),
+            session.send(b"payload B")
+        )
+        try:
+            await session.recv()
+        except Exception:
+            pass
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        await asyncio.sleep(0.1)
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    await _run(server, client_coro())
+
+    assert len(sequences_seen) == 2
+    assert len(nonces_seen) == 2
+    assert sequences_seen[0] != sequences_seen[1]
+    assert nonces_seen[0] != nonces_seen[1]
+
+
+@pytest.mark.asyncio
+async def test_finding_2_udp_cookie_pruning():
+    """Finding 2: UDP cookie rate limiter prune must be refill-aware and evict oldest."""
+    server = USMPServer(host=HOST, port=0, psk=PSK, protocol="udp")
+    for i in range(1200):
+        ip = f"10.0.0.{i}"
+        server._allow_udp_cookie(ip)
+    
+    assert len(server._udp_cookie_rate_limiter) <= 1000
+
+
+@pytest.mark.asyncio
+async def test_finding_3_paced_keepalive():
+    """Finding 3: Paced control frames must not trigger consecutive count closure."""
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+    received_data = []
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        try:
+            data = await session.recv()
+            received_data.append(data)
+            await session.recv()
+        except Exception:
+            pass
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        session = client._session
+        assert session is not None
+
+        for _ in range(5):
+            await session.ping()
+            await asyncio.sleep(0.02)
+            
+        await asyncio.sleep(1.1)
+        
+        for _ in range(5):
+            await session.ping()
+            await asyncio.sleep(0.02)
+        
+        await session.send(b"final data")
+        await asyncio.sleep(0.1)
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    await _run(server, client_coro())
+    assert received_data == [b"final data"]
+
+
+@pytest.mark.asyncio
+async def test_finding_4_oversized_payload_rejection():
+    """Finding 4: Oversized length field must be rejected early to prevent desync."""
+    import struct
+    from usmp.types import USMP_MAGIC, USMP_MAX_PAYLOAD, USMP_HEADER_SIZE
+    class DummyTransport:
+        def __init__(self):
+            self.sent = []
+        def sendto(self, data, addr):
+            self.sent.append((data, addr))
+        def close(self):
+            pass
+
+    stream = UDPStream(DummyTransport(), (HOST, 9999), is_server=False)
+    
+    header = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 0) + struct.pack("<H", 481) + struct.pack("<H", 0)
+    oversized_data = header + b"\x00" * 481
+    stream.feed_packet(oversized_data)
+    
+    assert len(stream._read_buffer) == 0
+
+    valid_payload = b"\x00\x11\x22\x33"
+    header2 = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 1) + struct.pack("<H", 4) + struct.pack("<H", 0)
+    valid_data = header2 + valid_payload
+    stream.feed_packet(valid_data)
+    
+    assert len(stream._read_buffer) == len(valid_data)
+    assert stream._read_buffer[:2] == b"\xcd\xab"
+
+
+@pytest.mark.asyncio
+async def test_finding_5_client_handshake_timeout():
+    """Finding 5: client_handshake must respect timeout to prevent hanging."""
+    from usmp.errors import USMPTimeoutError
+    port = _free_port()
+    client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+    with pytest.raises(USMPTimeoutError):
+        await client.connect(timeout=0.2)
+
+
+@pytest.mark.asyncio
+async def test_finding_6_tcp_listener_stop_hang():
+    """Finding 6: TCPListener.stop() must not hang on active handlers."""
+    import time
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="tcp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        await session.recv()
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="tcp")
+        await client.connect()
+        await asyncio.sleep(0.05)
+        t0 = time.monotonic()
+        await server._listener.stop()
+        t1 = time.monotonic()
+        assert t1 - t0 < 1.0
+
+    srv_task = asyncio.create_task(server.serve())
+    await asyncio.sleep(0.2)
+    try:
+        await client_coro()
+    finally:
+        srv_task.cancel()
+        try:
+            await srv_task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_finding_7_disconnect_leaks():
+    """Finding 7: disconnect() must close transport even if bye() raises error."""
+    class BadSession:
+        session_id = "mock-session-id"
+        async def bye(self):
+            raise ConnectionResetError("mock error")
+
+    class DummyTransport:
+        def __init__(self):
+            self.closed = False
+        def close(self):
+            self.closed = True
+
+    client = USMPClient(host=HOST, port=9999, psk=PSK)
+    client._session = BadSession()
+    client._transport = DummyTransport()
+
+    with pytest.raises(ConnectionResetError):
+        await client.disconnect()
+
+    assert client._transport is None
+    assert client._session is None
+
+
+@pytest.mark.asyncio
+async def test_finding_8_handshake_timeout_rate_limiter():
+    """Finding 8: Handshake timeout must cover queue time and update failed handshakes limiter."""
+    from usmp._handshake import _failed_handshakes
+    from usmp.types import PacketType
+    _failed_handshakes.clear()
+    
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, handshake_timeout=0.1, protocol="udp")
+    
+    @server.on_session
+    async def handler(session: USMPSession):
+        pass
+
+    original_write = UDPStream.write_frame
+    async def mock_write(self, *args, **kwargs):
+        ptype = args[0] if args else kwargs.get("ptype")
+        if ptype == PacketType.HELLO_ACK:
+            await asyncio.sleep(2.0)
+        await original_write(self, *args, **kwargs)
+        
+    UDPStream.write_frame = mock_write
+    
+    try:
+        async def client_coro():
+            client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+            task = asyncio.create_task(client.connect(timeout=5.0))
+            await asyncio.sleep(0.3)
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+
+        await _run(server, client_coro())
+    finally:
+        UDPStream.write_frame = original_write
+    
+    assert HOST in _failed_handshakes
+    assert _failed_handshakes[HOST][0] >= 1
+
+
+@pytest.mark.asyncio
+async def test_finding_9_watchdog_unauthenticated_timer():
+    """Finding 9: Watchdog liveness must not be updated by unauthenticated frames."""
+    import struct
+    from usmp.types import USMP_MAGIC, PacketType
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+    
+    initial_last_recv = None
+    final_last_recv = None
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        nonlocal initial_last_recv, final_last_recv
+        initial_last_recv = session._last_recv
+        await asyncio.sleep(0.05)
+        
+        header = struct.pack("<H", USMP_MAGIC) + bytes([2, PacketType.DATA]) + struct.pack("<I", 99) + struct.pack("<H", 20) + struct.pack("<H", 0)
+        garbage_data = header + b"\xff" * 20
+        server._handle_udp_datagram(None, garbage_data, ("127.0.0.1", client_port))
+        
+        await asyncio.sleep(0.05)
+        final_last_recv = session._last_recv
+        try:
+            await session.recv()
+        except Exception:
+            pass
+
+    client_port = 0
+    async def client_coro():
+        nonlocal client_port
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        client_port = client._transport._transport.get_extra_info("sockname")[1]
+        await asyncio.sleep(0.2)
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    await _run(server, client_coro())
+    
+    assert initial_last_recv is not None
+    assert final_last_recv is not None
+    assert final_last_recv == initial_last_recv
+
+
+@pytest.mark.asyncio
+async def test_finding_10_utack_buffer_full():
+    """Finding 10: UDP UTACK must not be sent if buffer capacity drops the packet."""
+    import struct
+    from usmp.types import USMP_MAGIC
+    class MockTransport:
+        def __init__(self):
+            self.sent = []
+        def sendto(self, data, addr):
+            self.sent.append(data)
+        def close(self):
+            pass
+
+    stream = UDPStream(MockTransport(), (HOST, 9999), is_server=True)
+    stream._read_buffer.extend(b"\x00" * 4090)
+    
+    header = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 10) + struct.pack("<H", 8) + struct.pack("<H", 0)
+    data = header + b"\x00" * 8
+    
+    stream.feed_packet(data)
+    assert len(stream._transport.sent) == 0
+
+
+@pytest.mark.asyncio
+async def test_finding_11_bye_idempotent_sequence_clamp():
+    """Finding 11: second bye() must be idempotent and clamp sequence increment."""
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        pass
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        session = client._session
+        assert session is not None
+        
+        session._info.tx_seq = 0xFFFFFFFF
+        await session.bye()
+        await session.bye()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
+
+    await _run(server, client_coro())
+
+
+@pytest.mark.asyncio
+async def test_finding_12_on_transport_connect_finally_safety():
+    """Finding 12: Connection task cancellation must safely decrement counters in finally block."""
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="tcp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        pass
+
+    async def client_coro():
+        reader, writer = await asyncio.open_connection(HOST, port)
+        await asyncio.sleep(0.05)
+        
+        assert len(server._tcp_connections) == 1
+        
+        tasks = list(server._conn_tasks)
+        assert len(tasks) == 1
+        tasks[0].cancel()
+        
+        await asyncio.sleep(0.05)
+        assert len(server._tcp_connections) == 0
+        writer.close()
+        await writer.wait_closed()
+
+    await _run(server, client_coro())
+
+
+@pytest.mark.asyncio
+async def test_finding_13_handshake_sequence():
+    """Finding 13: Client handshake writes must use consecutive sequence numbers."""
+    from usmp.types import PacketType
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
+    sequences_seen = []
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        pass
+
+    original_write = UDPStream.write_frame
+    async def mock_write(self, *args, **kwargs):
+        ptype = args[0] if args else kwargs.get("ptype")
+        seq = kwargs.get("seq")
+        sequences_seen.append((ptype, seq))
+        await original_write(self, *args, **kwargs)
+        
+    UDPStream.write_frame = mock_write
+
+    try:
+        async def client_coro():
+            client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+            await client.connect()
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+    
+        await _run(server, client_coro())
+    finally:
+        UDPStream.write_frame = original_write
+    
+    assert (PacketType.HELLO, 0) in sequences_seen
+    assert (PacketType.HELLO_ACK, 2) in sequences_seen
