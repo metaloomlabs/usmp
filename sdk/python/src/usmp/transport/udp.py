@@ -10,7 +10,7 @@ from typing import Any
 
 from .._frame import encode_frame
 from .._frame import read_frame as _read_frame
-from ..types import USMP_HEADER_SIZE, PacketType, USMPFrame, USMP_MAX_PAYLOAD
+from ..types import USMP_HEADER_SIZE, USMP_MAX_PAYLOAD, PacketType, USMPFrame
 from .base import USMPListener, USMPTransport
 
 logger = logging.getLogger("usmp.transport.udp")
@@ -347,6 +347,21 @@ class UDPListener(USMPListener):
             stream.close()
         self._udp_sessions.clear()
         self._udp_handshakes.clear()
+
+        # Mirror TCPListener.stop(). close() only unblocks streams parked in
+        # readexactly(); a handler inside drain()'s ARQ wait or sleep() keeps
+        # running, so its finally block never runs and the loop shuts down with
+        # the task still pending.
+        current = asyncio.current_task()
+        tasks = [
+            t
+            for t in (set(self._server._conn_tasks) | self._background_tasks)
+            if t is not current and not t.done()
+        ]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     def _handle_udp_datagram(
         self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]

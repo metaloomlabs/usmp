@@ -5,16 +5,19 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-07-16
+## [1.1.0] — 2026-07-17
 
 ### 🔒 Security
 
 - **Fixed**: Cryptographic AES-GCM nonce reuse vulnerability under concurrent session writes by serializing all packet encryption under a session-wide `_send_lock` (Finding 1).
+- **Fixed**: AES-GCM nonce reuse still reachable after the Finding 1 lock, because `tx_seq` was committed only after `write_frame` returned. A write that put the frame on the wire and then raised — UDP's ARQ gives up with `OSError` after 5 sends, and any `await` is a cancellation point — left the sequence un-advanced, so the next send repeated the nonce under the same key. The sequence is now reserved before the write (Finding 1 follow-up).
+- **Fixed**: Message-level send atomicity. `send()` re-acquired `_send_lock` per fragment, so concurrent sends interleaved on the wire; because fragment sequences stayed consecutive the receiver's ordering check passed and spliced the two payloads into one. A PING arriving mid-send could likewise place a PONG between fragments and tear the session down. `send()` now holds the lock for the whole message (Finding 1/3 follow-up).
 - **Fixed**: UDP stateless cookie rate limiter memory leak and DoS vulnerabilities by implementing refill-aware token refills, a strict cache cap of 1000 items, and an LRU eviction strategy (Finding 2).
-- **Fixed**: Session disconnection bugs under normal keepalive operations by migrating control frame flood checks to a rate-based bucket (max 8 per 1.0s window) (Finding 3).
+- **Fixed**: Session disconnection bugs under normal keepalive operations by migrating control frame flood checks to a rate-based bucket (max 8 per 1.0s window) (Finding 3). The bucket compared `>= 8`, admitting only 7 per window; it now admits the documented 8.
 - **Fixed**: UDP frame parser desync and buffer pollution by dropping packets early if the declared length exceeds `USMP_MAX_PAYLOAD` (Finding 4).
 - **Fixed**: Client-side connection hangs by adding a `timeout` parameter to `USMPClient.connect()` (Finding 5).
 - **Fixed**: TCP server stop hangs on Python 3.12+ by tracking active connection tasks in `_conn_tasks` and cancelling them during server stop (Finding 6).
+- **Fixed**: UDP handler task leak on server stop. The Finding 6 cancel-and-gather landed only in `TCPListener.stop()`; `UDPListener.stop()` closed the streams but never cancelled its handler tasks, so a handler parked where `close()` cannot unblock it (the ARQ wait in `drain()`, or a `sleep`) outlived shutdown with its `finally` block unrun. `UDPListener.stop()` now mirrors the TCP path (Finding 6 follow-up).
 - **Fixed**: Socket and session state leaks on failed disconnects by wrapping `bye()` in a `try...finally` block to guarantee socket closure (Finding 7).
 - **Fixed**: Handshake timeouts bypassed by semaphore queue times by moving the timeout wrapping outside the semaphore block, and added global UDP concurrent handshakes cap (Finding 8).
 - **Fixed**: Session watchdog spoofing by updating session `_last_recv` watchdog timestamp only after successful AEAD packet decryption (Finding 9).
@@ -25,7 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added 13 integration and regression tests to `test_udp_integration.py` targeting all security findings.
+- Added 18 integration and regression tests to `test_udp_integration.py` targeting all security findings.
+
+### Version Bumps
+
+- Python SDK (`pyproject.toml`, `__init__.py`): `1.0.1` → `1.1.0`
+- Root workspace (`pyproject.toml`): `1.0.1` → `1.1.0`
+- C Core, Arduino, and ESP32 ports are unchanged at `1.0.0` — this release is Python SDK only.
 
 ---
 
