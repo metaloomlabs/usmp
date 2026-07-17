@@ -32,11 +32,13 @@ client = USMPClient(
 
 The client class exposes several asynchronous methods to manage the connection state and exchange data:
 
-### `await client.connect()`
+### `await client.connect(timeout: float = 10.0)`
 
-Establishes a raw TCP socket connection and initiates the 4-step cryptographic handshake.
+Establishes a raw connection (TCP or UDP) and initiates the 4-step cryptographic handshake.
 
-* **Raises**: `HandshakeError` if the handshake times out or fails validation; `AuthError` if the server signature does not match.
+* **Parameters**:
+  * **`timeout`** *(float, optional)*: The maximum time allowed for the handshake to complete (default is `10.0` seconds).
+* **Raises**: `USMPTimeoutError` if the handshake times out; `HandshakeError` if the handshake fails validation; `AuthError` if the server signature does not match.
 
 ### `await client.send(data: bytes)`
 

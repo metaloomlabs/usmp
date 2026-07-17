@@ -1,8 +1,7 @@
-# src/usmp/_handshake.py
-
 import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import struct
 import time
@@ -10,7 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, overload
 
 from ._crypto import derive_session_keys, generate_keypair
-from .errors import AuthError, HandshakeError
+from .errors import AuthError, HandshakeError, USMPError
 from .transport.base import USMPTransport, coerce_transport
 from .types import (
     USMP_DEVICE_ID_LEN,
@@ -24,9 +23,44 @@ from .types import (
     SessionInfo,
 )
 
+logger = logging.getLogger("usmp.handshake")
+
 # Global tracking of failed handshake attempts per IP
-# ip -> (fail_count, lockout_until)
+# ip -> (fail_count, lockout_until, last_attempt_time)
 _failed_handshakes: dict[str, tuple[int, float, float]] = {}
+
+
+def record_failed_handshake(limiter_key: str) -> None:
+    now = time.monotonic()
+    entry = _failed_handshakes.get(limiter_key)
+    if entry:
+        fails, lockout_until, _ = entry
+    else:
+        fails, lockout_until = 0, 0.0
+
+    fails += 1
+    if fails >= 5:
+        # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
+        backoff = min(60.0, 2.0 ** (fails - 5))
+        lockout_until = now + backoff
+    else:
+        lockout_until = 0.0
+
+    # Cap dictionary size to 1000 to prevent memory growth DoS
+    if len(_failed_handshakes) >= 1000 and limiter_key not in _failed_handshakes:
+        oldest_key = min(_failed_handshakes.keys(), key=lambda k: _failed_handshakes[k][2])
+        del _failed_handshakes[oldest_key]
+
+    _failed_handshakes[limiter_key] = (fails, lockout_until, now)
+
+    # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
+    expired_keys = [
+        k
+        for k, v in _failed_handshakes.items()
+        if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
+    ]
+    for expired_key in expired_keys:
+        del _failed_handshakes[expired_key]
 
 
 def _compute_hmac(psk: bytes, *parts: bytes) -> bytes:
@@ -79,6 +113,13 @@ async def server_handshake(
         _, lockout_until, _ = entry
         if lockout_until > now:
             remaining = lockout_until - now
+            # DEBUG, not WARNING: a locked-out peer retrying in a loop would
+            # otherwise flood the logs with one line per rejected attempt.
+            logger.debug(
+                "Handshake blocked: rate limit lockout active for IP %s (remaining %.1fs)",
+                limiter_key,
+                remaining,
+            )
             raise HandshakeError(f"Rate limit exceeded. Lockout active for {remaining:.1f}s")
 
     try:
@@ -102,6 +143,11 @@ async def server_handshake(
             if resolved_psk is None:
                 resolved_psk = resolved_psk_input.get(b"")
             if resolved_psk is None:
+                logger.warning(
+                    "Handshake rejected: device ID %s is not registered (IP: %s)",
+                    device_id.hex() if isinstance(device_id, bytes) else device_id,
+                    limiter_key,
+                )
                 raise HandshakeError("Device ID not registered")
         elif isinstance(resolved_psk_input, bytes):
             resolved_psk = resolved_psk_input
@@ -153,6 +199,11 @@ async def server_handshake(
         received_client = frame.payload[:USMP_HMAC_LEN]
 
         if not hmac.compare_digest(expected_client, received_client):
+            logger.warning(
+                "Handshake authentication failed: client HMAC verification failed (IP: %s, device: %s)",
+                limiter_key,
+                device_id.hex() if isinstance(device_id, bytes) else device_id,
+            )
             raise AuthError("Client HMAC verification failed")
 
         # ── Step 4: Send SESSION_OK [session_id(16) || hmac_server(32)] ───────────
@@ -191,37 +242,12 @@ async def server_handshake(
     ):
         # Clean disconnects / transport failures — don't count against rate limiter
         raise
-    except Exception:
-        now = time.monotonic()
-        entry = _failed_handshakes.get(limiter_key)
-        if entry:
-            fails, lockout_until, _ = entry
-        else:
-            fails, lockout_until = 0, 0.0
-
-        fails += 1
-        if fails >= 5:
-            # Exponential backoff: 2^(fails - 5) seconds, capped at 60s
-            backoff = min(60.0, 2.0 ** (fails - 5))
-            lockout_until = now + backoff
-        else:
-            lockout_until = 0.0
-
-        # Cap dictionary size to 1000 to prevent memory growth DoS
-        if len(_failed_handshakes) >= 1000 and limiter_key not in _failed_handshakes:
-            oldest_key = min(_failed_handshakes.keys(), key=lambda k: _failed_handshakes[k][2])
-            del _failed_handshakes[oldest_key]
-
-        _failed_handshakes[limiter_key] = (fails, lockout_until, now)
-
-        # Prune old/expired entries to prevent memory leak DoS (limit idle to 10 mins)
-        expired_keys = [
-            k
-            for k, v in _failed_handshakes.items()
-            if (now - v[2] > 600.0) or (v[1] > 0.0 and v[1] < now)
-        ]
-        for expired_key in expired_keys:
-            del _failed_handshakes[expired_key]
+    except (USMPError, ValueError, struct.error):
+        # Only genuine protocol / authentication failures count toward the per-IP
+        # lockout (USMPError covers malformed frames, HMAC/auth, and crypto errors).
+        # An unexpected internal error (e.g. a bug) must propagate without penalizing
+        # the client — otherwise a server-side defect could lock out legitimate peers.
+        record_failed_handshake(limiter_key)
         raise
 
 
@@ -266,7 +292,8 @@ async def client_handshake(
     priv_c, pub_c = generate_keypair()
 
     # ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
-    await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c)
+    # ── Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
+    await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c, seq=0)
 
     # ── Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
     try:
@@ -279,7 +306,7 @@ async def client_handshake(
             raise HandshakeError(f"Bad HELLO_RETRY length: {frame.length}")
         cookie = frame.payload[:16]
         # Resend HELLO with cookie appended
-        await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c + cookie)
+        await transport.write_frame(PacketType.HELLO, actual_device_id + pub_c + cookie, seq=1)
 
         # Read the actual CHALLENGE
         try:
@@ -302,7 +329,7 @@ async def client_handshake(
     # ── Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
     prefix_client = struct.pack("<H", USMP_MAGIC) + bytes([USMP_VERSION, int(PacketType.HELLO_ACK)])
     hmac_client = _compute_hmac(actual_psk, prefix_client, nonce, actual_device_id, pub_c, pub_s)
-    await transport.write_frame(PacketType.HELLO_ACK, hmac_client)
+    await transport.write_frame(PacketType.HELLO_ACK, hmac_client, seq=2)
 
     # ── Step 4: Receive SESSION_OK [session_id(16) || hmac_server(32)] ────────
     try:
@@ -326,6 +353,9 @@ async def client_handshake(
     )
     expected_server = _compute_hmac(actual_psk, prefix_server, nonce, session_id, pub_c, pub_s)
     if not hmac.compare_digest(expected_server, hmac_server):
+        logger.warning(
+            "Handshake authentication failed: server HMAC verification failed — possible rogue server"
+        )
         raise AuthError("Server HMAC verification failed — possible rogue server")
 
     k_c2s, k_s2c = session_key

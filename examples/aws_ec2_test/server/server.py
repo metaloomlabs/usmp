@@ -1,9 +1,15 @@
 # examples/aws_ec2_test/server/server.py
 import asyncio
 import argparse
+import logging
 import os
 import socket
 from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
+
+# The SDK logs via the "usmp" logger and ships a NullHandler, so it stays silent
+# until the application configures logging. Route its INFO/WARNING/ERROR to the
+# console so server-side events (handshake failures, timeouts, errors) are visible.
+logging.basicConfig(level=logging.INFO)
 
 # Default configuration settings
 DEFAULT_PSK = b"usmp-dev-psk-change-me-before-prod"

@@ -1,12 +1,13 @@
-# src/usmp/transport/tcp.py
-
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from .._frame import read_frame, write_frame
 from ..types import PacketType, USMPFrame
 from .base import USMPListener, USMPTransport
+
+logger = logging.getLogger("usmp.transport.tcp")
 
 
 class TCPTransport(USMPTransport):
@@ -77,8 +78,16 @@ class TCPListener(USMPListener):
             self._host,
             self._port,
         )
+        logger.info("Listening on TCP %s:%d", self._host, self._port)
 
     async def stop(self) -> None:
         if self._srv:
             self._srv.close()
+            # Python >= 3.12: wait_closed() blocks until every handler returns, so
+            # cancel live connection tasks first or shutdown never completes.
+            tasks = list(self._server._conn_tasks)
+            for t in tasks:
+                t.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
             await self._srv.wait_closed()

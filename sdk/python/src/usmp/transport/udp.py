@@ -1,5 +1,3 @@
-# src/usmp/transport/udp.py
-
 import asyncio
 import hashlib
 import hmac
@@ -12,7 +10,7 @@ from typing import Any
 
 from .._frame import encode_frame
 from .._frame import read_frame as _read_frame
-from ..types import USMP_HEADER_SIZE, PacketType, USMPFrame
+from ..types import USMP_HEADER_SIZE, USMP_MAX_PAYLOAD, PacketType, USMPFrame
 from .base import USMPListener, USMPTransport
 
 logger = logging.getLogger("usmp.transport.udp")
@@ -116,6 +114,7 @@ class UDPStream(USMPTransport):
                         data[UTACK_HEADER_LEN : UTACK_HEADER_LEN + UTACK_MAC_LEN],
                     )
                 ):
+                    logger.debug("Dropped unauthenticated UDP UTACK from %s", self._remote_addr)
                     return
             if seq_val == self._pending_send_seq and type_val == self._pending_send_type:
                 self._ack_received_event.set()
@@ -131,6 +130,9 @@ class UDPStream(USMPTransport):
 
         # U2 fix: enforce one-frame-per-datagram on UDP
         length = struct.unpack("<H", data[8:10])[0]
+        if length > USMP_MAX_PAYLOAD:
+            logger.debug("UDP frame declares oversized length %d, dropping", length)
+            return
         if len(data) != USMP_HEADER_SIZE + length:
             logger.debug(
                 "UDP datagram size mismatch: got %d, expected %d",
@@ -141,9 +143,6 @@ class UDPStream(USMPTransport):
 
         type_val = data[3]
         seq_val = struct.unpack("<I", data[4:8])[0]
-
-        # Send UTACK back immediately
-        self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
 
         # Duplicate detection for handshake packets (types 1-4 and HELLO_RETRY)
         if type_val < 5 or type_val == 0x0A:
@@ -159,6 +158,7 @@ class UDPStream(USMPTransport):
                     type_val,
                     self._last_rx_type,
                 )
+                self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
                 return
             self._last_rx_type = type_val
 
@@ -170,12 +170,16 @@ class UDPStream(USMPTransport):
                     seq_val,
                     self._last_rx_seq,
                 )
+                self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
                 return
 
         # L3 fix: drop if buffer would exceed cap (unauthenticated data)
         if len(self._read_buffer) + len(data) > MAX_READ_BUFFER:
             logger.debug("UDP read buffer full (%d bytes), dropping packet", len(self._read_buffer))
             return
+
+        # Send UTACK back only after passing buffer limit check
+        self._transport.sendto(self._build_utack(type_val, seq_val), self._remote_addr)
 
         self._read_buffer.extend(data)
         self._data_event.set()
@@ -344,6 +348,21 @@ class UDPListener(USMPListener):
         self._udp_sessions.clear()
         self._udp_handshakes.clear()
 
+        # Mirror TCPListener.stop(). close() only unblocks streams parked in
+        # readexactly(); a handler inside drain()'s ARQ wait or sleep() keeps
+        # running, so its finally block never runs and the loop shuts down with
+        # the task still pending.
+        current = asyncio.current_task()
+        tasks = [
+            t
+            for t in (set(self._server._conn_tasks) | self._background_tasks)
+            if t is not current and not t.done()
+        ]
+        for t in tasks:
+            t.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     def _handle_udp_datagram(
         self, transport: asyncio.DatagramTransport, data: bytes, addr: tuple[str, int]
     ) -> None:
@@ -418,6 +437,11 @@ class UDPListener(USMPListener):
             # Check concurrent handshakes limit to prevent task exhaustion
             in_progress = self._server._udp_in_progress_handshakes.get(limiter_key, 0)
             if in_progress >= 3:
+                return
+
+            # Check global concurrent handshakes limit (Finding 8)
+            if len(self._udp_handshakes) >= self._server._max_connections * 2:
+                logger.debug("Global UDP handshakes limit reached, dropping connection attempt")
                 return
 
             # Increment concurrent count

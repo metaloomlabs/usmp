@@ -1,4 +1,4 @@
-# src/usmp/__init__.py
+import logging
 
 from ._client import USMPClient
 from ._frame import decode_frame, encode_frame, read_frame, write_frame
@@ -12,6 +12,7 @@ from .errors import (
     FrameError,
     HandshakeError,
     MagicError,
+    NotConnectedError,
     PayloadError,
     SequenceError,
     TimeoutError,
@@ -31,6 +32,7 @@ __all__ = [
     "FrameError",
     "HandshakeError",
     "MagicError",
+    "NotConnectedError",
     "PacketType",
     "PayloadError",
     "SequenceError",
@@ -58,4 +60,8 @@ __all__ = [
     "write_frame",
 ]
 
-__version__ = "1.0.1"
+# Attach a no-op handler so the SDK never emits to the application's stderr via
+# logging's "last resort" handler when the consuming app has not configured logging.
+logging.getLogger("usmp").addHandler(logging.NullHandler())
+
+__version__ = "1.1.0"

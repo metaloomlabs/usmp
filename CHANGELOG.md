@@ -5,54 +5,37 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1] — 2026-07-14
-
-Core C library bug fixes plus a Python SDK refactor. No wire-format, public API,
-or port-interface changes — core, ports, and SDK remain protocol-compatible with
-1.0.0. Ports pick up the core fixes on rebuild.
+## [1.1.0] — 2026-07-17
 
 ### 🔒 Security
 
-- **Fixed** (C Core): A live UDP session could be torn down by a single spoofed datagram. `usmp_recv` already dropped-and-continued on CRC/parse and AES-GCM failures for UDP, but four structural checks between them (unexpected frame type, payload shorter than nonce+tag, payload larger than the caller buffer, and control-frame-during-fragmentation) still returned `-1`. Because the CRC is not secret, an off-path attacker spoofing the server's address could hit one of these and kill the session. These checks now drop the frame and keep reading on UDP, matching the surrounding logic. TCP behavior is unchanged.
-
-### Fixed
-
-- **Fixed** (C Core): `usmp_recv` returned `0` ("no data") when the 10-attempt receive cap was reached in the middle of reassembling a fragmented message, silently discarding the partial payload while the rx state had already advanced — the next call would then reassemble from mid-message and produce corrupt data. It now fails hard (`-1`, session marked not-established) when the cap is hit mid-reassembly so the caller reconnects; the idle case still returns `0`.
-- **Fixed** (Python SDK): Corrected `UDPStream` UTACK packet building and duplicate-handshake-packet detection logic.
-- **Fixed** (Python SDK): `UDPListener` now keeps references to its background tasks so they are not garbage-collected mid-flight.
-- **Fixed** (Arduino Port): Unsolicited server→device UDP messages were not delivered through `available()` / `maintain()`. `WiFiUDP::available()` only reports bytes left in an already-parsed packet, so queued datagrams were never seen and inbound data surfaced only as a side effect of the next `send()` (up to the keepalive interval late, or never with keepalive off). `available()` now actively polls the socket and stages the datagram for `read()`/`onMessage`. Fixes the `remote_control` example over UDP.
-- **Fixed** (Arduino Port): A stray or duplicate UDP UTACK (or an idle socket) could wedge `maintain()` in an unbounded `recv` spin. Session-phase UDP reads now use a bounded wait and return "no data"; handshake reads stay unbounded.
-- **Fixed** (Arduino Port): TCP `recv` had no timeout — a peer that sent a partial frame and stalled could block `maintain()` indefinitely. Session-phase TCP reads now use a no-progress stall timeout; handshake reads stay unbounded.
-- **Fixed** (Arduino Port): `read(uint8_t*, size_t)` no longer narrows the caller's buffer length when passing it to the `uint16_t`-typed core `usmp_recv`.
-- **Fixed** (ESP32 Port): Treated socket read timeouts on idle TCP streams as non-fatal empty reads (`0`) instead of returning fatal errors (`-1`), preventing the connection from dropping and reconnecting every 500ms of inactivity.
-- **Fixed** (ESP32 Port): Bound session-phase UDP receive select timeout to 50ms (non-fatal empty read on timeout) so the thread is not blocked indefinitely and keepalive ticks can execute regularly.
-- **Fixed** (ESP32 Port): Corrected `keys_set` state resetting in `usmp_udp_reconnect` so reconnect handshakes use the correct unbounded timeout.
-
-### Changed
-
-- **Internal refactor, no behavior change** (C Core): Consolidated duplicated serialization logic into single shared helpers — the 10-byte frame header (`usmp_serialize_header`, previously hand-written in CRC, packet-build, and GCM-AAD paths), the GCM nonce (`build_nonce`), the encrypt-and-transmit path shared by data and control frames (`emit_frame`), the session-id hex log (`log_session_id`), and the handshake HMAC transcript shared by the client and server HMACs (`compute_transcript_hmac`). Byte-for-byte identical output on the wire.
-- **Changed** (C Core): Named the HELLO_RETRY cookie length constant (`USMP_COOKIE_LEN`) instead of the bare literal `16`.
-- **Changed** (Python SDK): Refactored the server, client, session, and handshake modules for clearer structure, improved type hints, and better error handling.
-- **Changed** (Python SDK): Replaced `assert`s with explicit type checks in the datagram protocol classes (asserts are stripped under `python -O`).
-- **Changed** (Python SDK): Expanded the Ruff lint rule set (`B`, `UP`, `C90`, `S`, `BLE`, `RUF`) and addressed the resulting warnings; adjusted the mypy configuration (now checks `src` and `tests`). Cleaned up imports and alphabetized `__all__` in `usmp/__init__.py`.
-- **Internal refactor, no behavior change** (Arduino Port): Deduplicated the two `begin()` overloads into one shared template and extracted a `USMPTransportBase` so the WiFi bring-up lives in one place; centralized level-gated logging in one helper (which also fixed a doubled `[usmp] [usmp]:` log prefix). Replaced the hand-maintained copy of the core public header with a one-line shim that forwards to `core/include/usmp.h`, removing a drift source.
-- **Documented** (Arduino Port): Clarified the connection-callback firing semantics in `USMP.h` — `onConnect` fires on every session establishment (initial and reconnect); `onReconnect` fires additionally on reconnects. Behavior unchanged.
-- **Changed** (ESP32 Port): Standardized error level logs to route through standard `ESP_LOGE` macros instead of `printf` with manual lowercase tag conversion.
-- **Changed** (ESP32 Port): Modified the build configuration (`CMakeLists.txt`) to dynamically resolve the core directory path to support standalone component builds.
+- **Fixed**: Cryptographic AES-GCM nonce reuse vulnerability under concurrent session writes by serializing all packet encryption under a session-wide `_send_lock` (Finding 1).
+- **Fixed**: AES-GCM nonce reuse still reachable after the Finding 1 lock, because `tx_seq` was committed only after `write_frame` returned. A write that put the frame on the wire and then raised — UDP's ARQ gives up with `OSError` after 5 sends, and any `await` is a cancellation point — left the sequence un-advanced, so the next send repeated the nonce under the same key. The sequence is now reserved before the write (Finding 1 follow-up).
+- **Fixed**: Message-level send atomicity. `send()` re-acquired `_send_lock` per fragment, so concurrent sends interleaved on the wire; because fragment sequences stayed consecutive the receiver's ordering check passed and spliced the two payloads into one. A PING arriving mid-send could likewise place a PONG between fragments and tear the session down. `send()` now holds the lock for the whole message (Finding 1/3 follow-up).
+- **Fixed**: UDP stateless cookie rate limiter memory leak and DoS vulnerabilities by implementing refill-aware token refills, a strict cache cap of 1000 items, and an LRU eviction strategy (Finding 2).
+- **Fixed**: Session disconnection bugs under normal keepalive operations by migrating control frame flood checks to a rate-based bucket (max 8 per 1.0s window) (Finding 3). The bucket compared `>= 8`, admitting only 7 per window; it now admits the documented 8.
+- **Fixed**: UDP frame parser desync and buffer pollution by dropping packets early if the declared length exceeds `USMP_MAX_PAYLOAD` (Finding 4).
+- **Fixed**: Client-side connection hangs by adding a `timeout` parameter to `USMPClient.connect()` (Finding 5).
+- **Fixed**: TCP server stop hangs on Python 3.12+ by tracking active connection tasks in `_conn_tasks` and cancelling them during server stop (Finding 6).
+- **Fixed**: UDP handler task leak on server stop. The Finding 6 cancel-and-gather landed only in `TCPListener.stop()`; `UDPListener.stop()` closed the streams but never cancelled its handler tasks, so a handler parked where `close()` cannot unblock it (the ARQ wait in `drain()`, or a `sleep`) outlived shutdown with its `finally` block unrun. `UDPListener.stop()` now mirrors the TCP path (Finding 6 follow-up).
+- **Fixed**: Socket and session state leaks on failed disconnects by wrapping `bye()` in a `try...finally` block to guarantee socket closure (Finding 7).
+- **Fixed**: `disconnect()` raising on a clean UDP teardown. A server drops its UDP stream as soon as the session handler returns, so a client saying goodbye a moment later gets no UTACK; the stop-and-wait ARQ then exhausted its retries and raised `OSError` out of `bye()` and `disconnect()`. BYE is a courtesy frame and the session is over regardless, so an undelivered one is now logged at debug and swallowed rather than failing teardown. `disconnect()` still propagates other errors from `bye()`, and still closes the transport either way (Finding 7 follow-up).
+- **Fixed**: Handshake timeouts bypassed by semaphore queue times by moving the timeout wrapping outside the semaphore block, and added global UDP concurrent handshakes cap (Finding 8).
+- **Fixed**: Session watchdog spoofing by updating session `_last_recv` watchdog timestamp only after successful AEAD packet decryption (Finding 9).
+- **Fixed**: Misleading UDP frame confirmations by sending UTACK only after verifying read buffer capacity checks (Finding 10).
+- **Fixed**: Sequence number overflow crash during session teardown by clamping sequence increments to `0xFFFFFFFF` and making session `bye()` idempotent (Finding 11).
+- **Fixed**: Cancellation cleanup bypass in server handshake handler by executing connection state updates at the very top of `finally` blocks before any async yield/await calls (Finding 12).
+- **Fixed**: Handshake UTACK spoofing/stale retry match on UDP by using incrementing sequence numbers (`0`, `1`, `2`) during client handshake writes (Finding 13).
 
 ### Added
 
-- **Python SDK**: Transport-layer abstraction — a new `usmp.transport` package with a transport base class and dedicated TCP and UDP transport modules.
-- **CI**: An `arduino-esp32-compile` job that assembles the Arduino library exactly as it ships and compiles all four examples for ESP32 — the first automated build gate for the Arduino wrappers.
-- **ESP32 Port**: Implemented DNS hostname resolution (via `getaddrinfo`) support in both TCP and UDP transports, allowing devices to connect to hostnames (e.g. `usmp.mycompany.com`) as well as numeric IPv4 addresses.
+- Added 19 integration and regression tests to `test_udp_integration.py` targeting all security findings.
 
 ### Version Bumps
 
-- C Core (`usmp.h`, `usmp_connect.c`): `1.0.0` → `1.0.1`
-- Arduino Port (`library.json`, `library.properties`): `1.0.0` → `1.0.1` (the port's `usmp_api.h` is now a shim forwarding to `core/include/usmp.h`, so the version is inherited from core)
-- Python SDK (`pyproject.toml`): `1.0.0` → `1.0.1`
-- ESP32 Port (`idf_component.yml`): `1.0.0` → `1.0.1`
-- Root workspace (`pyproject.toml`): `1.0.0` → `1.0.1`
+- Python SDK (`pyproject.toml`, `__init__.py`): `1.0.1` → `1.1.0`
+- Root workspace (`pyproject.toml`): `1.0.1` → `1.1.0`
+- C Core, Arduino, and ESP32 ports are unchanged at `1.0.0` — this release is Python SDK only.
 
 ---
 
