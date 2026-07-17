@@ -44,6 +44,15 @@ uint16_t usmp_crc16(const uint8_t* data, uint16_t len);
 int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len);
 int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt);
 
+/*
+ * Serialize the 10-byte little-endian frame header (all fields except the
+ * trailing CRC) into out[0..9]. This is the single source of truth for the
+ * on-wire header layout — CRC input, build_packet output, and the AES-GCM AAD
+ * all derive from it, so they can never drift apart.
+ */
+void usmp_serialize_header(uint16_t magic, uint8_t version, uint8_t type, uint32_t seq,
+                           uint16_t length, uint8_t out[10]);
+
 #ifdef __cplusplus
 }
 #endif

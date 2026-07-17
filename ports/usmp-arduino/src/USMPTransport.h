@@ -14,35 +14,54 @@ extern "C" {
 }
 #endif
 
+// Shared transport parameters + WiFi bring-up ─────────────────────────────────
+// Holds the connection params and the (identical for TCP/UDP) WiFi logic so the
+// concrete transports only differ in init(). Never used polymorphically / never
+// heap-deleted through this type — the derived objects are plain stack values,
+// so no virtual destructor is needed.
+class USMPTransportBase {
+ public:
+  USMPTransportBase(const char* host, uint16_t port)
+      : _host(host), _port(port), _ssid(nullptr), _password(nullptr) {}
+
+  // Connect STA WiFi using the stored credentials. Returns true immediately if
+  // WiFi is managed externally (no SSID set). Shared by TCP and UDP.
+  bool connectWiFi() const;
+
+  const char* _host;
+  uint16_t _port;
+  const char* _ssid;
+  const char* _password;
+
+ protected:
+  void _setWiFi(const char* ssid, const char* password) {
+    _ssid = ssid;
+    _password = password;
+  }
+};
+
 // Internal TCP context ──────────────────────────────────────────────────────
 // Allocated on heap in USMPTCPTransport::init(). Lives for transport lifetime.
 struct USMPArduinoTcpCtx {
   WiFiClient client;
   char host[64];
   uint16_t port;
+  bool session_active;  // false during handshake (recv unbounded), true once established
 };
 
 // TCP transport factory ─────────────────────────────────────────────────────
-class USMPTCPTransport {
+class USMPTCPTransport : public USMPTransportBase {
  public:
-  USMPTCPTransport(const char* host, uint16_t port)
-      : _host(host), _port(port), _ssid(nullptr), _password(nullptr) {}
+  USMPTCPTransport(const char* host, uint16_t port) : USMPTransportBase(host, port) {}
 
-  // Optional: let USMP manage WiFi — usmp.begin(USMP::TCP(...).wifi("SSID",
-  // "pass"))
+  // Optional: let USMP manage WiFi — usmp.begin(USMP::TCP(...).wifi("SSID", "pass"))
+  // Returns the derived type so the fluent builder keeps its concrete static type.
   USMPTCPTransport& wifi(const char* ssid, const char* password) {
-    _ssid = ssid;
-    _password = password;
+    _setWiFi(ssid, password);
     return *this;
   }
 
-  bool connectWiFi() const;
   bool init(usmp_transport_t* t) const;
-
-  const char* _host;
-  uint16_t _port;
-  const char* _ssid;
-  const char* _password;
 };
 
 // Internal UDP context ──────────────────────────────────────────────────────
@@ -61,24 +80,16 @@ struct USMPArduinoUdpCtx {
 };
 
 // UDP transport factory ─────────────────────────────────────────────────────
-class USMPUDPTransport {
+class USMPUDPTransport : public USMPTransportBase {
  public:
-  USMPUDPTransport(const char* host, uint16_t port)
-      : _host(host), _port(port), _ssid(nullptr), _password(nullptr) {}
+  USMPUDPTransport(const char* host, uint16_t port) : USMPTransportBase(host, port) {}
 
   USMPUDPTransport& wifi(const char* ssid, const char* password) {
-    _ssid = ssid;
-    _password = password;
+    _setWiFi(ssid, password);
     return *this;
   }
 
-  bool connectWiFi() const;
   bool init(usmp_transport_t* t) const;
-
-  const char* _host;
-  uint16_t _port;
-  const char* _ssid;
-  const char* _password;
 };
 
 // Ergonomic namespace: USMP::TCP("ip", port).wifi("ssid", "pass")
