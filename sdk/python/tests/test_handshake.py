@@ -177,8 +177,7 @@ async def test_wrong_psk_server_rejected():
 
 
 async def test_rate_limiter_non_ip_fallback():
-    import struct
-    from unittest.mock import AsyncMock, Mock
+    from unittest.mock import Mock
 
     import pytest
 
@@ -187,12 +186,7 @@ async def test_rate_limiter_non_ip_fallback():
 
     _failed_handshakes.clear()
 
-    # A well-formed but non-HELLO frame makes server_handshake raise HandshakeError
-    # ("Expected HELLO") — a realistic protocol failure that counts toward the limiter,
-    # unlike a bare Mock (whose TypeError is now treated as an internal error).
-    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack("<HH", 0, 0)
     mock_reader = Mock(spec=asyncio.StreamReader)
-    mock_reader.readexactly = AsyncMock(return_value=bad_frame)
     mock_writer = Mock(spec=asyncio.StreamWriter)
     mock_writer.get_extra_info.return_value = None
 
@@ -212,8 +206,7 @@ async def test_rate_limiter_non_ip_fallback():
 
 
 async def test_rate_limiter_table_capping():
-    import struct
-    from unittest.mock import AsyncMock, Mock
+    from unittest.mock import Mock
 
     import pytest
 
@@ -227,10 +220,7 @@ async def test_rate_limiter_table_capping():
     for i in range(1000):
         _failed_handshakes[f"ip_{i}"] = (1, 0.0, now - 500.0 + float(i) * 0.1)
 
-    # Well-formed non-HELLO frame → HandshakeError, a counted protocol failure.
-    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack("<HH", 0, 0)
     mock_reader = Mock(spec=asyncio.StreamReader)
-    mock_reader.readexactly = AsyncMock(return_value=bad_frame)
     mock_writer = Mock(spec=asyncio.StreamWriter)
     mock_writer.get_extra_info.return_value = ("192.168.1.99", 54321)
 

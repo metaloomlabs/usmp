@@ -26,9 +26,7 @@ Blocks until the next decrypted message payload is received and verified.
 
 * **Payload Reassembly**: If the incoming message was fragmented, `recv()` transparently accumulates the `PKT_DATA_FRAG` frames, decrypts each piece, and joins them back together. It returns the complete, reassembled plaintext once the final `PKT_DATA` frame arrives.
 * **Control Frame Filtering**: If a client sends a keepalive `PING` frame during an idle period, `recv()` intercepts it, automatically replies with a `PONG` frame, and resumes waiting without waking up your application code.
-* **Reassembly Safeguards**: If a control frame (like `PING` or `BYE`) is interleaved while reassembly is in progress, or if the reassembly requires more than 4 fragments:
-  * **On TCP**: The session raises a `SequenceError` or `PayloadError` and terminates the connection.
-  * **On UDP**: The session safely logs the protocol violation, drops the partial reassembly state, and continues reading (the session remains active), preventing injection-based sequence attacks from easily tearing down the session.
+* **Reassembly Safeguards**: If a control frame (like `PING` or `BYE`) is interleaved while reassembly is in progress, or if the reassembly requires more than 4 fragments, the session state machine rejects the stream, raises a `SequenceError` or `PayloadError`, and closes the connection.
 * **Timeout**: If a custom `timeout` (in seconds) is specified and no frame is received within that duration, a `TimeoutError` is raised.
 
 ### `await session.ping()`

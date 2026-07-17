@@ -1,19 +1,14 @@
+# src/usmp/_session.py
+
 import asyncio
-import logging
 import struct
 import time
-from typing import Any, overload
+from typing import Any
 
 from ._crypto import decrypt, encrypt
-from .errors import (
-    ConnectionClosedError,
-    FrameError,
-    PayloadError,
-    SequenceError,
-    USMPError,
-    USMPTimeoutError,
-)
-from .transport.base import USMPTransport, coerce_transport
+from ._frame import read_frame, write_frame
+from .errors import ConnectionClosedError, FrameError, PayloadError, SequenceError, USMPError
+from .errors import TimeoutError as USMPTimeoutError
 from .types import (
     USMP_MAGIC,
     USMP_MAX_DATA_LEN,
@@ -23,8 +18,6 @@ from .types import (
     SessionInfo,
 )
 
-logger = logging.getLogger("usmp.session")
-
 
 class USMPSession:
     """
@@ -32,44 +25,18 @@ class USMPSession:
     Handles encrypted send/recv with sequence number tracking.
     """
 
-    @overload
-    def __init__(self, transport: USMPTransport, info: SessionInfo, /) -> None: ...
-
-    @overload
     def __init__(
         self,
         reader: Any,
         writer: Any,
         info: SessionInfo,
         recv_timeout: float | None = None,
-    ) -> None: ...
-
-    def __init__(
-        self,
-        reader: Any,
-        writer: Any = None,
-        info: SessionInfo | None = None,
-        recv_timeout: float | None = None,
-    ) -> None:
-        if info is None:
-            # Transport form: USMPSession(transport, info)
-            transport = reader
-            actual_info = writer
-            actual_recv_timeout = None
-        else:
-            # Legacy stream form: USMPSession(reader, writer, info, recv_timeout)
-            transport = coerce_transport(reader, writer)
-            actual_info = info
-            actual_recv_timeout = recv_timeout
-
-        self._transport = transport
-        self._reader = transport  # legacy alias
-        self._writer = transport  # legacy alias
-        self._info = actual_info
-        self._recv_timeout = actual_recv_timeout
+    ):
+        self._reader = reader
+        self._writer = writer
+        self._info = info
+        self._recv_timeout = recv_timeout
         self._last_recv: float = time.monotonic()  # updated on every inbound frame
-        self._send_lock = asyncio.Lock()
-        self._closed = False
 
     @property
     def device_id(self) -> str:
@@ -87,21 +54,31 @@ class USMPSession:
                 f"max {USMP_MAX_DATA_LEN * USMP_MAX_FRAMES}"
             )
 
-        # One lock hold for the whole message, not one per fragment: the peer
-        # reassembles by consecutive sequence, so anything that slips between our
-        # fragments (a concurrent send(), or a PONG from recv()) is either spliced
-        # into this payload or trips the peer's mid-fragmentation guard.
-        async with self._send_lock:
-            offset = 0
-            while offset < len(data) or len(data) == 0:
-                chunk = data[offset : offset + USMP_MAX_DATA_LEN]
-                is_frag = offset + len(chunk) < len(data)
-                packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
-                await self._send_encrypted_locked(packet_type, chunk)
-                offset += len(chunk)
+        offset = 0
+        while offset < len(data) or len(data) == 0:
+            chunk = data[offset : offset + USMP_MAX_DATA_LEN]
+            is_frag = offset + len(chunk) < len(data)
+            packet_type = PacketType.DATA_FRAG if is_frag else PacketType.DATA
 
-                if len(data) == 0:
-                    break
+            seq = self._info.tx_seq
+            if seq >= 0xFFFFFFFF:
+                raise SequenceError("TX sequence overflowed")
+            nonce = struct.pack("<I", seq) + self._info.session_id[:8]
+            ciphertext = encrypt(
+                key=self._info.tx_key,
+                nonce=nonce,
+                seq=seq,
+                type_=int(packet_type),
+                version=USMP_VERSION,
+                magic=USMP_MAGIC,
+                plaintext=chunk,
+            )
+            await write_frame(self._writer, packet_type, ciphertext, seq=seq)
+            self._info.tx_seq += 1
+            offset += len(chunk)
+
+            if len(data) == 0:
+                break
 
     async def recv(self, timeout: float | None = None) -> bytes:
         """Receive and decrypt data, reassembling fragmented packets if necessary."""
@@ -111,22 +88,23 @@ class USMPSession:
             assembled_payload = bytearray()
             frame_count = 0
             ctrl_count = 0
-            ctrl_window_start = time.monotonic()
             expected_frag_seq = 0
 
             while True:
                 try:
-                    frame = await self._transport.read_frame()
+                    frame = await read_frame(self._reader)
+                    self._last_recv = time.monotonic()
 
                     # Sliding replay window check for UDP (L2)
-                    is_udp = not self._transport.is_reliable
+                    confirm = getattr(self._reader, "confirm_authenticated", None)
+                    is_udp = confirm is not None
                     if is_udp:
-                         if frame.seq <= self._info.rx_seq - 64:
-                             continue  # too old, drop silently
-                         if frame.seq <= self._info.rx_seq:
-                             offset = self._info.rx_seq - frame.seq
-                             if (self._info.rx_window_bitmap & (1 << offset)) != 0:
-                                 continue  # duplicate/replayed seq, drop silently
+                        if frame.seq <= self._info.rx_seq - 64:
+                            continue  # too old, drop silently
+                        if frame.seq <= self._info.rx_seq:
+                            offset = self._info.rx_seq - frame.seq
+                            if (self._info.rx_window_bitmap & (1 << offset)) != 0:
+                                continue  # duplicate/replayed seq, drop silently
 
                     nonce = struct.pack("<I", frame.seq) + self._info.session_id[:8]
                     plaintext = decrypt(
@@ -139,25 +117,13 @@ class USMPSession:
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
                     )
-                    self._last_recv = time.monotonic()
-                except (USMPError, struct.error) as e:
-                    if not self._transport.is_reliable:
+                except (USMPError, ValueError):
+                    if getattr(self._reader, "confirm_authenticated", None) is not None:
                         # UDP: drop unauthenticated/malformed packet and continue reading
-                        logger.debug(
-                            "Dropped malformed/unauthenticated UDP frame for device %s: %s",
-                            self.device_id,
-                            e,
-                        )
                         continue
                     raise
 
-                # At max sequence the session is spent: any further frame —
-                # including a peer's terminal BYE — is treated as overflow and
-                # tears the session down (see test_session_sequence_overflow).
                 if frame.seq >= 0xFFFFFFFF:
-                    logger.warning(
-                        "Session terminated: RX sequence overflowed for device %s", self.device_id
-                    )
                     raise SequenceError("RX sequence overflowed")
 
                 if is_udp:
@@ -175,20 +141,17 @@ class USMPSession:
                         offset = self._info.rx_seq - frame.seq
                         self._info.rx_window_bitmap |= 1 << offset
 
-                    self._transport.confirm_authenticated(frame.seq)
+                    if confirm is not None:
+                        confirm(frame.seq)
                 else:
                     if frame.seq != self._info.rx_seq:
-                        logger.warning(
-                            "Session terminated: TCP sequence mismatch for device %s (expected %d, got %d)",
-                            self.device_id,
-                            self._info.rx_seq,
-                            frame.seq,
-                        )
                         raise SequenceError(
                             f"Sequence mismatch: expected {self._info.rx_seq}, got {frame.seq}"
                         )
 
-                    # Overflow is already guarded above (frame.seq == rx_seq here).
+                    if self._info.rx_seq >= 0xFFFFFFFF:
+                        raise SequenceError("RX sequence overflowed")
+
                     self._info.rx_seq += 1
 
                 # S5 fix: over UDP a reordered or crafted fragment / control-frame
@@ -203,19 +166,26 @@ class USMPSession:
                     if frame.type == PacketType.BYE:
                         raise ConnectionClosedError("Remote sent BYE")
 
-                    if frame.type in (PacketType.PING, PacketType.PONG):
+                    if frame.type == PacketType.PING:
                         if len(assembled_payload) > 0:
                             raise SequenceError(
-                                f"Protocol error: {frame.type_name()} received during fragmentation"
+                                "Protocol error: PING received during fragmentation"
                             )
-                        if frame.type == PacketType.PING:
-                            await self._send_pong()
-                        now = time.monotonic()
-                        if now - ctrl_window_start > 1.0:
-                            ctrl_window_start = now
-                            ctrl_count = 0
+                        await self._send_pong()
                         ctrl_count += 1
-                        if ctrl_count > 8:
+                        if ctrl_count >= 8:
+                            raise ConnectionClosedError(
+                                "Too many consecutive control frames received"
+                            )
+                        continue
+
+                    if frame.type == PacketType.PONG:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError(
+                                "Protocol error: PONG received during fragmentation"
+                            )
+                        ctrl_count += 1
+                        if ctrl_count >= 8:
                             raise ConnectionClosedError(
                                 "Too many consecutive control frames received"
                             )
@@ -239,13 +209,8 @@ class USMPSession:
 
                     if frame_count >= USMP_MAX_FRAMES:
                         raise PayloadError("Protocol error: exceeded max fragments limit")
-                except (FrameError, SequenceError, ValueError) as e:
-                    if not self._transport.is_reliable:
-                        logger.debug(
-                            "Dropped UDP frame for device %s due to protocol violation: %s",
-                            self.device_id,
-                            e,
-                        )
+                except (FrameError, SequenceError, ValueError):
+                    if is_udp:
                         assembled_payload = bytearray()
                         frame_count = 0
                         expected_frag_seq = 0
@@ -255,63 +220,55 @@ class USMPSession:
         if effective_timeout is not None:
             try:
                 return await asyncio.wait_for(_recv_internal(), timeout=effective_timeout)
-            except TimeoutError as e:
+            except asyncio.TimeoutError as e:
                 raise USMPTimeoutError("Receive timed out") from e
         else:
             return await _recv_internal()
 
     async def ping(self) -> None:
         """Send a PING frame."""
-        await self._send_encrypted(PacketType.PING)
-
-    async def bye(self) -> None:
-        """Send a BYE frame and close the connection."""
-        if self._closed:
-            return
-        self._closed = True
-        try:
-            await self._send_encrypted(PacketType.BYE)
-        except (SequenceError, OSError) as e:
-            # BYE is a courtesy and the session is over either way: _closed is set
-            # above and the transport closes below. A peer that has already torn
-            # down never ACKs it, so UDP's stop-and-wait ARQ raises OSError once
-            # its retries are spent; a spent sequence can't carry it at all.
-            # Neither turns a clean teardown into a caller-visible failure.
-            logger.debug("BYE not delivered for device %s: %s", self.device_id, e)
-        finally:
-            self._transport.close()
-
-    async def _send_pong(self) -> None:
-        await self._send_encrypted(PacketType.PONG)
-
-    async def _send_encrypted(self, ptype: PacketType, plaintext: bytes = b"") -> None:
-        """Encrypt plaintext, wrap in a USMP frame, send, and bump tx_seq."""
-        async with self._send_lock:
-            await self._send_encrypted_locked(ptype, plaintext)
-
-    async def _send_encrypted_locked(self, ptype: PacketType, plaintext: bytes = b"") -> None:
-        """Body of _send_encrypted. The caller must already hold _send_lock."""
         seq = self._info.tx_seq
-        if seq >= 0xFFFFFFFF and ptype != PacketType.BYE:
-            logger.warning(
-                "Session terminated: TX sequence overflowed for device %s", self.device_id
-            )
-            raise SequenceError("TX sequence overflowed")
         nonce = struct.pack("<I", seq) + self._info.session_id[:8]
         ciphertext = encrypt(
             key=self._info.tx_key,
             nonce=nonce,
             seq=seq,
-            type_=int(ptype),
+            type_=int(PacketType.PING),
             version=USMP_VERSION,
             magic=USMP_MAGIC,
-            plaintext=plaintext,
+            plaintext=b"",
         )
-        # Burn the sequence before the write, never after. write_frame can put the
-        # frame on the wire and still raise — UDP's ARQ sends up to 5 times before
-        # giving up with OSError, and any await here is a cancellation point. If a
-        # caller then retries on the un-advanced seq, the GCM nonce (seq ||
-        # session_id[:8]) repeats under the same key, which surrenders plaintext
-        # and the GHASH key. A skipped sequence is free; a reused one is fatal.
-        self._info.tx_seq = min(seq + 1, 0xFFFFFFFF)
-        await self._transport.write_frame(ptype, ciphertext, seq=seq)
+        await write_frame(self._writer, PacketType.PING, ciphertext, seq=seq)
+        self._info.tx_seq += 1
+
+    async def bye(self) -> None:
+        """Send a BYE frame and close the connection."""
+        seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
+        ciphertext = encrypt(
+            key=self._info.tx_key,
+            nonce=nonce,
+            seq=seq,
+            type_=int(PacketType.BYE),
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
+            plaintext=b"",
+        )
+        await write_frame(self._writer, PacketType.BYE, ciphertext, seq=seq)
+        self._info.tx_seq += 1
+        self._writer.close()
+
+    async def _send_pong(self) -> None:
+        seq = self._info.tx_seq
+        nonce = struct.pack("<I", seq) + self._info.session_id[:8]
+        ciphertext = encrypt(
+            key=self._info.tx_key,
+            nonce=nonce,
+            seq=seq,
+            type_=int(PacketType.PONG),
+            version=USMP_VERSION,
+            magic=USMP_MAGIC,
+            plaintext=b"",
+        )
+        await write_frame(self._writer, PacketType.PONG, ciphertext, seq=seq)
+        self._info.tx_seq += 1
