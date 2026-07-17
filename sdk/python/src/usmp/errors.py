@@ -51,7 +51,3 @@ TimeoutError = USMPTimeoutError
 
 class ConnectionClosedError(USMPError):
     """Connection closed by remote."""
-
-
-class NotConnectedError(USMPError, RuntimeError):
-    """Attempted operation on a disconnected client."""

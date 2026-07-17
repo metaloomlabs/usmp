@@ -10,7 +10,7 @@
 #define WIFI_SSID "YourNetwork"
 #define WIFI_PASS "YourPassword"
 
-#define PUBLISH_INTERVAL_MS 10000  // Send data every 10 seconds
+#define PUBLISH_INTERVAL_MS 10000 // Send data every 10 seconds
 
 USMPClient usmp(PSK);
 uint32_t lastPublishTime = 0;
@@ -19,13 +19,17 @@ void setup() {
   Serial.begin(115200);
 
   // Configure callbacks for connection state monitoring
-  usmp.onConnect([]() { Serial.println("[USMP] Session established: " + usmp.sessionId()); });
+  usmp.onConnect([]() {
+    Serial.println("[USMP] Session established: " + usmp.sessionId());
+  });
 
-  usmp.onDisconnect([]() { Serial.println("[USMP] Disconnected — will attempt auto-reconnect"); });
+  usmp.onDisconnect([]() {
+    Serial.println("[USMP] Disconnected — will attempt auto-reconnect");
+  });
 
   // Start connection. You can use USMP::UDP or USMP::TCP
   Serial.println("[USMP] Connecting to WiFi and gateway...");
-
+  
   // Choose either TCP or UDP (uncomment the one you want to use)
   // auto transport = USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
   auto transport = USMP::UDP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);

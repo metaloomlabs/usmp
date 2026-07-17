@@ -1,8 +1,8 @@
 from dataclasses import dataclass
-from enum import IntEnum, StrEnum
+from enum import Enum, IntEnum
 
 
-class USMPProtocol(StrEnum):
+class USMPProtocol(str, Enum):
     TCP = "tcp"
     UDP = "udp"
 

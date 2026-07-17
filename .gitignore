@@ -30,7 +30,6 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.pyrefly_cache/
 .coverage
 htmlcov/
 .cache
