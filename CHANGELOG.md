@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed**: TCP server stop hangs on Python 3.12+ by tracking active connection tasks in `_conn_tasks` and cancelling them during server stop (Finding 6).
 - **Fixed**: UDP handler task leak on server stop. The Finding 6 cancel-and-gather landed only in `TCPListener.stop()`; `UDPListener.stop()` closed the streams but never cancelled its handler tasks, so a handler parked where `close()` cannot unblock it (the ARQ wait in `drain()`, or a `sleep`) outlived shutdown with its `finally` block unrun. `UDPListener.stop()` now mirrors the TCP path (Finding 6 follow-up).
 - **Fixed**: Socket and session state leaks on failed disconnects by wrapping `bye()` in a `try...finally` block to guarantee socket closure (Finding 7).
+- **Fixed**: `disconnect()` raising on a clean UDP teardown. A server drops its UDP stream as soon as the session handler returns, so a client saying goodbye a moment later gets no UTACK; the stop-and-wait ARQ then exhausted its retries and raised `OSError` out of `bye()` and `disconnect()`. BYE is a courtesy frame and the session is over regardless, so an undelivered one is now logged at debug and swallowed rather than failing teardown. `disconnect()` still propagates other errors from `bye()`, and still closes the transport either way (Finding 7 follow-up).
 - **Fixed**: Handshake timeouts bypassed by semaphore queue times by moving the timeout wrapping outside the semaphore block, and added global UDP concurrent handshakes cap (Finding 8).
 - **Fixed**: Session watchdog spoofing by updating session `_last_recv` watchdog timestamp only after successful AEAD packet decryption (Finding 9).
 - **Fixed**: Misleading UDP frame confirmations by sending UTACK only after verifying read buffer capacity checks (Finding 10).
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Added 18 integration and regression tests to `test_udp_integration.py` targeting all security findings.
+- Added 19 integration and regression tests to `test_udp_integration.py` targeting all security findings.
 
 ### Version Bumps
 

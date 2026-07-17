@@ -1244,3 +1244,37 @@ async def test_udp_listener_stop_cancels_handler_tasks():
             await srv_task
         except (asyncio.CancelledError, Exception):
             pass
+
+
+@pytest.mark.asyncio
+async def test_disconnect_survives_peer_already_gone():
+    """A BYE the peer never ACKs must not fail disconnect().
+
+    The server drops its UDP stream the moment the handler returns
+    (_on_transport_connect's finally pops _udp_sessions and closes), so a client
+    that says goodbye a moment later gets no UTACK. The stop-and-wait ARQ then
+    exhausts its 5 retries and raises OSError — which used to escape disconnect()
+    and turn an ordinary teardown into a caller-visible failure. This is what the
+    Linux CI hit on test_udp_basic_send_recv / _multiple_messages / _fragmentation.
+    """
+    port = _free_port()
+    server = USMPServer(host=HOST, port=port, psk=PSK, session_timeout=5.0, protocol="udp")
+
+    @server.on_session
+    async def handler(session: USMPSession):
+        data = await session.recv()
+        await session.send(b"ACK:" + data)
+        # handler returns -> server tears the session down before the client's BYE
+
+    async def client_coro():
+        client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
+        await client.connect()
+        await client.send(b"hello")
+        reply = await client.recv()
+        # Make the race deterministic: the server is definitely gone by now.
+        await asyncio.sleep(0.3)
+        await client.disconnect()  # must not raise
+        return reply
+
+    reply = await _run(server, client_coro())
+    assert reply == b"ACK:hello"

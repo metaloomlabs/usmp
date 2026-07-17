@@ -271,8 +271,13 @@ class USMPSession:
         self._closed = True
         try:
             await self._send_encrypted(PacketType.BYE)
-        except SequenceError:
-            pass
+        except (SequenceError, OSError) as e:
+            # BYE is a courtesy and the session is over either way: _closed is set
+            # above and the transport closes below. A peer that has already torn
+            # down never ACKs it, so UDP's stop-and-wait ARQ raises OSError once
+            # its retries are spent; a spent sequence can't carry it at all.
+            # Neither turns a clean teardown into a caller-visible failure.
+            logger.debug("BYE not delivered for device %s: %s", self.device_id, e)
         finally:
             self._transport.close()
 
