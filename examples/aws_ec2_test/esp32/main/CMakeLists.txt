@@ -1,3 +1,4 @@
+# examples/aws_ec2_test/esp32/main/CMakeLists.txt
 idf_component_register(
     SRCS "app.c" "wifi.c"
     INCLUDE_DIRS "."

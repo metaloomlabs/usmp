@@ -1,4 +1,4 @@
-# src/usmp/__init__.py
+import logging
 
 from ._client import USMPClient
 from ._frame import decode_frame, encode_frame, read_frame, write_frame
@@ -12,6 +12,7 @@ from .errors import (
     FrameError,
     HandshakeError,
     MagicError,
+    NotConnectedError,
     PayloadError,
     SequenceError,
     TimeoutError,
@@ -19,40 +20,48 @@ from .errors import (
     USMPTimeoutError,
     VersionError,
 )
+from .transport import register_transport
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
 __all__ = [
-    # Types
-    "USMPFrame",
-    "SessionInfo",
-    "PacketType",
-    "ErrorCode",
-    "USMPProtocol",
-    # Errors
-    "USMPError",
-    "FrameError",
-    "CRCError",
-    "MagicError",
-    "VersionError",
-    "PayloadError",
-    "HandshakeError",
     "AuthError",
-    "CryptoError",
-    "SequenceError",
-    "USMPTimeoutError",
-    "TimeoutError",  # deprecated alias
+    "CRCError",
     "ConnectionClosedError",
-    # Frame
-    "encode_frame",
-    "decode_frame",
-    "read_frame",
-    "write_frame",
-    # Session
-    "USMPSession",
-    # Server
-    "USMPServer",
+    "CryptoError",
+    "ErrorCode",
+    "FrameError",
+    "HandshakeError",
+    "MagicError",
+    "NotConnectedError",
+    "PacketType",
+    "PayloadError",
+    "SequenceError",
+    "SessionInfo",
+    "TimeoutError",  # deprecated alias
     # Client
     "USMPClient",
+    # Errors
+    "USMPError",
+    # Types
+    "USMPFrame",
+    "USMPProtocol",
+    # Server
+    "USMPServer",
+    # Session
+    "USMPSession",
+    "USMPTimeoutError",
+    "VersionError",
+    "decode_frame",
+    # Frame
+    "encode_frame",
+    "read_frame",
+    # Transport registry
+    "register_transport",
+    "write_frame",
 ]
 
-__version__ = "1.0.0"
+# Attach a no-op handler so the SDK never emits to the application's stderr via
+# logging's "last resort" handler when the consuming app has not configured logging.
+logging.getLogger("usmp").addHandler(logging.NullHandler())
+
+__version__ = "1.1.0"

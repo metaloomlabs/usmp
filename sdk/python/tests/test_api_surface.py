@@ -93,7 +93,15 @@ def test_usmp_client_not_connected_raises():
     import pytest
 
     client = usmp.USMPClient(host="127.0.0.1", port=9000, psk=b"test-psk-1234-super-secret")
+    with pytest.raises(usmp.NotConnectedError, match="Not connected"):
+        client._ensure_connected()
+
+    # Verify catchable as RuntimeError
     with pytest.raises(RuntimeError, match="Not connected"):
+        client._ensure_connected()
+
+    # Verify catchable as USMPError
+    with pytest.raises(usmp.USMPError, match="Not connected"):
         client._ensure_connected()
 
 
@@ -134,6 +142,8 @@ def test_error_hierarchy():
     assert issubclass(usmp.CryptoError, usmp.USMPError)
     assert issubclass(usmp.SequenceError, usmp.USMPError)
     assert issubclass(usmp.ConnectionClosedError, usmp.USMPError)
+    assert issubclass(usmp.NotConnectedError, usmp.USMPError)
+    assert issubclass(usmp.NotConnectedError, RuntimeError)
 
 
 # ── PacketType ────────────────────────────────────────────────────────────────

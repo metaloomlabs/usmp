@@ -75,12 +75,13 @@ if __name__ == "__main__":
 
 ## Built-in Rate Limiting & DoS Hardening
 
-USMP servers are hardened out-of-the-box against brute-force attacks and socket flooding. The server employs an automated lockout mechanism:
+USMP servers are hardened out-of-the-box against brute-force attacks and socket flooding. The server employs several automated lockout and resource safeguards:
 
-* **Lockout Trigger**: If a client connection fails the handshake 5 times consecutively (due to bad keys, timeouts, or corrupted frames), the client's identifier is flagged.
+* **Lockout Trigger**: If a client connection fails the handshake 5 times consecutively (due to bad keys, timeouts, or corrupted frames), the client's IP address (or connection identifier) is flagged.
 * **Exponential Backoff**: Once flagged, subsequent connection requests from that client are rejected instantly. The lockout time starts small and scales as $2^{(\text{failures} - 5)}$ seconds, capping at a maximum lockout of **60 seconds**.
-* **Memory Safeguards**: To prevent attackers from exhausting server memory by spoofing client addresses, the lockout cache is capped at `1000` unique entries. If the limit is reached, the oldest records are evicted.
-* **Pruning**: Inactive, expired lockout records (older than 10 minutes) are automatically garbage-collected to keep the cache clean.
+* **Memory Safeguards**: To prevent attackers from exhausting server memory by spoofing client addresses, the lockout cache is capped at `1000` unique entries. If the limit is reached, an **LRU (Least Recently Used)** strategy sorts the cache and evicts the oldest/least recently updated lockout record.
+* **Pruning**: Inactive, expired lockout records (older than 10 minutes) are automatically garbage-collected in a refill-aware manner to keep the cache clean and prevent memory leak DoS.
+* **Global UDP Handshake Cap**: To mitigate spoofed UDP HELLO floods from exhausting resources before a handshake completes, the UDP listener caps concurrent handshakes to `max_connections * 2` (default 200). Subsequent UDP connection attempts are dropped until active handshakes finish.
 
 ## Complete Production Example
 
