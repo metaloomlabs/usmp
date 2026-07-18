@@ -324,6 +324,12 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     uint32_t seq =
         temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
 
+    // Don't confirm a frame we can't actually deliver: reject before sending the
+    // UTACK, otherwise the peer treats an undeliverable datagram as delivered
+    // (Finding 10). Reachable only if the caller passes a buffer smaller than a
+    // full datagram, but the ACK ordering must not depend on that.
+    if ((size_t)n > max_len) return -1;
+
     // Send UTACK back immediately. S3: authenticate session-phase UTACKs (type >= 5)
     // with rx_key once keys are established; handshake UTACKs stay plaintext.
     uint8_t utack[UTACK_HEADER_LEN + UTACK_MAC_LEN] = {0xAC,
@@ -352,7 +358,6 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       ctx->last_rx_type = type;
     }
 
-    if ((size_t)n > max_len) return -1;
     memcpy(buf, temp, n);
     return n;
   }

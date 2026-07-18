@@ -136,14 +136,21 @@ cleanup:
 
 void usmp_close(usmp_t* ctx) {
   if (!ctx) return;
-  if (ctx->transport.close) ctx->transport.close(&ctx->transport);
+  /*
+   * Courtesy BYE so the peer can release the session immediately instead of
+   * holding it until its inactivity watchdog fires. Best-effort: the session is
+   * over regardless, so an undelivered BYE is ignored. It must go out before we
+   * tear down the transport or zeroise the tx_key it is encrypted under.
+   */
+  if (ctx->established) usmp_send_bye(ctx);
   ctx->established = false;
+  if (ctx->transport.close) ctx->transport.close(&ctx->transport);
   mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
   mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "1.0.1"; }
+const char* usmp_get_version(void) { return "1.1.0"; }
 
 static usmp_log_level_t g_usmp_log_level = USMP_LOG_LEVEL_ERROR;
 
