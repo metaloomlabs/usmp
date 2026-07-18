@@ -5,9 +5,16 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.0] — 2026-07-17
+## [1.1.0] — 2026-07-18
+
+Security and hardening release spanning the Python SDK, the C core, and the
+ESP32 / Arduino ports. No wire-format or public API changes — all components
+remain protocol-compatible with 1.0.0; the ports pick up the core fixes on
+rebuild.
 
 ### 🔒 Security
+
+#### Python SDK
 
 - **Fixed**: Cryptographic AES-GCM nonce reuse vulnerability under concurrent session writes by serializing all packet encryption under a session-wide `_send_lock` (Finding 1).
 - **Fixed**: AES-GCM nonce reuse still reachable after the Finding 1 lock, because `tx_seq` was committed only after `write_frame` returned. A write that put the frame on the wire and then raised — UDP's ARQ gives up with `OSError` after 5 sends, and any `await` is a cancellation point — left the sequence un-advanced, so the next send repeated the nonce under the same key. The sequence is now reserved before the write (Finding 1 follow-up).
@@ -27,15 +34,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Fixed**: Cancellation cleanup bypass in server handshake handler by executing connection state updates at the very top of `finally` blocks before any async yield/await calls (Finding 12).
 - **Fixed**: Handshake UTACK spoofing/stale retry match on UDP by using incrementing sequence numbers (`0`, `1`, `2`) during client handshake writes (Finding 13).
 
+#### C Core & ports (ESP32 / Arduino)
+
+The C analogues of the Python transmit-path crypto fixes above. Both the ESP32 and Arduino ports compile the core directly, so they inherit these on rebuild.
+
+- **Fixed** (C Core): AES-GCM nonce reuse on transmit failure. `emit_frame` advanced `tx_seq` only *after* a successful transport write, so any send that reached the wire and then reported failure left the sequence number un-advanced — and the session still established. Because the deterministic nonce is `seq || session_id[0..7]` under a fixed key, the next send reused that nonce over different plaintext, breaking AES-GCM confidentiality and exposing the GHASH authentication key (frame forgery). This is reachable under ordinary packet loss: the UDP ARQ retransmits the ciphertext up to five times before returning `-1`, so every failure is a transmit-then-fail. The sequence number is now reserved *before* the write, and a failed write drops the session (`established = false`) so a re-handshake installs a fresh key before any resend. This is the C analogue of the Python Finding 1 follow-up.
+- **Fixed** (C Core): `tx_seq` could wrap past its terminal sentinel on control frames. `usmp_send` guarded sequence exhaustion, but PING/PONG/BYE reached the transmit path without a guard, so at `0xFFFFFFFF` the counter wrapped to `0` and reused the session's first nonce under the unchanged key — remotely driftable via the auto-PONG response to peer PINGs. The exhaustion guard now lives in the single `emit_frame` choke point and covers every frame type.
+- **Fixed** (C Core): Consecutive control-frame budget was off by one — `usmp_recv` admitted only 7 PING/PONG frames per call despite `USMP_MAX_CTRL_FRAMES == 8` and the documented "up to 8". The check is now `> USMP_MAX_CTRL_FRAMES`, admitting the documented 8 before it treats the burst as a flood. (Matches the Python Finding 3 off-by-one fix.)
+- **Fixed** (C Core handshake): All three client handshake writes used `seq = 0`. On UDP the ARQ matches a handshake UTACK — which is unauthenticated plaintext — by `(type, seq)` only, and the cookie-retry HELLO is otherwise byte-identical to the initial HELLO, so a stale ACK for the first HELLO could satisfy the retry's wait and an off-path attacker could forge one. The writes now use distinct sequence numbers (HELLO `0`, cookie-retry HELLO `1`, HELLO_ACK `2`), mirroring the Python client (Finding 13). Wire-compatible — the server echoes whatever seq it received into the UTACK.
+- **Fixed** (ESP32 & Arduino ports): The UDP transport sent its return-routability UTACK before checking that the datagram fits the caller's receive buffer, so an undeliverable frame was confirmed to the peer as delivered. The capacity check now runs before the UTACK is sent (Finding 10). Reachable only when the caller passes a buffer smaller than a full datagram; the core always passes a full-size buffer, so this is a latent ordering fix rather than a live break.
+
 ### Added
 
-- Added 19 integration and regression tests to `test_udp_integration.py` targeting all security findings.
+- **Python SDK**: Added 19 integration and regression tests to `test_udp_integration.py` targeting all security findings.
+- **C Core**: `usmp_close` now sends a best-effort graceful `BYE` before tearing down the transport, so a peer (e.g. the Python server) can release the session immediately instead of holding it until its inactivity watchdog fires. Wire-compatible — `BYE` was already defined and handled on receive; only C clients previously never sent one. Undelivered `BYE`s are ignored since the session is over regardless.
+- **C Core tests**: Regression coverage for the transmit-then-fail path — a mock transport that "transmits" then returns `-1`, asserting `tx_seq` advances on failure and no sequence number (hence no AES-GCM nonce) is ever reused — plus the control-frame sequence-overflow guard and `BYE`-on-close. The first two were confirmed to fail against the pre-fix core.
+
+### Changed
+
+- **C Core**: Documented the session threading contract in `usmp.h` — a `usmp_t` is not thread-safe and carries no internal locking; all calls touching one session must be serialized by the caller (concurrent senders would race on `tx_seq` and reuse a nonce). This is the C-side note corresponding to the Python `_send_lock`.
 
 ### Version Bumps
 
+- C Core (`usmp.h`, `usmp_connect.c`): `1.0.1` → `1.1.0`
+- ESP32 Port (`idf_component.yml`): `1.0.1` → `1.1.0` — required so the ESP Component Registry actually publishes the core security fixes; an unchanged version number is silently skipped on upload.
+- Arduino Port (`library.properties`, `library.json`): `1.0.1` → `1.1.0`
 - Python SDK (`pyproject.toml`, `__init__.py`): `1.0.1` → `1.1.0`
 - Root workspace (`pyproject.toml`): `1.0.1` → `1.1.0`
-- C Core, Arduino, and ESP32 ports are unchanged at `1.0.0` — this release is Python SDK only.
 
 ---
 

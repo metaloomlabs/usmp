@@ -435,6 +435,134 @@ void test_replay_window(void) {
   printf("[TEST] UDP sliding replay window tests passed!\n");
 }
 
+// ── Test: Send-failure must not reuse a sequence number (nonce reuse)
+// ──────────────────────────────────────────────────────────
+// Models a transport that puts the ciphertext on the wire and *then* reports
+// failure — exactly the ESP32/UDP ARQ, which retransmits up to 5 times before
+// returning -1. It records the sequence number of every frame it "transmits"
+// so the test can assert no seq (hence no AES-GCM nonce) is ever reused.
+#define FAILTX_MAX 16
+typedef struct {
+  uint32_t seqs[FAILTX_MAX];
+  int count;
+} failtx_ctx_t;
+
+static int failtx_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  failtx_ctx_t* c = (failtx_ctx_t*)t->ctx;
+  if (len >= 8 && c->count < FAILTX_MAX) {
+    uint32_t seq = (uint32_t)data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) |
+                   ((uint32_t)data[7] << 24);
+    c->seqs[c->count++] = seq;
+  }
+  return -1;  // the wire write happened; the transport still fails
+}
+
+static int failtx_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
+  (void)t;
+  (void)buf;
+  (void)max_len;
+  return -1;
+}
+
+void test_send_failure_no_nonce_reuse(void) {
+  printf("[TEST] Running send-failure nonce-reuse regression test...\n");
+
+  usmp_t ctx;
+  memset(&ctx, 0, sizeof(ctx));
+  uint8_t key[32] = {0xAA};
+  uint8_t sid[16] = {0x01, 0x02, 0x03};
+  ctx.established = true;
+  memcpy(ctx.tx_key, key, 32);
+  memcpy(ctx.session_id, sid, 16);
+
+  failtx_ctx_t fctx = {0};
+  usmp_transport_t tr;
+  memset(&tr, 0, sizeof(tr));
+  tr.send = failtx_send;
+  tr.recv = failtx_recv;
+  tr.ctx = &fctx;
+  ctx.transport = tr;
+
+  uint8_t msg1[] = "first-plaintext";
+  int r1 = usmp_send(&ctx, msg1, sizeof(msg1));
+  assert(r1 == -1);                  // send reports failure...
+  assert(ctx.tx_seq == 1);           // ...but the seq is burned regardless
+  assert(ctx.established == false);  // ...and the session is torn down
+
+  // Model the shipped example's continue-on-failure loop: a naive caller
+  // re-arms `established` (without a fresh key/seq) and sends different
+  // plaintext. The second frame must NOT land on seq 0 again.
+  ctx.established = true;
+  uint8_t msg2[] = "second-different-plaintext";
+  int r2 = usmp_send(&ctx, msg2, sizeof(msg2));
+  assert(r2 == -1);
+  assert(ctx.established == false);
+
+  // Every transmitted frame must carry a distinct sequence number, hence a
+  // distinct nonce under the fixed tx_key. Pre-fix this array was {0, 0}.
+  assert(fctx.count >= 2);
+  for (int i = 0; i < fctx.count; i++) {
+    for (int j = i + 1; j < fctx.count; j++) {
+      assert(fctx.seqs[i] != fctx.seqs[j]);
+    }
+  }
+  printf("  - tx_seq advanced on send failure; no nonce reuse across %d frames\n", fctx.count);
+  printf("[TEST] Send-failure nonce-reuse regression test passed!\n");
+}
+
+// ── Test: control frames must not wrap tx_seq past the overflow sentinel
+// ──────────────────────────────────────────────────────────
+void test_control_seq_overflow(void) {
+  printf("[TEST] Running control-frame seq overflow guard test...\n");
+
+  usmp_t ctx, dummy_server;
+  usmp_transport_t c_tr, s_tr;
+  loopback_ctx_t loopback;
+  setup_session_pair(&ctx, &dummy_server, &c_tr, &s_tr, &loopback);
+
+  // Park tx_seq at the reserved terminal sentinel. A PING here would wrap to 0
+  // and reuse the session's very first nonce under the unchanged key.
+  ctx.tx_seq = 0xFFFFFFFF;
+
+  int r = usmp_ping(&ctx);
+  assert(r == -1);                   // refused
+  assert(ctx.tx_seq == 0xFFFFFFFF);  // did NOT wrap to 0
+  assert(ctx.established == false);  // session torn down
+  assert(loopback.write_pos == 0);   // nothing was transmitted
+
+  printf("  - PING at seq 0xFFFFFFFF refused without wrapping or transmitting\n");
+  printf("[TEST] Control-frame seq overflow guard test passed!\n");
+}
+
+// ── Test: usmp_close sends a graceful BYE
+// ──────────────────────────────────────────────────────────
+void test_bye_on_close(void) {
+  printf("[TEST] Running BYE-on-close test...\n");
+
+  usmp_t client, server;
+  usmp_transport_t c_tr, s_tr;
+  loopback_ctx_t loopback;
+  setup_session_pair(&client, &server, &c_tr, &s_tr, &loopback);
+
+  size_t before = loopback.write_pos;
+  usmp_close(&client);
+
+  // A graceful close transmits exactly one BYE control frame (type at header
+  // offset 3: magic[2] version[1] type[1] ...).
+  assert(loopback.write_pos > before);
+  assert(loopback.buffer[before + 3] == USMP_TYPE_BYE);
+  assert(client.established == false);
+
+  // The peer decodes it as a peer-initiated session close (usmp_recv → -1).
+  uint8_t recv_buf[64];
+  int r = usmp_recv(&server, recv_buf, sizeof(recv_buf));
+  assert(r == -1);
+  assert(server.established == false);
+
+  printf("  - usmp_close emits a BYE the peer decodes as session close\n");
+  printf("[TEST] BYE-on-close test passed!\n");
+}
+
 extern char g_last_log_level;
 extern char g_last_log_tag[64];
 extern char g_last_log_msg[256];
@@ -520,6 +648,9 @@ int main(void) {
   test_malformed_frames();
   test_fragment_ordering();
   test_replay_window();
+  test_send_failure_no_nonce_reuse();
+  test_control_seq_overflow();
+  test_bye_on_close();
   test_logging();
 
   printf("All C core unit tests passed successfully!\n");

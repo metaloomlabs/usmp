@@ -236,7 +236,15 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
     pkt.magic = USMP_MAGIC;
     pkt.version = USMP_VERSION;
     pkt.type = USMP_TYPE_HELLO;
-    pkt.seq = 0;
+    /*
+     * Distinct seq per handshake write (HELLO=0, cookie-retry HELLO=1,
+     * HELLO_ACK=2). The retry HELLO is otherwise byte-identical to the initial
+     * HELLO; on UDP the ARQ matches an (unauthenticated, plaintext) handshake
+     * UTACK by (type, seq) only, so a shared seq lets a stale ACK for the first
+     * HELLO satisfy the retry's wait — and lets an off-path attacker forge one.
+     * Mirrors the Python client (Finding 13).
+     */
+    pkt.seq = 1;
     pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + USMP_COOKIE_LEN;
     memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
     memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
@@ -327,7 +335,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   pkt.magic = USMP_MAGIC;
   pkt.version = USMP_VERSION;
   pkt.type = USMP_TYPE_HELLO_ACK;
-  pkt.seq = 0;
+  pkt.seq = 2;  // distinct handshake-write seq; see the cookie-retry note above (Finding 13)
   pkt.length = USMP_HMAC_LEN;
   memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
 
