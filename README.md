@@ -3,6 +3,7 @@
 > **Say goodbye to the "IoT Security Gap"!** USMP is a lightweight, secure, and developer-friendly session protocol designed to bring end-to-end encrypted, mutually authenticated tunnels to ESP32, Arduino, and Python.
 
 [![Python SDK](https://img.shields.io/pypi/v/usmp?label=usmp&color=blue)](https://pypi.org/project/usmp)
+[![ESP Component Registry](https://components.espressif.com/components/metaloomlabs/usmp/badge.svg)](https://components.espressif.com/components/metaloomlabs/usmp)
 [![ESP-IDF](https://img.shields.io/badge/ESP--IDF-v5.0%2B-blue)](#esp32-esp-idf)
 [![Arduino](https://img.shields.io/badge/Arduino-ESP32-teal)](#arduino)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](#license)
@@ -222,11 +223,15 @@ See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. 
 
 ---
 
-## Contributing & License
+## Contributing & Governance
 
-We welcome all contributions! Please check the guidelines before submitting a Pull Request.
+We welcome all contributions! Please review our [Contributing Guidelines](CONTRIBUTING.md) and adhere to our [Code of Conduct](CODE_OF_CONDUCT.md) before submitting a Pull Request.
 
-USMP is licensed under the Apache 2.0 License.
+For security concerns, please refer to our [Security Policy](SECURITY.md).
+
+## License
+
+USMP is open-source software licensed under the [Apache 2.0 License](LICENSE).
 
 <p align="center">
   <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong>

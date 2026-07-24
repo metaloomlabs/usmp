@@ -1,5 +1,7 @@
 # USMP — Unified Secure Multi-transport Protocol
 
+[![ESP Component Registry](https://components.espressif.com/components/metaloomlabs/usmp/badge.svg)](https://components.espressif.com/components/metaloomlabs/usmp)
+
 Lightweight, mutually authenticated, AES-256-GCM encrypted communication for ESP32.  
 No TLS stack. No certificates. Three function calls.
 

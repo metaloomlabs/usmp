@@ -4,7 +4,7 @@ version = "1.1.0"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 license = "Apache-2.0"
-authors = [{ name = "winterx64", email = "itswinterx64@gmail.com" }]
+authors = [{ name = "winterx64", email = "winterx64.work@gmail.com" }]
 requires-python = ">=3.11,<3.14"
 dependencies = ["cryptography>=42.0.0,<49.0.0"]
 keywords = [
