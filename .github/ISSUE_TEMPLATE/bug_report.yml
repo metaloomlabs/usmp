@@ -1,0 +1,71 @@
+name: Bug Report
+description: Create a bug report to help us identify and resolve issues
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please search existing issues before filing a new report.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Target Platform / Component
+      description: Which component or SDK is affected?
+      options:
+        - Python SDK (`usmp`)
+        - ESP32 (ESP-IDF Component)
+        - ESP32 / ESP8266 (Arduino Library)
+        - C Core Library
+        - Documentation / Examples
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: A clear and concise description of the bug.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Detailed steps to reproduce the behavior.
+      placeholder: |
+        1. Set up server with PSK ...
+        2. Call `usmp_connect` on ESP32 ...
+        3. Observe error code ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs & Diagnostic Output
+      description: Paste relevant terminal output, ESP32 serial logs, or Python tracebacks here.
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment & Versions
+      description: Operating system, Python version, ESP-IDF version, Arduino core version, hardware board, etc.
+      placeholder: |
+        - OS: Ubuntu 24.04 / Windows 11 / macOS
+        - Python version: 3.11
+        - ESP-IDF / Arduino Core version: v5.2 / 3.0.0
+        - Hardware: ESP32-WROOM-32
+    validations:
+      required: true

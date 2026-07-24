@@ -13,7 +13,7 @@ If you discover a security vulnerability in USMP, **please report it privately**
 
 ### How to Report
 
-1. **Email**: Send details to **<security@metaloom.in>**
+1. **Email**: Send details to **<winterx64.work@gmail.com>**
 2. **Include**:
    - A description of the vulnerability
    - Steps to reproduce (if applicable)
