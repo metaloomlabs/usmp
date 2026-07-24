@@ -330,7 +330,7 @@ class USMPServer:
             transport.close()
             try:
                 await transport.wait_closed()
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.debug("Error during transport wait_closed", exc_info=True)
 
     async def serve(self) -> None:
