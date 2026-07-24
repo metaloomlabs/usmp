@@ -19,8 +19,8 @@ In the world of IoT, developers are often forced to make a frustrating choice wh
 **USMP fills this gap.** It gives you a lightweight, transport-agnostic, and secure tunnel that runs anywhere. Establishing a secure connection on your device is as simple as:
 
 ```c
-// 1. Initialize your choice of transport (TCP or UDP)
-usmp_transport_udp_init(&transport, "192.168.1.100", 9000);
+// 1. Initialize your choice of transport (TCP or UDP, supports IPs & DNS hostnames)
+usmp_transport_udp_init(&transport, "usmp.mycompany.com", 9000);
 
 // 2. Perform the handshake and establish a secure session
 usmp_connect(&ctx, &transport);
@@ -50,7 +50,7 @@ Every single session is hardened:
 * **Registry-Based Distribution**:
   * **Python**: Fully async SDK available on **PyPI** (`pip install usmp`).
   * **ESP-IDF**: Native component on the **ESP Component Registry** (`metaloomlabs/usmp`).
-  * **Arduino**: Standard packaged offline ZIP library (`usmp-X.Y.Z-arduino.zip`).
+  * **Arduino**: Standard packaged offline ZIP library (`usmp-1.0.1-arduino.zip`).
 
 ---
 
@@ -201,9 +201,10 @@ To view the complete, tutorial-based guide covering installation, TCP, UDP, and 
 Unlike PAKE protocols (SPAKE2, CPace), an attacker who records a USMP handshake can attempt to crack the PSK offline. The 16-byte minimum length is enforced, but **length ≠ entropy**.
 
 **You must:**
-- Use cryptographically random PSKs (`os.urandom(32)` or hardware RNG) — not human-readable passphrases.
-- Store PSKs in secure storage (encrypted NVS, secure elements, HSMs).
-- Never hardcode PSKs in source code or firmware.
+
+* Use cryptographically random PSKs (`os.urandom(32)` or hardware RNG) — not human-readable passphrases.
+* Store PSKs in secure storage (encrypted NVS, secure elements, HSMs).
+* Never hardcode PSKs in source code or firmware.
 
 See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. A PAKE upgrade is planned for a future release.
 
@@ -216,8 +217,8 @@ See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. 
 * [x] **v0.4.0**: Published on ESP Component Registry and PyPI, making it stable.
 * [x] **v0.4.7**: Security hardening (Deterministic Nonces, Lockout Rate Limiting, Dynamic Fragmentation).
 * [x] **v0.5.0**: UDP transport support fully complete and production-ready.
-* [ ] **v0.5.5**: CLI tools and auto-discovery (mDNS / UDP).
-* [ ] **v0.6.0**: Secure OTA firmware updates with Ed25519 signatures.
+* [ ] **v1.1.0**: CLI tools and auto-discovery (mDNS / UDP).
+* [ ] **v1.2.0**: Secure OTA firmware updates with Ed25519 signatures.
 
 ---
 

@@ -53,28 +53,35 @@ static void usmp_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key
 }
 
 static int udp_dial(usmp_udp_ctx_t* udp) {
-  int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (sock < 0) return -1;
+  struct addrinfo hints, *res;
+  memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_DGRAM;
+
+  char port_str[16];
+  snprintf(port_str, sizeof(port_str), "%d", udp->port);
+
+  if (getaddrinfo(udp->server_ip, port_str, &hints, &res) != 0) {
+    return -1;
+  }
+
+  int sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+  if (sock < 0) {
+    freeaddrinfo(res);
+    return -1;
+  }
 
   // Set receive timeout to 10ms for quick ACK polling
   struct timeval tv = {.tv_sec = 0, .tv_usec = 10000};
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
-  struct sockaddr_in addr = {
-      .sin_family = AF_INET,
-      .sin_port = htons((uint16_t)udp->port),
-  };
-
-  if (inet_pton(AF_INET, udp->server_ip, &addr.sin_addr) != 1) {
+  if (connect(sock, res->ai_addr, res->ai_addrlen) != 0) {
+    freeaddrinfo(res);
     close(sock);
     return -1;
   }
 
-  if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
-    close(sock);
-    return -1;
-  }
-
+  freeaddrinfo(res);
   udp->sock = sock;
   return 0;
 }
@@ -99,19 +106,22 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   }
 
   if (!expect_ack) {
-    send(udp->sock, data, len, 0);
+    if (send(udp->sock, data, len, 0) < 0) return -1;
     return 0;
   }
 
   // Stop-and-wait ARQ
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
   for (int attempt = 0; attempt < 5; attempt++) {
-    send(udp->sock, data, len, 0);
+    if (send(udp->sock, data, len, 0) < 0) {
+      if (!is_transient_error(errno)) return -1;
+    }
 
     uint32_t start_ms = usmp_port_millis();
     while (usmp_port_millis() - start_ms < 500) {
       ssize_t n = recv(udp->sock, temp, sizeof(temp), 0);
       if (n < 0) {
+        if (!is_transient_error(errno)) return -1;
         usmp_port_delay_ms(5);
         continue;
       }
@@ -146,12 +156,19 @@ static int usmp_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   return -1;  // Retries exhausted
 }
 
+#ifndef USMP_UDP_RECV_TIMEOUT_MS
+#define USMP_UDP_RECV_TIMEOUT_MS 50
+#endif
+
 static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
   if (!udp || udp->sock < 0) return -1;
 
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
   ssize_t n = 0;
+
+  const bool bounded = udp->keys_set;
+  const uint32_t start_ms = usmp_port_millis();
 
   while (1) {
     if (udp->rx_len > 0) {
@@ -162,17 +179,35 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       fd_set rfds;
       FD_ZERO(&rfds);
       FD_SET(udp->sock, &rfds);
-      struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
-      int select_ret = select(udp->sock + 1, &rfds, NULL, NULL, &tv);
-      if (select_ret == 0) {
-        // Timeout. If socket has been closed / set to negative by another thread, exit
-        if (udp->sock < 0) return -1;
-        continue;
+
+      struct timeval tv;
+      struct timeval* p_tv = NULL;
+
+      if (bounded) {
+        uint32_t now = usmp_port_millis();
+        uint32_t elapsed = now - start_ms;
+        if (elapsed >= USMP_UDP_RECV_TIMEOUT_MS) {
+          return 0; // no data within budget — non-fatal empty read
+        }
+        uint32_t remaining = USMP_UDP_RECV_TIMEOUT_MS - elapsed;
+        tv.tv_sec = (long)(remaining / 1000);
+        tv.tv_usec = (long)((remaining % 1000) * 1000);
+        p_tv = &tv;
       }
+
+      int select_ret = select(udp->sock + 1, &rfds, NULL, NULL, p_tv);
       if (select_ret < 0) {
         if (errno == EINTR) continue;
         return -1;
       }
+      if (select_ret == 0) {
+        if (bounded) {
+          return 0; // timeout reached — non-fatal empty read
+        }
+        if (udp->sock < 0) return -1;
+        continue;
+      }
+
       n = recv(udp->sock, temp, sizeof(temp), 0);
       if (n < 0) {
         if (!is_transient_error(errno)) {
@@ -196,6 +231,12 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     uint8_t type = temp[3];
     uint32_t seq =
         temp[4] | ((uint32_t)temp[5] << 8) | ((uint32_t)temp[6] << 16) | ((uint32_t)temp[7] << 24);
+
+    // Don't confirm a frame we can't actually deliver: reject before sending the
+    // UTACK, otherwise the peer treats an undeliverable datagram as delivered
+    // (Finding 10). Reachable only if the caller passes a buffer smaller than a
+    // full datagram, but the ACK ordering must not depend on that.
+    if ((size_t)n > max_len) return -1;
 
     // Send UTACK back immediately. S3: authenticate session-phase UTACKs (type >= 5)
     // with rx_key once keys are established; handshake UTACKs stay plaintext.
@@ -225,7 +266,6 @@ static int usmp_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
       udp->last_rx_type = type;
     }
 
-    if ((size_t)n > max_len) return -1;
     memcpy(buf, temp, (size_t)n);
     return (int)n;
   }
@@ -262,6 +302,7 @@ static int usmp_udp_reconnect(usmp_transport_t* t) {
   udp->rx_len = 0;
   udp->last_rx_seq_set = false;
   udp->last_rx_type = 0;
+  udp->keys_set = false;
   return udp_dial(udp);
 }
 

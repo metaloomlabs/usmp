@@ -2,6 +2,7 @@
 
 import struct
 
+from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PrivateKey,
@@ -59,8 +60,9 @@ def derive_session_keys(
         ).derive(shared_secret)
         return key_material[:USMP_SESSION_KEY_LEN], key_material[USMP_SESSION_KEY_LEN:]
     finally:
-        if "shared_secret" in locals():
-            del shared_secret
+        # Best-effort drop of the reference. Note: CPython does not zero the
+        # backing buffer, so this is not a guaranteed secure erase (see BUG-009).
+        del shared_secret
 
 
 def build_aad(
@@ -121,8 +123,6 @@ def decrypt(
     Decrypt and verify AES-256-GCM nonce_ct_tag.
     Raises CryptoError if authentication fails.
     """
-    from cryptography.exceptions import InvalidTag
-
     if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
         raise CryptoError("Payload too short")
 
@@ -137,6 +137,9 @@ def decrypt(
     try:
         return aesgcm.decrypt(nonce, ct_tag, aad)
     except InvalidTag as e:
-        raise CryptoError(f"Decryption failed: {e}") from e
+        # Expected on tampering / wrong key — don't echo library internals.
+        raise CryptoError("Authentication tag verification failed") from e
     except Exception as e:
-        raise CryptoError(f"Decryption failed: {e}") from e
+        # Keep the underlying detail as the exception cause, not in the message,
+        # so we don't echo library internals to callers/logs.
+        raise CryptoError("Decryption failed") from e

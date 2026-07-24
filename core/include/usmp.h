@@ -14,11 +14,11 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 1
-#define USMP_VERSION_MINOR 0
+#define USMP_VERSION_MINOR 1
 #define USMP_VERSION_PATCH 0
 
 /**
- * Get the library version string at runtime (e.g. "0.5.1").
+ * Get the library version string at runtime (e.g. "1.1.0").
  */
 const char* usmp_get_version(void);
 
@@ -55,7 +55,7 @@ const char* usmp_get_version(void);
 /*
  * USMP_CONNECT_RETRIES / USMP_CONNECT_RETRY_MS
  * Defined for user convenience — not yet used internally by the library.
- * Callers can use these in their own retry loops (see firmware/main/app.c).
+ * Callers can use these in their own retry loops (see examples/project_tcp/esp32/main/app.c).
  */
 #ifndef USMP_CONNECT_RETRIES
 #define USMP_CONNECT_RETRIES 10  // Unused internally (caller convenience only)
@@ -102,6 +102,16 @@ typedef struct {
   const uint8_t* psk;
   size_t psk_len;
 } usmp_t;
+
+// Threading ─────────────────────────────────────────────────────────────────
+//
+// A usmp_t session is NOT thread-safe and carries no internal locking. All
+// calls that touch one session (usmp_send, usmp_recv, usmp_ping,
+// usmp_keepalive_tick, usmp_close, usmp_reconnect) must be serialized by the
+// caller. Concurrent senders in particular would race on tx_seq and reuse an
+// AES-GCM nonce. On FreeRTOS/ESP32, drive a session from a single task or guard
+// it with your own mutex. Distinct sessions on distinct usmp_t objects are
+// independent and may run on separate threads.
 
 // Connection API ────────────────────────────────────────────────────────────
 

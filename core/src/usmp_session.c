@@ -19,22 +19,49 @@ static const char* TAG = "USMP_SESSION";
 
 // Helpers ───────────────────────────────────────────────────────────────────
 
+/* The AES-GCM AAD is exactly the 10-byte frame header (all fields but the CRC). */
 static void build_aad(uint16_t magic, uint8_t version, uint8_t type, uint32_t seq, uint16_t length,
                       uint8_t* aad) {
-  aad[0] = (uint8_t)(magic & 0xFF);
-  aad[1] = (uint8_t)((magic >> 8) & 0xFF);
-  aad[2] = version;
-  aad[3] = type;
-  aad[4] = (uint8_t)(seq & 0xFF);
-  aad[5] = (uint8_t)((seq >> 8) & 0xFF);
-  aad[6] = (uint8_t)((seq >> 16) & 0xFF);
-  aad[7] = (uint8_t)((seq >> 24) & 0xFF);
-  aad[8] = (uint8_t)(length & 0xFF);
-  aad[9] = (uint8_t)((length >> 8) & 0xFF);
+  usmp_serialize_header(magic, version, type, seq, length, aad);
 }
 
-// Send an encrypted control frame (PING, PONG, BYE) with empty plaintext ───
-static int send_control(usmp_t* ctx, uint8_t type) {
+/*
+ * Deterministic 12-byte AES-GCM nonce: seq(4, little-endian) || session_id[0..7].
+ * Unique per (key, seq) within a session, so the (key, nonce) pair is never reused.
+ */
+static void build_nonce(uint32_t seq, const uint8_t* session_id,
+                        uint8_t nonce[USMP_GCM_NONCE_LEN]) {
+  nonce[0] = (uint8_t)(seq & 0xFF);
+  nonce[1] = (uint8_t)((seq >> 8) & 0xFF);
+  nonce[2] = (uint8_t)((seq >> 16) & 0xFF);
+  nonce[3] = (uint8_t)((seq >> 24) & 0xFF);
+  memcpy(nonce + 4, session_id, 8);
+}
+
+/*
+ * Encrypt one plaintext chunk into a single frame and transmit it, advancing
+ * tx_seq. Shared by usmp_send() (DATA / DATA_FRAG) and send_control() (PING,
+ * PONG, BYE — empty plaintext). Pass data=NULL, len=0 for a control frame:
+ * the AES-GCM output is then just nonce(12) || tag(16) = 28 bytes.
+ *
+ * Returns: 0 on success, -2 if encryption failed, -1 if the transport send
+ * failed. The two error codes let callers log a precise diagnostic.
+ */
+static int emit_frame(usmp_t* ctx, uint8_t type, const uint8_t* data, uint16_t len) {
+  /*
+   * TX sequence-exhaustion guard for EVERY frame type. usmp_send() pre-checks
+   * the whole (possibly multi-fragment) message, but send_control() reaches this
+   * function directly, so this is the single choke point that keeps tx_seq from
+   * wrapping back to 0 and reusing a nonce from the start of the session under
+   * the unchanged key. 0xFFFFFFFF is the reserved terminal sentinel the RX side
+   * rejects, so the last usable sequence number is 0xFFFFFFFE.
+   */
+  if (ctx->tx_seq >= 0xFFFFFFFF) {
+    USMP_LOGE(TAG, "TX sequence overflowed");
+    ctx->established = false;
+    return -1;
+  }
+
   usmp_packet_t pkt;
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
@@ -42,24 +69,16 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   pkt.type = type;
   pkt.seq = ctx->tx_seq;
 
-  /*
-   * Encrypted payload for a control frame is just the AES-GCM output for
-   * empty plaintext: nonce(12) || tag(16) = 28 bytes total.
-   */
-  uint16_t enc_length = 12 + USMP_GCM_TAG_LEN;  // nonce + tag, empty plaintext
+  uint16_t enc_length = USMP_GCM_NONCE_LEN + len + USMP_GCM_TAG_LEN;
   uint8_t aad[10];
   build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
 
   uint8_t nonce[USMP_GCM_NONCE_LEN];
-  nonce[0] = (uint8_t)(pkt.seq & 0xFF);
-  nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
-  nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
-  nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
-  memcpy(nonce + 4, ctx->session_id, 8);
+  build_nonce(pkt.seq, ctx->session_id, nonce);
 
   size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), NULL, 0, pkt.payload, &out_len) != 0)
-    return -1;
+  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data, len, pkt.payload, &out_len) != 0)
+    return -2;
 
   pkt.length = (uint16_t)out_len;
 
@@ -67,11 +86,38 @@ static int send_control(usmp_t* ctx, uint8_t type) {
   uint16_t tx_len = 0;
   usmp_build_packet(&pkt, tx_buf, &tx_len);
 
-  if (ctx->transport.send(&ctx->transport, tx_buf, tx_len) < 0) return -1;
-
+  /*
+   * Reserve the sequence number BEFORE handing the frame to the transport.
+   * The nonce is seq||session_id[0..7] under a fixed key, so a seq must never be
+   * reused. Transmit-then-fail is a real failure mode — the UDP ARQ retransmits
+   * the ciphertext up to 5 times before it returns -1 — which means the frame is
+   * already on the wire when send() reports failure. Advancing tx_seq only on
+   * success would let the next send reuse this seq with different plaintext:
+   * identical (key, nonce), which breaks AES-GCM confidentiality and leaks the
+   * GHASH authentication key. Burn the seq up front, then drop the session on
+   * failure so a re-handshake installs a fresh key/session_id before any resend.
+   */
   ctx->tx_seq++;
   ctx->last_tx_ms = usmp_port_millis();
+
+  if (ctx->transport.send(&ctx->transport, tx_buf, tx_len) < 0) {
+    ctx->established = false;
+    return -1;
+  }
   return 0;
+}
+
+// Send an encrypted control frame (PING, PONG, BYE) with empty plaintext ───
+static int send_control(usmp_t* ctx, uint8_t type) { return emit_frame(ctx, type, NULL, 0); }
+
+/*
+ * Best-effort graceful BYE, used by usmp_close(). Lets the peer release the
+ * session immediately instead of waiting for its inactivity watchdog. The
+ * caller owns teardown regardless, so the return value is advisory only.
+ */
+int usmp_send_bye(usmp_t* ctx) {
+  if (!ctx || !ctx->established || !ctx->transport.send) return -1;
+  return send_control(ctx, USMP_TYPE_BYE);
 }
 
 // Public API ────────────────────────────────────────────────────────────────
@@ -101,48 +147,19 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
       chunk_len = USMP_MAX_DATA_LEN;
     }
 
-    usmp_packet_t pkt;
-    memset(&pkt, 0, sizeof(pkt));
+    uint8_t type = (offset + chunk_len < len) ? USMP_TYPE_DATA_FRAG : USMP_TYPE_DATA;
+    uint32_t frame_seq = ctx->tx_seq;  // captured before emit_frame advances it
 
-    pkt.magic = USMP_MAGIC;
-    pkt.version = USMP_VERSION;
-    pkt.type = (offset + chunk_len < len) ? USMP_TYPE_DATA_FRAG : USMP_TYPE_DATA;
-    pkt.seq = ctx->tx_seq;
-
-    uint16_t enc_length = 12 + chunk_len + USMP_GCM_TAG_LEN;
-    uint8_t aad[10];
-    build_aad(pkt.magic, pkt.version, pkt.type, pkt.seq, enc_length, aad);
-
-    uint8_t nonce[USMP_GCM_NONCE_LEN];
-    nonce[0] = (uint8_t)(pkt.seq & 0xFF);
-    nonce[1] = (uint8_t)((pkt.seq >> 8) & 0xFF);
-    nonce[2] = (uint8_t)((pkt.seq >> 16) & 0xFF);
-    nonce[3] = (uint8_t)((pkt.seq >> 24) & 0xFF);
-    memcpy(nonce + 4, ctx->session_id, 8);
-
-    size_t out_len = 0;
-    if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data + offset, chunk_len,
-                         pkt.payload, &out_len) != 0) {
-      USMP_LOGE(TAG, "Encryption failed");
+    int rc = emit_frame(ctx, type, data + offset, chunk_len);
+    if (rc != 0) {
+      USMP_LOGE(TAG, rc == -2 ? "Encryption failed" : "Send failed");
       return -1;
     }
 
-    pkt.length = (uint16_t)out_len;
-
-    uint8_t tx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
-    uint16_t tx_len = 0;
-    usmp_build_packet(&pkt, tx_buf, &tx_len);
-
-    if (ctx->transport.send(&ctx->transport, tx_buf, tx_len) < 0) {
-      USMP_LOGE(TAG, "Send failed");
-      return -1;
-    }
-
-    snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u type=0x%02x", (unsigned long)ctx->tx_seq,
-             chunk_len, pkt.type);
+    snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u type=0x%02x", (unsigned long)frame_seq,
+             chunk_len, type);
     USMP_LOGI(TAG, _msg);
 
-    ctx->tx_seq++;
     offset += chunk_len;
 
     if (len == 0) {
@@ -150,7 +167,6 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     }
   }
 
-  ctx->last_tx_ms = usmp_port_millis();
   return 0;
 }
 
@@ -170,6 +186,18 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
   for (int ctrl_count = 0;;) {
     if (attempts++ >= 10) {
       USMP_LOGW(TAG, "Max receive attempts reached per call — possible flood");
+      if (frame_count > 0) {
+        /*
+         * We already consumed part of a fragmented message and advanced the
+         * rx state. Returning 0 here would look like "no data" while silently
+         * dropping the partial payload, and the next call would try to
+         * reassemble from the middle of the message — corrupt data. Fail hard
+         * so the caller reconnects instead.
+         */
+        USMP_LOGE(TAG, "Incomplete reassembly after max attempts — session desynced");
+        ctx->established = false;
+        return -1;
+      }
       return 0;
     }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
@@ -214,6 +242,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING || pkt.type == USMP_TYPE_BYE) {
       if (bytes_written > 0) {
         USMP_LOGE(TAG, "Protocol error: control frame during fragmentation");
+        if (ctx->transport.confirm_authenticated)
+          continue;  // UDP: drop spoofed frame, keep reading
         return -1;
       }
       dec_dest = dummy_out;
@@ -228,17 +258,20 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     } else {
       snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
       USMP_LOGE(TAG, _msg);
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
 
     /* Verify payload length is valid for AES-GCM (contains at least nonce + tag) */
     if (pkt.length < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN) {
       USMP_LOGE(TAG, "Payload too short");
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
     uint16_t plain_len = pkt.length - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
     if (plain_len > dec_max) {
       USMP_LOGE(TAG, "Buffer too small for payload");
+      if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
       return -1;
     }
 
@@ -296,7 +329,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     /* Handle control frames and loop back for the next frame */
     if (pkt.type == USMP_TYPE_PONG) {
       USMP_LOGI(TAG, "PONG received");
-      if (++ctrl_count >= USMP_MAX_CTRL_FRAMES) {
+      if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
         return -1;
       }
@@ -312,7 +345,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
         ctx->established = false;
         return -1;
       }
-      if (++ctrl_count >= USMP_MAX_CTRL_FRAMES) {
+      if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
         return -1;
       }

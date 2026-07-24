@@ -22,19 +22,24 @@ uint16_t usmp_crc16(const uint8_t* data, uint16_t len) {
   return usmp_crc16_step(0xFFFF, data, len);
 }
 
+void usmp_serialize_header(uint16_t magic, uint8_t version, uint8_t type, uint32_t seq,
+                           uint16_t length, uint8_t out[10]) {
+  out[0] = (uint8_t)(magic & 0xFF);
+  out[1] = (uint8_t)((magic >> 8) & 0xFF);
+  out[2] = version;
+  out[3] = type;
+  out[4] = (uint8_t)(seq & 0xFF);
+  out[5] = (uint8_t)((seq >> 8) & 0xFF);
+  out[6] = (uint8_t)((seq >> 16) & 0xFF);
+  out[7] = (uint8_t)((seq >> 24) & 0xFF);
+  out[8] = (uint8_t)(length & 0xFF);
+  out[9] = (uint8_t)((length >> 8) & 0xFF);
+}
+
 // CRC over header bytes [0..9] + payload (matches Python SDK)
 static uint16_t compute_crc(usmp_packet_t* pkt) {
   uint8_t header[10];
-  header[0] = (uint8_t)(pkt->magic & 0xFF);
-  header[1] = (uint8_t)((pkt->magic >> 8) & 0xFF);
-  header[2] = pkt->version;
-  header[3] = pkt->type;
-  header[4] = (uint8_t)(pkt->seq & 0xFF);
-  header[5] = (uint8_t)((pkt->seq >> 8) & 0xFF);
-  header[6] = (uint8_t)((pkt->seq >> 16) & 0xFF);
-  header[7] = (uint8_t)((pkt->seq >> 24) & 0xFF);
-  header[8] = (uint8_t)(pkt->length & 0xFF);
-  header[9] = (uint8_t)((pkt->length >> 8) & 0xFF);
+  usmp_serialize_header(pkt->magic, pkt->version, pkt->type, pkt->seq, pkt->length, header);
 
   uint16_t crc = usmp_crc16_step(0xFFFF, header, 10);
   crc = usmp_crc16_step(crc, pkt->payload, pkt->length);
@@ -44,17 +49,8 @@ static uint16_t compute_crc(usmp_packet_t* pkt) {
 int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len) {
   pkt->crc = compute_crc(pkt);
 
-  // Write header manually (packed, little-endian)
-  out[0] = (uint8_t)(pkt->magic & 0xFF);
-  out[1] = (uint8_t)((pkt->magic >> 8) & 0xFF);
-  out[2] = pkt->version;
-  out[3] = pkt->type;
-  out[4] = (uint8_t)(pkt->seq & 0xFF);
-  out[5] = (uint8_t)((pkt->seq >> 8) & 0xFF);
-  out[6] = (uint8_t)((pkt->seq >> 16) & 0xFF);
-  out[7] = (uint8_t)((pkt->seq >> 24) & 0xFF);
-  out[8] = (uint8_t)(pkt->length & 0xFF);
-  out[9] = (uint8_t)((pkt->length >> 8) & 0xFF);
+  // Write header (packed, little-endian) followed by the trailing CRC
+  usmp_serialize_header(pkt->magic, pkt->version, pkt->type, pkt->seq, pkt->length, out);
   out[10] = (uint8_t)(pkt->crc & 0xFF);
   out[11] = (uint8_t)((pkt->crc >> 8) & 0xFF);
 

@@ -53,17 +53,17 @@ jobs:
           ./scripts/build-esp32-component.sh --in-place
 
       - name: Create GitHub Release
+        uses: softprops/action-gh-release@7b4da11513bf3f43f9999e90eabced41ab8bb048 # v2.2.0
+        with:
+          files: |
+            usmp-*-arduino.zip
+            dist/*.whl
+            dist/*.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create ${{ github.ref_name }} \
-            --title "${{ github.ref_name }}" \
-            --generate-notes || true
-          gh release upload ${{ github.ref_name }} \
-            usmp-*-arduino.zip \
-            dist/*.whl \
-            dist/*.tar.gz \
-            --clobber
 
       - name: Publish Python package to PyPI
         run: |

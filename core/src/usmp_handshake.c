@@ -19,6 +19,7 @@
 static const char* TAG = "USMP_HS";
 
 #define PUB_KEY_LEN 32
+#define USMP_COOKIE_LEN 16  // HELLO_RETRY anti-DoS cookie length
 
 static int derive_session_keys(const uint8_t* shared_secret, size_t secret_len,
                                const uint8_t* nonce, size_t nonce_len, const uint8_t* pub_c,
@@ -71,6 +72,42 @@ static int compute_hmac(const uint8_t* psk, size_t psk_len, const uint8_t* data,
 done:
   mbedtls_md_free(&ctx);
   return ret;
+}
+
+/*
+ * Compute the PSK-keyed authentication HMAC over a handshake transcript.
+ *
+ * Transcript layout (single source of truth for both the client HELLO_ACK and
+ * the server SESSION_OK HMACs — they differ only in `type` and the id field):
+ *
+ *   magic(2 LE) || version(1) || type(1) || nonce(32) || id_field(id_len) ||
+ *   pub_c(32) || pub_s(32)
+ *
+ * `id_field` is the 6-byte device_id for the client HMAC and the 16-byte
+ * session_id for the server HMAC.
+ */
+static int compute_transcript_hmac(const uint8_t* psk, size_t psk_len, uint8_t type,
+                                   const uint8_t* nonce, const uint8_t* id_field, size_t id_len,
+                                   const uint8_t* pub_c, const uint8_t* pub_s, uint8_t* out) {
+  /* Buffer sized for the larger (session_id) variant; `off` is the true length. */
+  uint8_t input[4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
+  size_t off = 0;
+
+  input[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+  input[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+  input[2] = USMP_VERSION;
+  input[3] = type;
+  off = 4;
+  memcpy(input + off, nonce, USMP_NONCE_LEN);
+  off += USMP_NONCE_LEN;
+  memcpy(input + off, id_field, id_len);
+  off += id_len;
+  memcpy(input + off, pub_c, PUB_KEY_LEN);
+  off += PUB_KEY_LEN;
+  memcpy(input + off, pub_s, PUB_KEY_LEN);
+  off += PUB_KEY_LEN;
+
+  return compute_hmac(psk, psk_len, input, off, out);
 }
 
 int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
@@ -190,7 +227,7 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   }
 
   if (pkt.type == USMP_TYPE_HELLO_RETRY) {
-    if (pkt.length != 16) {
+    if (pkt.length != USMP_COOKIE_LEN) {
       USMP_LOGE(TAG, "Bad HELLO_RETRY length");
       goto cleanup;
     }
@@ -199,12 +236,21 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
     pkt.magic = USMP_MAGIC;
     pkt.version = USMP_VERSION;
     pkt.type = USMP_TYPE_HELLO;
-    pkt.seq = 0;
-    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + 16;
+    /*
+     * Distinct seq per handshake write (HELLO=0, cookie-retry HELLO=1,
+     * HELLO_ACK=2). The retry HELLO is otherwise byte-identical to the initial
+     * HELLO; on UDP the ARQ matches an (unauthenticated, plaintext) handshake
+     * UTACK by (type, seq) only, so a shared seq lets a stale ACK for the first
+     * HELLO satisfy the retry's wait — and lets an off-path attacker forge one.
+     * Mirrors the Python client (Finding 13).
+     */
+    pkt.seq = 1;
+    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + USMP_COOKIE_LEN;
     memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
     memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
     // Copy cookie from previous packet's payload
-    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE, 16);
+    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE,
+           USMP_COOKIE_LEN);
 
     len = usmp_build_packet(&pkt, tx_buf, NULL);
     if (transport->send(transport, tx_buf, (size_t)len) < 0) {
@@ -279,27 +325,17 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
 
   // Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
   uint8_t hmac_client[USMP_HMAC_LEN];
-  {
-    uint8_t input[4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
-    input[0] = (uint8_t)(USMP_MAGIC & 0xFF);
-    input[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
-    input[2] = USMP_VERSION;
-    input[3] = USMP_TYPE_HELLO_ACK;
-    memcpy(input + 4, nonce, USMP_NONCE_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN, session->device_id, USMP_DEVICE_ID_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
-    if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_client) != 0) {
-      USMP_LOGE(TAG, "Client HMAC computation failed");
-      goto cleanup;
-    }
+  if (compute_transcript_hmac(psk, psk_len, USMP_TYPE_HELLO_ACK, nonce, session->device_id,
+                              USMP_DEVICE_ID_LEN, pub_c, pub_s, hmac_client) != 0) {
+    USMP_LOGE(TAG, "Client HMAC computation failed");
+    goto cleanup;
   }
 
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
   pkt.version = USMP_VERSION;
   pkt.type = USMP_TYPE_HELLO_ACK;
-  pkt.seq = 0;
+  pkt.seq = 2;  // distinct handshake-write seq; see the cookie-retry note above (Finding 13)
   pkt.length = USMP_HMAC_LEN;
   memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
 
@@ -330,20 +366,10 @@ int usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
 
   // Verify server HMAC ────────────────────────────────────────────────────
   uint8_t hmac_server_expected[USMP_HMAC_LEN];
-  {
-    uint8_t input[4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN + PUB_KEY_LEN];
-    input[0] = (uint8_t)(USMP_MAGIC & 0xFF);
-    input[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
-    input[2] = USMP_VERSION;
-    input[3] = USMP_TYPE_SESSION_OK;
-    memcpy(input + 4, nonce, USMP_NONCE_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN, session->session_id, USMP_SESSION_ID_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN, pub_c, PUB_KEY_LEN);
-    memcpy(input + 4 + USMP_NONCE_LEN + USMP_SESSION_ID_LEN + PUB_KEY_LEN, pub_s, PUB_KEY_LEN);
-    if (compute_hmac(psk, psk_len, input, sizeof(input), hmac_server_expected) != 0) {
-      USMP_LOGE(TAG, "Server HMAC computation failed");
-      goto cleanup;
-    }
+  if (compute_transcript_hmac(psk, psk_len, USMP_TYPE_SESSION_OK, nonce, session->session_id,
+                              USMP_SESSION_ID_LEN, pub_c, pub_s, hmac_server_expected) != 0) {
+    USMP_LOGE(TAG, "Server HMAC computation failed");
+    goto cleanup;
   }
 
   if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, USMP_HMAC_LEN) != 0) {

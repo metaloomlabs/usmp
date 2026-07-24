@@ -141,10 +141,15 @@ void onReconnect(void (*cb)());
 void onMessage(void (*cb)(const uint8_t *data, size_t len));
 ```
 
-* **`onConnect`**: Triggered when the initial connection and handshake succeed.
-* **`onDisconnect`**: Triggered when the connection drops.
-* **`onReconnect`**: Triggered when a reconnection handshake completes.
+* **`onConnect`**: Triggered on **every** session establishment — the initial `begin()` **and** every successful reconnect. Use it for work that must run whenever a live session exists (e.g. re-announcing device state to the gateway).
+* **`onDisconnect`**: Triggered when a live session is lost (send/receive/keepalive failure, or the gateway sends `BYE`).
+* **`onReconnect`**: Triggered **additionally** (just before `onConnect`) when a reconnection handshake completes. Use it for reconnect-specific work.
 * **`onMessage`**: Triggered when a new decrypted message arrives.
+
+> [!NOTE]
+> A reconnect fires **both** `onReconnect` and `onConnect` (in that order). If you call `send()` in both handlers, a reconnect sends from both — this is intentional, not a bug.
+
+<!-- -->
 
 > [!IMPORTANT]
 > **Do Not Mix Callbacks and Polling**
@@ -173,3 +178,14 @@ USMP::UDP(const char *gateway_ip, uint16_t port = 9000);
 
 * Configures a connectionless UDP socket connection.
 * To let USMP manage your Wi-Fi, chain `.wifi("SSID", "Password")`.
+
+---
+
+## Advanced: Receive Timeouts
+
+Once a session is established, receives are bounded so `maintain()` can never block indefinitely on a stalled peer or a stray packet. The bounds are compile-time overridable via `-D` build flags (e.g. in `platformio.ini` `build_flags`):
+
+* **`USMP_UDP_RECV_TIMEOUT_MS`** (default `50`) — per-attempt UDP receive wait. The core retries up to ~10× per read, so the effective budget for an in-flight fragment is ~10× this value (~500 ms).
+* **`USMP_TCP_RECV_TIMEOUT_MS`** (default `2000`) — TCP no-progress stall timeout; trips only when zero bytes arrive for this long mid-frame, so a large-but-flowing frame is never cut off.
+
+Handshake receives are unbounded regardless — they must wait for the gateway's reply. Raise these on high-latency links; lower them for snappier failure detection.

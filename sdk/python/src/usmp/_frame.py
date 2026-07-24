@@ -1,5 +1,5 @@
-import asyncio
 import struct
+from typing import Any
 
 from .errors import CRCError, FrameError, MagicError, PayloadError, VersionError
 from .types import (
@@ -88,10 +88,17 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
         if crc != expected_crc:
             raise CRCError(f"CRC mismatch: got 0x{crc:04X}, expected 0x{expected_crc:04X}")
 
+    # Unknown/out-of-range type byte is malformed input, not an internal fault —
+    # surface it as a FrameError so callers handle it with the other protocol errors.
+    try:
+        packet_type = PacketType(type_)
+    except ValueError as e:
+        raise FrameError(f"Unknown packet type: {type_}") from e
+
     return USMPFrame(
         magic=magic,
         version=version,
-        type=PacketType(type_),
+        type=packet_type,
         seq=seq,
         length=length,
         crc=crc,
@@ -99,7 +106,7 @@ def decode_frame(data: bytes, verify_crc: bool = True) -> USMPFrame:
     )
 
 
-async def read_frame(reader: asyncio.StreamReader, verify_crc: bool = True) -> USMPFrame:
+async def read_frame(reader: Any, verify_crc: bool = True) -> USMPFrame:
     """
     Read exactly one USMP frame from an asyncio StreamReader.
     Reads header first, then exact payload bytes — handles TCP stream fragmentation.
@@ -120,7 +127,7 @@ async def read_frame(reader: asyncio.StreamReader, verify_crc: bool = True) -> U
 
 
 async def write_frame(
-    writer: asyncio.StreamWriter,
+    writer: Any,
     type_: PacketType,
     payload: bytes,
     seq: int = 0,
