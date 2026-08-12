@@ -58,7 +58,7 @@ Every single session is hardened:
 ## Supported Platforms
 
 | Platform | Status | Getting Started |
-|:---|:---|:---|
+| :--- | :--- | :--- |
 | **ESP32 (ESP-IDF v5+)** | Production ready | [ESP-IDF Port Guide](ports/usmp-esp32/README.md) |
 | **ESP32 (Arduino)** | Production ready | [Arduino Reference](ports/usmp-arduino/) |
 | **Python 3.11+** | Production ready | [Python SDK Reference](sdk/python/README.md) |
