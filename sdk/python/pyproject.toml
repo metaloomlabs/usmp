@@ -32,7 +32,7 @@ classifiers = [
 [project.urls]
 Homepage = "https://usmp.metaloom.in"
 Repository = "https://github.com/metaloomlabs/usmp"
-Documentation = "https://usmp.metaloom.in/docs"
+Documentation = "https://github.com/metaloomlabs/usmp"
 "Bug Tracker" = "https://github.com/metaloomlabs/usmp/issues"
 
 
