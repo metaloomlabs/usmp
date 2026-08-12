@@ -12,9 +12,6 @@ members = ["sdk/python"]
 [tool.uv.sources]
 usmp = { workspace = true }
 
-[dependency-groups]
-dev = ["mkdocs-material>=9.7.6", "mkdocs-minify-plugin>=0.8.0"]
-
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 

@@ -6,7 +6,7 @@ readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "winterx64", email = "winterx64.work@gmail.com" }]
 requires-python = ">=3.11,<3.14"
-dependencies = ["cryptography>=42.0.0,<49.0.0"]
+dependencies = ["cryptography>=42.0.0,<51.0.0"]
 keywords = [
     "iot",
     "esp32",
@@ -47,12 +47,7 @@ module-name = "usmp"
 asyncio_mode = "auto"
 
 [dependency-groups]
-dev = [
-    "pytest>=9.0.3",
-    "pytest-asyncio>=1.3.0",
-    "ruff>=0.3.0",
-    "mypy>=1.9.0",
-]
+dev = ["pytest>=9.0.3", "pytest-asyncio>=1.3.0", "ruff>=0.3.0", "mypy>=1.9.0"]
 
 [tool.ruff]
 line-length = 100
@@ -66,7 +61,20 @@ ignore = ["E501", "S101"]
 max-complexity = 32
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101", "SLF001", "ANN", "BLE001", "S110", "B017", "RUF059", "S603", "S607", "UP015", "S104", "UP022"]
+"tests/**" = [
+    "S101",
+    "SLF001",
+    "ANN",
+    "BLE001",
+    "S110",
+    "B017",
+    "RUF059",
+    "S603",
+    "S607",
+    "UP015",
+    "S104",
+    "UP022",
+]
 
 
 [tool.mypy]

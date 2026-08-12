@@ -58,11 +58,11 @@ Every single session is hardened:
 ## Supported Platforms
 
 | Platform | Status | Getting Started |
-|:---|:---|:---|
-| **ESP32 (ESP-IDF v5+)** | Production ready | [ESP-IDF Port Guide](docs/ports/esp32.md) |
-| **ESP32 (Arduino)** | Production ready | [Arduino Reference](docs/ports/arduino.md) |
-| **Python 3.11+** | Production ready | [Python SDK Reference](docs/sdk/python.md) |
-| **STM32** | Planned | [Porting Guide](docs/ports/porting-guide.md) |
+| :--- | :--- | :--- |
+| **ESP32 (ESP-IDF v5+)** | Production ready | [ESP-IDF Port Guide](ports/usmp-esp32/README.md) |
+| **ESP32 (Arduino)** | Production ready | [Arduino Reference](ports/usmp-arduino/) |
+| **Python 3.11+** | Production ready | [Python SDK Reference](sdk/python/README.md) |
+| **STM32** | Planned | - |
 | **Linux** | Planned | - |
 
 ---
@@ -186,12 +186,11 @@ void loop() {
 
 ## Detailed Documentation
 
-To view the complete, tutorial-based guide covering installation, TCP, UDP, and production hardening, build the MkDocs site locally or view the docs folder:
+For examples and component guides:
 
-* [Installation & Setup](docs/getting-started/installation.md)
-* [Your First TCP Tunnel](docs/getting-started/tutorial-tcp.md)
-* [Going Connectionless (UDP)](docs/getting-started/tutorial-udp.md)
-* [Production Hardening Guide](docs/getting-started/production-hardening.md)
+* [Python SDK Guide](sdk/python/README.md)
+* [ESP32 Component Guide](ports/usmp-esp32/README.md)
+* [Example Projects](examples/README.md)
 
 ---
 
