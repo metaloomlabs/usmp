@@ -2,7 +2,20 @@
 
 #include <string.h>
 
+#if defined(MBEDTLS_CONFIG_FILE)
+#include MBEDTLS_CONFIG_FILE
+#elif defined(__has_include)
+  #if __has_include("mbedtls/config.h")
+    #include "mbedtls/config.h"
+  #elif __has_include("mbedtls/mbedtls_config.h")
+    #include "mbedtls/mbedtls_config.h"
+  #endif
+#endif
+
+#if defined(MBEDTLS_CHACHAPOLY_C)
 #include "mbedtls/chachapoly.h"
+#endif
+
 #include "mbedtls/constant_time.h"
 #include "mbedtls/gcm.h"
 #include "usmp_port.h"
@@ -98,6 +111,8 @@ done:
   return ret;
 }
 
+#if defined(MBEDTLS_CHACHAPOLY_C)
+
 int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
                                    const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
   mbedtls_chachapoly_context cp;
@@ -158,6 +173,22 @@ done:
   mbedtls_chachapoly_free(&cp);
   return ret;
 }
+
+#else
+
+int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                                   const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
+  (void)key; (void)nonce; (void)aad; (void)aad_len; (void)plaintext; (void)plain_len; (void)out; (void)out_len;
+  return -1;
+}
+
+int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
+                                   const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len) {
+  (void)key; (void)nonce; (void)aad; (void)aad_len; (void)nonce_ct_tag; (void)nct_len; (void)out; (void)out_len;
+  return -1;
+}
+
+#endif
 
 int usmp_crypto_encrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
                         const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
