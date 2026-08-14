@@ -4,7 +4,7 @@ Integration tests — real USMPServer + USMPClient over loopback UDP.
 """
 
 import asyncio
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -144,7 +144,7 @@ async def test_udp_client_reboot_no_lockout():
             super().__init__(*args, **kwargs)
             self._local_port = local_port
 
-        async def connect(self) -> None:
+        async def connect(self, timeout: float = 10.0) -> None:
             if self._local_port:
                 from usmp._handshake import client_handshake
                 from usmp.transport.udp import ClientUDPProtocol
@@ -1278,3 +1278,47 @@ async def test_disconnect_survives_peer_already_gone():
 
     reply = await _run(server, client_coro())
     assert reply == b"ACK:hello"
+
+
+@pytest.mark.asyncio
+async def test_udp_adaptive_rtt_estimation():
+    """Verify that UDPStream initializes RTT state and updates srtt/rttvar/rto on ACKs."""
+    import struct
+
+    class DummyTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[tuple[Any, Any]] = []
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
+            self.sent.append((data, addr))
+
+        def close(self) -> None:
+            pass
+
+    stream = UDPStream(DummyTransport(), (HOST, 9999), is_server=False)
+    assert stream._srtt == 0.2
+    assert stream._rttvar == 0.1
+    assert stream._rto == 0.5
+
+    # Simulate sending a type=1 (HELLO), seq=0 packet
+    header = struct.pack("<HBBII", 0xABCD, 2, 1, 0, 0)
+    stream.write(header)
+
+    async def respond_utack():
+        await asyncio.sleep(0.01)
+        # UTACK for seq=0, type=1
+        utack = b"\xac\xac\x01\x00\x00\x00\x00"
+        stream.feed_packet(utack)
+
+    task = asyncio.create_task(respond_utack())
+    await stream.drain()
+    await task
+
+    # RTT should have updated from the sample
+    assert stream._srtt < 0.2
+    assert 0.1 <= stream._rto <= 5.0
+
+
+
+

@@ -65,6 +65,33 @@ def derive_session_keys(
         del shared_secret
 
 
+def derive_rekey_keys(
+    is_initiator: bool,
+    tx_key: bytes,
+    rx_key: bytes,
+    session_id: bytes,
+    salt: bytes,
+) -> tuple[bytes, bytes]:
+    """
+    Derive two new directional session keys during in-band rekeying via HKDF-SHA256.
+
+    Returns (new_tx_key, new_rx_key).
+    """
+    secret = (tx_key + rx_key) if is_initiator else (rx_key + tx_key)
+    info = b"usmp-rekey" + session_id
+    key_material = HKDF(
+        algorithm=hashes.SHA256(),
+        length=USMP_SESSION_KEY_LEN * 2,
+        salt=salt,
+        info=info,
+    ).derive(secret)
+
+    if is_initiator:
+        return key_material[:USMP_SESSION_KEY_LEN], key_material[USMP_SESSION_KEY_LEN:]
+    else:
+        return key_material[USMP_SESSION_KEY_LEN:], key_material[:USMP_SESSION_KEY_LEN]
+
+
 def build_aad(
     magic: int,
     version: int,

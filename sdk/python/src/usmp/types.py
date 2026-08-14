@@ -18,6 +18,7 @@ class PacketType(IntEnum):
     BYE = 0x08
     DATA_FRAG = 0x09
     HELLO_RETRY = 0x0A
+    REKEY = 0x0B
     ERROR = 0xFF
 
 
