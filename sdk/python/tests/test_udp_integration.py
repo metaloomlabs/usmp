@@ -1301,7 +1301,7 @@ async def test_udp_adaptive_rtt_estimation():
     # Simulate sending a type=1 (HELLO), seq=0 packet
     header = struct.pack("<HBBII", 0xABCD, 2, 1, 0, 0)
     stream.write(header)
-    
+
     async def respond_utack():
         await asyncio.sleep(0.01)
         # UTACK for seq=0, type=1
