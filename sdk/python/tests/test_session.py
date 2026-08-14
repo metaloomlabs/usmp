@@ -130,3 +130,28 @@ async def test_control_frame_during_fragmentation():
     with pytest.raises(SequenceError) as exc_info:
         await server_session.recv()
     assert "Protocol error: PING received during fragmentation" in str(exc_info.value)
+
+
+async def test_inband_rekeying():
+    server_session, client_session = await _connected_pair()
+
+    # Initial data exchange
+    await client_session.send(b"data before rekey")
+    assert await server_session.recv() == b"data before rekey"
+
+    old_client_tx = client_session._info.tx_key
+    old_server_rx = server_session._info.rx_key
+
+    # Perform in-band rekeying initiated by client
+    await client_session.rekey()
+    await client_session.send(b"data after rekey")
+
+    received = await server_session.recv()
+    assert received == b"data after rekey"
+
+    # Verify keys were rotated and sequences reset
+    assert client_session._info.tx_key != old_client_tx
+    assert server_session._info.rx_key != old_server_rx
+    assert client_session._info.tx_key == server_session._info.rx_key
+    assert client_session._info.tx_seq == 1
+    assert server_session._info.rx_seq == 1

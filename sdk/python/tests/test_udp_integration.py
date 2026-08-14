@@ -4,7 +4,7 @@ Integration tests — real USMPServer + USMPClient over loopback UDP.
 """
 
 import asyncio
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -144,7 +144,7 @@ async def test_udp_client_reboot_no_lockout():
             super().__init__(*args, **kwargs)
             self._local_port = local_port
 
-        async def connect(self) -> None:
+        async def connect(self, timeout: float = 10.0) -> None:
             if self._local_port:
                 from usmp._handshake import client_handshake
                 from usmp.transport.udp import ClientUDPProtocol
@@ -1285,12 +1285,15 @@ async def test_udp_adaptive_rtt_estimation():
     """Verify that UDPStream initializes RTT state and updates srtt/rttvar/rto on ACKs."""
     import struct
 
-    class DummyTransport:
-        def __init__(self):
-            self.sent = []
-        def sendto(self, data, addr):
+    class DummyTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[tuple[Any, Any]] = []
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
             self.sent.append((data, addr))
-        def close(self):
+
+        def close(self) -> None:
             pass
 
     stream = UDPStream(DummyTransport(), (HOST, 9999), is_server=False)

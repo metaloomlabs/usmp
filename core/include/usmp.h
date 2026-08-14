@@ -169,6 +169,13 @@ int usmp_ping(usmp_t* ctx);
  */
 int usmp_keepalive_tick(usmp_t* ctx);
 
+/**
+ * Perform in-band session rekeying. Rotates tx_key and rx_key using HKDF
+ * and resets tx_seq and rx_seq to 0 without tearing down the socket.
+ * Returns 0 on success, -1 on failure.
+ */
+int usmp_rekey(usmp_t* ctx);
+
 #ifdef __cplusplus
 }
 #endif

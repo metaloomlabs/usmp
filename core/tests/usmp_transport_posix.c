@@ -101,8 +101,8 @@ static int posix_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   if ((size_t)USMP_HEADER_SIZE + payload_len > max_len) return -1;
 
   while (received < (size_t)USMP_HEADER_SIZE + payload_len) {
-    ssize_t n =
-        recv(tcp->sock, (char*)buf + received, (size_t)USMP_HEADER_SIZE + payload_len - received, 0);
+    ssize_t n = recv(tcp->sock, (char*)buf + received,
+                     (size_t)USMP_HEADER_SIZE + payload_len - received, 0);
     if (n <= 0) return -1;
     received += (size_t)n;
   }
@@ -322,7 +322,8 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
             } else {
               int32_t delta = (int32_t)sample - (int32_t)udp->srtt;
               int32_t abs_delta = delta < 0 ? -delta : delta;
-              udp->rttvar = (uint32_t)((int32_t)udp->rttvar + (abs_delta - (int32_t)udp->rttvar) / 4);
+              udp->rttvar =
+                  (uint32_t)((int32_t)udp->rttvar + (abs_delta - (int32_t)udp->rttvar) / 4);
               udp->srtt = (uint32_t)((int32_t)udp->srtt + delta / 8);
             }
             uint32_t new_rto = udp->srtt + 4 * udp->rttvar;

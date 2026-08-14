@@ -638,6 +638,36 @@ void test_logging(void) {
   printf("  - Logging tests passed!\n");
 }
 
+static int dummy_send_rekey(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  (void)t;
+  (void)data;
+  (void)len;
+  return 0;
+}
+
+static void test_rekey(void) {
+  printf("Running rekey test...\n");
+  usmp_t session = {0};
+  session.established = true;
+  session.transport.send = dummy_send_rekey;
+  session.tx_seq = 100;
+  session.rx_seq = 100;
+  memset(session.session_id, 0x11, 16);
+  memset(session.tx_key, 0xAA, 32);
+  memset(session.rx_key, 0xBB, 32);
+
+  uint8_t old_tx[32];
+  memcpy(old_tx, session.tx_key, 32);
+
+  int ret = usmp_rekey(&session);
+  assert(ret == 0);
+  assert(session.tx_seq == 0);
+  assert(session.rx_seq == 0);
+  assert(memcmp(session.tx_key, old_tx, 32) != 0);
+
+  printf("  - Rekey test passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -652,6 +682,7 @@ int main(void) {
   test_control_seq_overflow();
   test_bye_on_close();
   test_logging();
+  test_rekey();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;
