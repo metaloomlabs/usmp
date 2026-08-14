@@ -14,8 +14,8 @@
 static const char* TAG = "USMP_SESSION";
 
 static int derive_rekey_keys(bool is_initiator, const uint8_t* tx_key, const uint8_t* rx_key,
-                             const uint8_t* session_id, const uint8_t* salt,
-                             uint8_t* out_tx_key, uint8_t* out_rx_key) {
+                             const uint8_t* session_id, const uint8_t* salt, uint8_t* out_tx_key,
+                             uint8_t* out_rx_key) {
   const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
   if (!md) return -1;
 
@@ -33,8 +33,8 @@ static int derive_rekey_keys(bool is_initiator, const uint8_t* tx_key, const uin
   memcpy(info + 10, session_id, USMP_SESSION_ID_LEN);
 
   uint8_t key_material[USMP_SESSION_KEY_LEN * 2];
-  int ret = mbedtls_hkdf(md, salt, 32, secret, sizeof(secret), info, sizeof(info),
-                         key_material, sizeof(key_material));
+  int ret = mbedtls_hkdf(md, salt, 32, secret, sizeof(secret), info, sizeof(info), key_material,
+                         sizeof(key_material));
   if (ret == 0) {
     if (is_initiator) {
       memcpy(out_tx_key, key_material, USMP_SESSION_KEY_LEN);
@@ -116,7 +116,8 @@ static int emit_frame(usmp_t* ctx, uint8_t type, const uint8_t* data, uint16_t l
   build_nonce(pkt.seq, ctx->session_id, nonce);
 
   size_t out_len = 0;
-  if (usmp_crypto_encrypt(ctx->cipher_suite, ctx->tx_key, nonce, aad, sizeof(aad), data, len, pkt.payload, &out_len) != 0)
+  if (usmp_crypto_encrypt(ctx->cipher_suite, ctx->tx_key, nonce, aad, sizeof(aad), data, len,
+                          pkt.payload, &out_len) != 0)
     return -2;
 
   pkt.length = (uint16_t)out_len;
@@ -335,8 +336,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_crypto_decrypt(ctx->cipher_suite, ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload, pkt.length,
-                         dec_dest, &out_len) != 0) {
+    if (usmp_crypto_decrypt(ctx->cipher_suite, ctx->rx_key, expected_nonce, aad, sizeof(aad),
+                            pkt.payload, pkt.length, dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
       if (ctx->transport.confirm_authenticated) {
         continue;  // UDP: drop unauthenticated packet and continue reading
@@ -517,8 +518,8 @@ int usmp_rekey(usmp_t* ctx) {
 
   uint8_t new_tx[USMP_SESSION_KEY_LEN];
   uint8_t new_rx[USMP_SESSION_KEY_LEN];
-  if (derive_rekey_keys(true, ctx->tx_key, ctx->rx_key, ctx->session_id, salt,
-                        new_tx, new_rx) != 0) {
+  if (derive_rekey_keys(true, ctx->tx_key, ctx->rx_key, ctx->session_id, salt, new_tx, new_rx) !=
+      0) {
     USMP_LOGE(TAG, "Failed to derive new keys for rekey");
     mbedtls_platform_zeroize(salt, sizeof(salt));
     return -1;

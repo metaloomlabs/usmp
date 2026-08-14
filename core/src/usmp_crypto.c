@@ -5,11 +5,11 @@
 #if defined(MBEDTLS_CONFIG_FILE)
 #include MBEDTLS_CONFIG_FILE
 #elif defined(__has_include)
-  #if __has_include("mbedtls/config.h")
-    #include "mbedtls/config.h"
-  #elif __has_include("mbedtls/mbedtls_config.h")
-    #include "mbedtls/mbedtls_config.h"
-  #endif
+#if __has_include("mbedtls/config.h")
+#include "mbedtls/config.h"
+#elif __has_include("mbedtls/mbedtls_config.h")
+#include "mbedtls/mbedtls_config.h"
+#endif
 #endif
 
 #if defined(MBEDTLS_CHACHAPOLY_C)
@@ -113,8 +113,9 @@ done:
 
 #if defined(MBEDTLS_CHACHAPOLY_C)
 
-int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                                   const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
+int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* plaintext, size_t plain_len,
+                                   uint8_t* out, size_t* out_len) {
   mbedtls_chachapoly_context cp;
   mbedtls_chachapoly_init(&cp);
 
@@ -130,7 +131,8 @@ int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, con
     in_ptr = dummy_in;
   }
 
-  if (mbedtls_chachapoly_encrypt_and_tag(&cp, plain_len, nonce, aad, aad_len, in_ptr, ct_out, tag_out) != 0)
+  if (mbedtls_chachapoly_encrypt_and_tag(&cp, plain_len, nonce, aad, aad_len, in_ptr, ct_out,
+                                         tag_out) != 0)
     goto done;
 
   memcpy(out, nonce, USMP_GCM_NONCE_LEN);
@@ -142,8 +144,9 @@ done:
   return ret;
 }
 
-int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                                   const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len) {
+int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* nonce_ct_tag, size_t nct_len,
+                                   uint8_t* out, size_t* out_len) {
   if (nct_len < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN) return -1;
   if (mbedtls_ct_memcmp(nonce_ct_tag, nonce, USMP_GCM_NONCE_LEN) != 0) return -1;
 
@@ -163,7 +166,8 @@ int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, con
   if (ct_ptr == NULL) ct_ptr = dummy;
   if (out_ptr == NULL) out_ptr = dummy;
 
-  if (mbedtls_chachapoly_auth_decrypt(&cp, cipher_len, nonce, aad, aad_len, tag, ct_ptr, out_ptr) != 0)
+  if (mbedtls_chachapoly_auth_decrypt(&cp, cipher_len, nonce, aad, aad_len, tag, ct_ptr, out_ptr) !=
+      0)
     goto done;
 
   *out_len = cipher_len;
@@ -176,32 +180,52 @@ done:
 
 #else
 
-int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                                   const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
-  (void)key; (void)nonce; (void)aad; (void)aad_len; (void)plaintext; (void)plain_len; (void)out; (void)out_len;
+int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* plaintext, size_t plain_len,
+                                   uint8_t* out, size_t* out_len) {
+  (void)key;
+  (void)nonce;
+  (void)aad;
+  (void)aad_len;
+  (void)plaintext;
+  (void)plain_len;
+  (void)out;
+  (void)out_len;
   return -1;
 }
 
-int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                                   const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len) {
-  (void)key; (void)nonce; (void)aad; (void)aad_len; (void)nonce_ct_tag; (void)nct_len; (void)out; (void)out_len;
+int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* nonce_ct_tag, size_t nct_len,
+                                   uint8_t* out, size_t* out_len) {
+  (void)key;
+  (void)nonce;
+  (void)aad;
+  (void)aad_len;
+  (void)nonce_ct_tag;
+  (void)nct_len;
+  (void)out;
+  (void)out_len;
   return -1;
 }
 
 #endif
 
-int usmp_crypto_encrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                        const uint8_t* plaintext, size_t plain_len, uint8_t* out, size_t* out_len) {
+int usmp_crypto_encrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* plaintext,
+                        size_t plain_len, uint8_t* out, size_t* out_len) {
   if (cipher_suite == 2) {
-    return usmp_chacha20_poly1305_encrypt(key, nonce, aad, aad_len, plaintext, plain_len, out, out_len);
+    return usmp_chacha20_poly1305_encrypt(key, nonce, aad, aad_len, plaintext, plain_len, out,
+                                          out_len);
   }
   return usmp_gcm_encrypt(key, nonce, aad, aad_len, plaintext, plain_len, out, out_len);
 }
 
-int usmp_crypto_decrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
-                        const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len) {
+int usmp_crypto_decrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_ct_tag,
+                        size_t nct_len, uint8_t* out, size_t* out_len) {
   if (cipher_suite == 2) {
-    return usmp_chacha20_poly1305_decrypt(key, nonce, aad, aad_len, nonce_ct_tag, nct_len, out, out_len);
+    return usmp_chacha20_poly1305_decrypt(key, nonce, aad, aad_len, nonce_ct_tag, nct_len, out,
+                                          out_len);
   }
   return usmp_gcm_decrypt(key, nonce, aad, aad_len, nonce_ct_tag, nct_len, out, out_len);
 }
