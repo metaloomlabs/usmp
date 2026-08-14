@@ -155,3 +155,15 @@ async def test_inband_rekeying():
     assert client_session._info.tx_key == server_session._info.rx_key
     assert client_session._info.tx_seq == 1
     assert server_session._info.rx_seq == 1
+
+
+async def test_chacha20_poly1305_session():
+    from usmp.types import CipherSuite
+
+    server_session, client_session = await _connected_pair()
+    server_session._info.cipher_suite = CipherSuite.CHACHA20_POLY1305
+    client_session._info.cipher_suite = CipherSuite.CHACHA20_POLY1305
+
+    await client_session.send(b"hello via chacha20 poly1305")
+    received = await server_session.recv()
+    assert received == b"hello via chacha20 poly1305"

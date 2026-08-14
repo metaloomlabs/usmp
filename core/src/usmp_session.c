@@ -116,7 +116,7 @@ static int emit_frame(usmp_t* ctx, uint8_t type, const uint8_t* data, uint16_t l
   build_nonce(pkt.seq, ctx->session_id, nonce);
 
   size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data, len, pkt.payload, &out_len) != 0)
+  if (usmp_crypto_encrypt(ctx->cipher_suite, ctx->tx_key, nonce, aad, sizeof(aad), data, len, pkt.payload, &out_len) != 0)
     return -2;
 
   pkt.length = (uint16_t)out_len;
@@ -335,7 +335,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_decrypt(ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload, pkt.length,
+    if (usmp_crypto_decrypt(ctx->cipher_suite, ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload, pkt.length,
                          dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
       if (ctx->transport.confirm_authenticated) {
