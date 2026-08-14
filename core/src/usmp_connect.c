@@ -150,7 +150,7 @@ void usmp_close(usmp_t* ctx) {
   USMP_LOGI(TAG, "Session closed");
 }
 
-const char* usmp_get_version(void) { return "1.1.0"; }
+const char* usmp_get_version(void) { return "1.2.0"; }
 
 static usmp_log_level_t g_usmp_log_level = USMP_LOG_LEVEL_ERROR;
 

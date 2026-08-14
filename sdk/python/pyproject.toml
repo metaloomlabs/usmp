@@ -1,12 +1,12 @@
 [project]
 name = "usmp"
-version = "1.1.0"
+version = "1.2.0"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 license = "Apache-2.0"
 authors = [{ name = "winterx64", email = "winterx64.work@gmail.com" }]
 requires-python = ">=3.11,<3.14"
-dependencies = ["cryptography>=42.0.0,<51.0.0"]
+dependencies = ["cryptography>=50.0.0"]
 keywords = [
     "iot",
     "esp32",

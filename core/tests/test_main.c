@@ -668,6 +668,32 @@ static void test_rekey(void) {
   printf("  - Rekey test passed!\n");
 }
 
+static void test_chacha20_poly1305(void) {
+  printf("Running ChaCha20-Poly1305 test...\n");
+  uint8_t key[32];
+  memset(key, 0x42, sizeof(key));
+  uint8_t nonce[12] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+  uint8_t aad[10] = {0xAB, 0xCD, 0x02, 0x05, 0, 0, 0, 0, 0, 10};
+  const char* plain_text = "ChaCha20-Poly1305 C test payload";
+  size_t plain_len = strlen(plain_text);
+
+  uint8_t cipher_buf[128];
+  size_t cipher_len = 0;
+  int ret = usmp_crypto_encrypt(USMP_CIPHER_CHACHA20_POLY1305, key, nonce, aad, sizeof(aad),
+                                (const uint8_t*)plain_text, plain_len, cipher_buf, &cipher_len);
+  assert(ret == 0);
+
+  uint8_t decrypted[128];
+  size_t dec_len = 0;
+  ret = usmp_crypto_decrypt(USMP_CIPHER_CHACHA20_POLY1305, key, nonce, aad, sizeof(aad),
+                            cipher_buf, cipher_len, decrypted, &dec_len);
+  assert(ret == 0);
+  assert(dec_len == plain_len);
+  assert(memcmp(decrypted, plain_text, plain_len) == 0);
+
+  printf("  - ChaCha20-Poly1305 test passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -683,6 +709,7 @@ int main(void) {
   test_bye_on_close();
   test_logging();
   test_rekey();
+  test_chacha20_poly1305();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;

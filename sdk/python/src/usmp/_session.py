@@ -138,6 +138,7 @@ class USMPSession:
                         magic=frame.magic,
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
+                        cipher_suite=self._info.cipher_suite,
                     )
                     self._last_recv = time.monotonic()
                 except (USMPError, struct.error) as e:
@@ -351,6 +352,7 @@ class USMPSession:
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             plaintext=plaintext,
+            cipher_suite=self._info.cipher_suite,
         )
         # Burn the sequence before the write, never after. write_frame can put the
         # frame on the wire and still raise — UDP's ARQ sends up to 5 times before

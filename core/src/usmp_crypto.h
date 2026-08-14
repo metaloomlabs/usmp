@@ -42,3 +42,19 @@ int usmp_gcm_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aa
  */
 int usmp_gcm_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad, size_t aad_len,
                      const uint8_t* nonce_ct_tag, size_t nct_len, uint8_t* out, size_t* out_len);
+
+int usmp_chacha20_poly1305_encrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* plaintext, size_t plain_len,
+                                   uint8_t* out, size_t* out_len);
+
+int usmp_chacha20_poly1305_decrypt(const uint8_t* key, const uint8_t* nonce, const uint8_t* aad,
+                                   size_t aad_len, const uint8_t* nonce_ct_tag, size_t nct_len,
+                                   uint8_t* out, size_t* out_len);
+
+int usmp_crypto_encrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* plaintext,
+                        size_t plain_len, uint8_t* out, size_t* out_len);
+
+int usmp_crypto_decrypt(uint8_t cipher_suite, const uint8_t* key, const uint8_t* nonce,
+                        const uint8_t* aad, size_t aad_len, const uint8_t* nonce_ct_tag,
+                        size_t nct_len, uint8_t* out, size_t* out_len);
