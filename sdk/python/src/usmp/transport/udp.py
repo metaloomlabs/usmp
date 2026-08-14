@@ -59,6 +59,11 @@ class UDPStream(USMPTransport):
         self._tx_key: bytes | None = None
         self._rx_key: bytes | None = None
 
+        # Jacobson/Karn RTT Estimation state
+        self._srtt: float = 0.2  # 200 ms default
+        self._rttvar: float = 0.1  # 100 ms default
+        self._rto: float = 0.5  # 500 ms default RTO
+
     @property
     def is_reliable(self) -> bool:
         return False
@@ -221,18 +226,29 @@ class UDPStream(USMPTransport):
             self._transport.sendto(data, self._remote_addr)
             return
 
-        # Stop-and-wait ARQ: retry up to 5 times with 500ms timeout
+        # Stop-and-wait ARQ: retry up to 5 times with adaptive RTT and exponential backoff
         self._ack_received_event.clear()
+        base_rto = self._rto
         for attempt in range(5):
+            timeout = min(5.0, max(0.05, base_rto * (2**attempt)))
+            start_time = time.monotonic()
             self._transport.sendto(data, self._remote_addr)
             try:
-                await asyncio.wait_for(self._ack_received_event.wait(), timeout=0.5)
+                await asyncio.wait_for(self._ack_received_event.wait(), timeout=timeout)
+                # Karn's algorithm: update RTT estimation only on first-attempt ACKs (attempt == 0)
+                if attempt == 0:
+                    sample_rtt = time.monotonic() - start_time
+                    err = sample_rtt - self._srtt
+                    self._rttvar += 0.25 * (abs(err) - self._rttvar)
+                    self._srtt += 0.125 * err
+                    self._rto = max(0.1, min(5.0, self._srtt + 4.0 * self._rttvar))
                 return  # Success, ACK received!
             except TimeoutError:
                 logger.debug(
-                    "UDP Timeout on seq=%d, attempt=%d",
+                    "UDP Timeout on seq=%d, attempt=%d, timeout=%.3fs",
                     self._pending_send_seq,
                     attempt + 1,
+                    timeout,
                 )
                 continue
 

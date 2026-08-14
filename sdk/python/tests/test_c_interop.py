@@ -120,13 +120,13 @@ async def test_tcp_c_interop(c_client_path):
             *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
 
         print("C Client stdout:", stdout.decode())
         print("C Client stderr:", stderr.decode())
 
         assert proc.returncode == 0
-        await asyncio.wait_for(test_completed_event.wait(), timeout=10.0)
+        await asyncio.wait_for(test_completed_event.wait(), timeout=30.0)
     finally:
         server_task.cancel()
         try:
@@ -191,13 +191,13 @@ async def test_udp_c_interop(c_client_path):
             *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
 
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10.0)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30.0)
 
         print("C Client stdout:", stdout.decode())
         print("C Client stderr:", stderr.decode())
 
         assert proc.returncode == 0
-        await asyncio.wait_for(test_completed_event.wait(), timeout=10.0)
+        await asyncio.wait_for(test_completed_event.wait(), timeout=30.0)
     finally:
         server_task.cancel()
         try:

@@ -195,6 +195,9 @@ typedef struct {
   uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
   uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
   bool keys_set;
+  uint32_t srtt;
+  uint32_t rttvar;
+  uint32_t rto;
 } posix_udp_ctx_t;
 
 // S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
@@ -269,13 +272,19 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
     return 0;
   }
 
-  // Stop-and-wait ARQ
+  // Stop-and-wait ARQ with Adaptive RTT (Jacobson/Karn) & Exponential Backoff
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
+  uint32_t base_rto = (udp->rto > 0) ? udp->rto : 500;
+
   for (int attempt = 0; attempt < 5; attempt++) {
+    uint32_t timeout_ms = base_rto * (1U << attempt);
+    if (timeout_ms > 5000) timeout_ms = 5000;
+    if (timeout_ms < 50) timeout_ms = 50;
+
     send(udp->sock, (const char*)data, len, 0);
 
     uint32_t start_ms = usmp_port_millis();
-    while (usmp_port_millis() - start_ms < 500) {
+    while (usmp_port_millis() - start_ms < timeout_ms) {
       ssize_t n = recv(udp->sock, (char*)temp, sizeof(temp), 0);
       if (n < 0) {
 #ifdef _WIN32
@@ -302,6 +311,24 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
             uint8_t expected[UTACK_MAC_LEN];
             utack_mac(udp->tx_key, temp, expected);
             if (mbedtls_ct_memcmp(expected, temp + UTACK_HEADER_LEN, UTACK_MAC_LEN) != 0) continue;
+          }
+          // Karn's algorithm: update RTT only on first-attempt ACKs (attempt == 0)
+          if (attempt == 0) {
+            uint32_t sample = usmp_port_millis() - start_ms;
+            if (sample == 0) sample = 1;
+            if (udp->srtt == 0) {
+              udp->srtt = sample;
+              udp->rttvar = sample / 2;
+            } else {
+              int32_t delta = (int32_t)sample - (int32_t)udp->srtt;
+              int32_t abs_delta = delta < 0 ? -delta : delta;
+              udp->rttvar = (uint32_t)((int32_t)udp->rttvar + (abs_delta - (int32_t)udp->rttvar) / 4);
+              udp->srtt = (uint32_t)((int32_t)udp->srtt + delta / 8);
+            }
+            uint32_t new_rto = udp->srtt + 4 * udp->rttvar;
+            if (new_rto < 100) new_rto = 100;
+            if (new_rto > 5000) new_rto = 5000;
+            udp->rto = new_rto;
           }
           return 0;  // ACK matched (and authenticated for session frames)
         }
@@ -452,6 +479,9 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   memset(udp, 0, sizeof(posix_udp_ctx_t));
   udp->sock = -1;
   udp->port = port;
+  udp->srtt = 200;
+  udp->rttvar = 100;
+  udp->rto = 500;
   strncpy(udp->server_ip, server_ip, sizeof(udp->server_ip) - 1);
   udp->server_ip[sizeof(udp->server_ip) - 1] = '\0';
 
