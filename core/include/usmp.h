@@ -14,7 +14,7 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 1
-#define USMP_VERSION_MINOR 1
+#define USMP_VERSION_MINOR 2
 #define USMP_VERSION_PATCH 0
 
 /**
