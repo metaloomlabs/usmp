@@ -3,12 +3,51 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mbedtls/hkdf.h"
+#include "mbedtls/md.h"
+#include "mbedtls/platform_util.h"
 #include "usmp.h"
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
 #include "usmp_port.h"
 
 static const char* TAG = "USMP_SESSION";
+
+static int derive_rekey_keys(bool is_initiator, const uint8_t* tx_key, const uint8_t* rx_key,
+                             const uint8_t* session_id, const uint8_t* salt, uint8_t* out_tx_key,
+                             uint8_t* out_rx_key) {
+  const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+  if (!md) return -1;
+
+  uint8_t secret[USMP_SESSION_KEY_LEN * 2];
+  if (is_initiator) {
+    memcpy(secret, tx_key, USMP_SESSION_KEY_LEN);
+    memcpy(secret + USMP_SESSION_KEY_LEN, rx_key, USMP_SESSION_KEY_LEN);
+  } else {
+    memcpy(secret, rx_key, USMP_SESSION_KEY_LEN);
+    memcpy(secret + USMP_SESSION_KEY_LEN, tx_key, USMP_SESSION_KEY_LEN);
+  }
+
+  uint8_t info[10 + USMP_SESSION_ID_LEN];
+  memcpy(info, "usmp-rekey", 10);
+  memcpy(info + 10, session_id, USMP_SESSION_ID_LEN);
+
+  uint8_t key_material[USMP_SESSION_KEY_LEN * 2];
+  int ret = mbedtls_hkdf(md, salt, 32, secret, sizeof(secret), info, sizeof(info), key_material,
+                         sizeof(key_material));
+  if (ret == 0) {
+    if (is_initiator) {
+      memcpy(out_tx_key, key_material, USMP_SESSION_KEY_LEN);
+      memcpy(out_rx_key, key_material + USMP_SESSION_KEY_LEN, USMP_SESSION_KEY_LEN);
+    } else {
+      memcpy(out_rx_key, key_material, USMP_SESSION_KEY_LEN);
+      memcpy(out_tx_key, key_material + USMP_SESSION_KEY_LEN, USMP_SESSION_KEY_LEN);
+    }
+  }
+  mbedtls_platform_zeroize(secret, sizeof(secret));
+  mbedtls_platform_zeroize(key_material, sizeof(key_material));
+  return ret;
+}
 
 /*
  * Maximum number of consecutive control frames (PING/PONG) processed in a
@@ -77,7 +116,8 @@ static int emit_frame(usmp_t* ctx, uint8_t type, const uint8_t* data, uint16_t l
   build_nonce(pkt.seq, ctx->session_id, nonce);
 
   size_t out_len = 0;
-  if (usmp_gcm_encrypt(ctx->tx_key, nonce, aad, sizeof(aad), data, len, pkt.payload, &out_len) != 0)
+  if (usmp_crypto_encrypt(ctx->cipher_suite, ctx->tx_key, nonce, aad, sizeof(aad), data, len,
+                          pkt.payload, &out_len) != 0)
     return -2;
 
   pkt.length = (uint16_t)out_len;
@@ -239,6 +279,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     uint8_t* dec_dest = NULL;
     uint16_t dec_max = 0;
 
+    uint8_t rekey_salt_buf[32] = {0};
+
     if (pkt.type == USMP_TYPE_PONG || pkt.type == USMP_TYPE_PING || pkt.type == USMP_TYPE_BYE) {
       if (bytes_written > 0) {
         USMP_LOGE(TAG, "Protocol error: control frame during fragmentation");
@@ -248,6 +290,14 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       }
       dec_dest = dummy_out;
       dec_max = sizeof(dummy_out);
+    } else if (pkt.type == USMP_TYPE_REKEY) {
+      if (bytes_written > 0) {
+        USMP_LOGE(TAG, "Protocol error: REKEY frame during fragmentation");
+        if (ctx->transport.confirm_authenticated) continue;
+        return -1;
+      }
+      dec_dest = rekey_salt_buf;
+      dec_max = sizeof(rekey_salt_buf);
     } else if (pkt.type == USMP_TYPE_DATA || pkt.type == USMP_TYPE_DATA_FRAG) {
       dec_dest = out + bytes_written;
       if (max_len < bytes_written) {
@@ -286,8 +336,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     memcpy(expected_nonce + 4, ctx->session_id, 8);
 
     size_t out_len = 0;
-    if (usmp_gcm_decrypt(ctx->rx_key, expected_nonce, aad, sizeof(aad), pkt.payload, pkt.length,
-                         dec_dest, &out_len) != 0) {
+    if (usmp_crypto_decrypt(ctx->cipher_suite, ctx->rx_key, expected_nonce, aad, sizeof(aad),
+                            pkt.payload, pkt.length, dec_dest, &out_len) != 0) {
       USMP_LOGE(TAG, "Decryption failed");
       if (ctx->transport.confirm_authenticated) {
         continue;  // UDP: drop unauthenticated packet and continue reading
@@ -358,6 +408,41 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       USMP_LOGI(TAG, "BYE received — session closed by peer");
       ctx->established = false;
       return -1;
+    } else if (pkt.type == USMP_TYPE_REKEY) {
+      USMP_LOGI(TAG, "REKEY frame received — rotating session keys");
+      if (out_len != 32) {
+        USMP_LOGE(TAG, "Invalid REKEY payload size");
+        return -1;
+      }
+      uint8_t new_tx[USMP_SESSION_KEY_LEN];
+      uint8_t new_rx[USMP_SESSION_KEY_LEN];
+      if (derive_rekey_keys(false, ctx->tx_key, ctx->rx_key, ctx->session_id, rekey_salt_buf,
+                            new_tx, new_rx) != 0) {
+        USMP_LOGE(TAG, "Failed to derive new keys on REKEY");
+        return -1;
+      }
+      memcpy(ctx->tx_key, new_tx, USMP_SESSION_KEY_LEN);
+      memcpy(ctx->rx_key, new_rx, USMP_SESSION_KEY_LEN);
+      ctx->tx_seq = 0;
+      ctx->rx_seq = 0;
+      ctx->rx_window_bitmap = 0;
+
+      if (ctx->transport.set_session_keys) {
+        ctx->transport.set_session_keys(&ctx->transport, ctx->tx_key, ctx->rx_key);
+      }
+
+      mbedtls_platform_zeroize(new_tx, sizeof(new_tx));
+      mbedtls_platform_zeroize(new_rx, sizeof(new_rx));
+      mbedtls_platform_zeroize(rekey_salt_buf, sizeof(rekey_salt_buf));
+
+      if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
+        USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
+        return -1;
+      }
+      if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        return 0;
+      }
+      continue;
     }
 
     /* It's a DATA or DATA_FRAG frame */
@@ -412,5 +497,48 @@ int usmp_keepalive_tick(usmp_t* ctx) {
   uint32_t now = usmp_port_millis();
   if ((now - ctx->last_tx_ms) >= ctx->keepalive_ms) return usmp_ping(ctx);
 
+  return 0;
+}
+
+int usmp_rekey(usmp_t* ctx) {
+  if (!ctx || !ctx->established) return -1;
+
+  uint8_t salt[32];
+  if (usmp_port_random(salt, sizeof(salt)) != 0) {
+    USMP_LOGE(TAG, "Failed to generate random salt for rekey");
+    return -1;
+  }
+
+  int rc = emit_frame(ctx, USMP_TYPE_REKEY, salt, sizeof(salt));
+  if (rc != 0) {
+    USMP_LOGE(TAG, "Failed to emit REKEY frame");
+    mbedtls_platform_zeroize(salt, sizeof(salt));
+    return -1;
+  }
+
+  uint8_t new_tx[USMP_SESSION_KEY_LEN];
+  uint8_t new_rx[USMP_SESSION_KEY_LEN];
+  if (derive_rekey_keys(true, ctx->tx_key, ctx->rx_key, ctx->session_id, salt, new_tx, new_rx) !=
+      0) {
+    USMP_LOGE(TAG, "Failed to derive new keys for rekey");
+    mbedtls_platform_zeroize(salt, sizeof(salt));
+    return -1;
+  }
+
+  memcpy(ctx->tx_key, new_tx, USMP_SESSION_KEY_LEN);
+  memcpy(ctx->rx_key, new_rx, USMP_SESSION_KEY_LEN);
+  ctx->tx_seq = 0;
+  ctx->rx_seq = 0;
+  ctx->rx_window_bitmap = 0;
+
+  if (ctx->transport.set_session_keys) {
+    ctx->transport.set_session_keys(&ctx->transport, ctx->tx_key, ctx->rx_key);
+  }
+
+  mbedtls_platform_zeroize(salt, sizeof(salt));
+  mbedtls_platform_zeroize(new_tx, sizeof(new_tx));
+  mbedtls_platform_zeroize(new_rx, sizeof(new_rx));
+
+  USMP_LOGI(TAG, "In-band session rekeying initiated successfully");
   return 0;
 }

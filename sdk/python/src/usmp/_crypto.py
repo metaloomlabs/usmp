@@ -8,11 +8,11 @@ from cryptography.hazmat.primitives.asymmetric.x25519 import (
     X25519PrivateKey,
     X25519PublicKey,
 )
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM, ChaCha20Poly1305
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from .errors import CryptoError
-from .types import USMP_SESSION_KEY_LEN, USMP_TAG_LEN
+from .types import USMP_SESSION_KEY_LEN, USMP_TAG_LEN, CipherSuite
 
 
 def generate_keypair() -> tuple[X25519PrivateKey, bytes]:
@@ -65,6 +65,33 @@ def derive_session_keys(
         del shared_secret
 
 
+def derive_rekey_keys(
+    is_initiator: bool,
+    tx_key: bytes,
+    rx_key: bytes,
+    session_id: bytes,
+    salt: bytes,
+) -> tuple[bytes, bytes]:
+    """
+    Derive two new directional session keys during in-band rekeying via HKDF-SHA256.
+
+    Returns (new_tx_key, new_rx_key).
+    """
+    secret = (tx_key + rx_key) if is_initiator else (rx_key + tx_key)
+    info = b"usmp-rekey" + session_id
+    key_material = HKDF(
+        algorithm=hashes.SHA256(),
+        length=USMP_SESSION_KEY_LEN * 2,
+        salt=salt,
+        info=info,
+    ).derive(secret)
+
+    if is_initiator:
+        return key_material[:USMP_SESSION_KEY_LEN], key_material[USMP_SESSION_KEY_LEN:]
+    else:
+        return key_material[USMP_SESSION_KEY_LEN:], key_material[:USMP_SESSION_KEY_LEN]
+
+
 def build_aad(
     magic: int,
     version: int,
@@ -94,18 +121,19 @@ def encrypt(
     version: int,
     magic: int,
     plaintext: bytes,
+    cipher_suite: CipherSuite = CipherSuite.AES256_GCM,
 ) -> bytes:
     """
-    Encrypt plaintext with AES-256-GCM.
+    Encrypt plaintext with AES-256-GCM or ChaCha20-Poly1305.
     Returns nonce(12) || ciphertext || tag(16).
     """
     # AAD uses the post-encryption payload length (nonce + plaintext + tag)
     enc_length = 12 + len(plaintext) + USMP_TAG_LEN
     aad = build_aad(magic, version, type_, seq, enc_length)
 
-    aesgcm = AESGCM(key)
+    aead = ChaCha20Poly1305(key) if cipher_suite == CipherSuite.CHACHA20_POLY1305 else AESGCM(key)
     # cryptography library appends tag to ciphertext automatically
-    ciphertext_and_tag = aesgcm.encrypt(nonce, plaintext, aad)
+    ciphertext_and_tag = aead.encrypt(nonce, plaintext, aad)
     return nonce + ciphertext_and_tag
 
 
@@ -118,9 +146,10 @@ def decrypt(
     magic: int,
     length: int,
     nonce_ct_tag: bytes,
+    cipher_suite: CipherSuite = CipherSuite.AES256_GCM,
 ) -> bytes:
     """
-    Decrypt and verify AES-256-GCM nonce_ct_tag.
+    Decrypt and verify AES-256-GCM or ChaCha20-Poly1305 nonce_ct_tag.
     Raises CryptoError if authentication fails.
     """
     if len(nonce_ct_tag) < 12 + USMP_TAG_LEN:
@@ -133,9 +162,9 @@ def decrypt(
     ct_tag = nonce_ct_tag[12:]
     aad = build_aad(magic, version, type_, seq, length)
 
-    aesgcm = AESGCM(key)
+    aead = ChaCha20Poly1305(key) if cipher_suite == CipherSuite.CHACHA20_POLY1305 else AESGCM(key)
     try:
-        return aesgcm.decrypt(nonce, ct_tag, aad)
+        return aead.decrypt(nonce, ct_tag, aad)
     except InvalidTag as e:
         # Expected on tampering / wrong key — don't echo library internals.
         raise CryptoError("Authentication tag verification failed") from e

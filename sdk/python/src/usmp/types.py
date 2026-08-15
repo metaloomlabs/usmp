@@ -18,6 +18,7 @@ class PacketType(IntEnum):
     BYE = 0x08
     DATA_FRAG = 0x09
     HELLO_RETRY = 0x0A
+    REKEY = 0x0B
     ERROR = 0xFF
 
 
@@ -77,6 +78,11 @@ class USMPFrame:
         )
 
 
+class CipherSuite(IntEnum):
+    AES256_GCM = 0x01
+    CHACHA20_POLY1305 = 0x02
+
+
 @dataclass
 class SessionInfo:
     device_id: bytes
@@ -86,6 +92,7 @@ class SessionInfo:
     tx_seq: int = 0
     rx_seq: int = 0
     rx_window_bitmap: int = 0
+    cipher_suite: CipherSuite = CipherSuite.AES256_GCM
 
     def __post_init__(self) -> None:
         if len(self.device_id) != USMP_DEVICE_ID_LEN:

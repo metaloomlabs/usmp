@@ -14,7 +14,7 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 1
-#define USMP_VERSION_MINOR 1
+#define USMP_VERSION_MINOR 2
 #define USMP_VERSION_PATCH 0
 
 /**
@@ -80,6 +80,11 @@ const char* usmp_get_version(void);
  */
 #define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN - 12)
 
+typedef enum {
+  USMP_CIPHER_AES256_GCM = 1,
+  USMP_CIPHER_CHACHA20_POLY1305 = 2,
+} usmp_cipher_suite_t;
+
 // Session context ───────────────────────────────────────────────────────────
 typedef struct {
   uint8_t device_id[USMP_DEVICE_ID_LEN];
@@ -93,6 +98,7 @@ typedef struct {
   uint32_t keepalive_ms;
   uint32_t last_tx_ms;
   uint64_t rx_window_bitmap;
+  uint8_t cipher_suite;
 
   /*
    * Runtime PSK — must be set before calling usmp_connect().
@@ -168,6 +174,13 @@ int usmp_ping(usmp_t* ctx);
  * Returns 0 ok, -1 if PING failed (time to call usmp_reconnect).
  */
 int usmp_keepalive_tick(usmp_t* ctx);
+
+/**
+ * Perform in-band session rekeying. Rotates tx_key and rx_key using HKDF
+ * and resets tx_seq and rx_seq to 0 without tearing down the socket.
+ * Returns 0 on success, -1 on failure.
+ */
+int usmp_rekey(usmp_t* ctx);
 
 #ifdef __cplusplus
 }

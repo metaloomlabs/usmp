@@ -4,7 +4,7 @@ import struct
 import time
 from typing import Any, overload
 
-from ._crypto import decrypt, encrypt
+from ._crypto import decrypt, derive_rekey_keys, encrypt
 from .errors import (
     ConnectionClosedError,
     FrameError,
@@ -103,7 +103,7 @@ class USMPSession:
                 if len(data) == 0:
                     break
 
-    async def recv(self, timeout: float | None = None) -> bytes:
+    async def recv(self, timeout: float | None = None) -> bytes:  # noqa: C901
         """Receive and decrypt data, reassembling fragmented packets if necessary."""
         effective_timeout = timeout if timeout is not None else self._recv_timeout
 
@@ -138,6 +138,7 @@ class USMPSession:
                         magic=frame.magic,
                         length=frame.length,
                         nonce_ct_tag=frame.payload,
+                        cipher_suite=self._info.cipher_suite,
                     )
                     self._last_recv = time.monotonic()
                 except (USMPError, struct.error) as e:
@@ -221,6 +222,28 @@ class USMPSession:
                             )
                         continue
 
+                    if frame.type == PacketType.REKEY:
+                        if len(assembled_payload) > 0:
+                            raise SequenceError("Protocol error: REKEY received during fragmentation")
+                        if len(plaintext) != 32:
+                            raise PayloadError("Invalid REKEY payload length")
+                        new_tx, new_rx = derive_rekey_keys(
+                            is_initiator=False,
+                            tx_key=self._info.tx_key,
+                            rx_key=self._info.rx_key,
+                            session_id=self._info.session_id,
+                            salt=plaintext,
+                        )
+                        self._info.tx_key = new_tx
+                        self._info.rx_key = new_rx
+                        self._info.tx_seq = 0
+                        self._info.rx_seq = 0
+                        self._info.rx_window_bitmap = 0
+                        if hasattr(self._transport, "set_session_keys"):
+                            self._transport.set_session_keys(new_tx, new_rx)
+                        logger.info("Rotated session keys via in-band REKEY for device %s", self.device_id)
+                        continue
+
                     if frame.type not in (PacketType.DATA, PacketType.DATA_FRAG):
                         raise ValueError(f"Unexpected frame type: {frame.type_name()}")
 
@@ -264,6 +287,29 @@ class USMPSession:
         """Send a PING frame."""
         await self._send_encrypted(PacketType.PING)
 
+    async def rekey(self) -> None:
+        """Perform in-band session rekeying, rotating session keys without disconnecting."""
+        import os
+
+        salt = os.urandom(32)
+        async with self._send_lock:
+            await self._send_encrypted_locked(PacketType.REKEY, salt)
+            new_tx, new_rx = derive_rekey_keys(
+                is_initiator=True,
+                tx_key=self._info.tx_key,
+                rx_key=self._info.rx_key,
+                session_id=self._info.session_id,
+                salt=salt,
+            )
+            self._info.tx_key = new_tx
+            self._info.rx_key = new_rx
+            self._info.tx_seq = 0
+            self._info.rx_seq = 0
+            self._info.rx_window_bitmap = 0
+            if hasattr(self._transport, "set_session_keys"):
+                self._transport.set_session_keys(new_tx, new_rx)
+            logger.info("Initiated in-band session rekeying for device %s", self.device_id)
+
     async def bye(self) -> None:
         """Send a BYE frame and close the connection."""
         if self._closed:
@@ -306,6 +352,7 @@ class USMPSession:
             version=USMP_VERSION,
             magic=USMP_MAGIC,
             plaintext=plaintext,
+            cipher_suite=self._info.cipher_suite,
         )
         # Burn the sequence before the write, never after. write_frame can put the
         # frame on the wire and still raise — UDP's ARQ sends up to 5 times before

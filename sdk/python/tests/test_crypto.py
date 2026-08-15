@@ -124,6 +124,64 @@ def test_encrypt_decrypt_roundtrip():
     assert pt == plaintext
 
 
+def test_chacha20_poly1305_roundtrip():
+    from usmp.types import CipherSuite
+
+    key = b"\x07" * 32
+    plaintext = b"chacha20 poly1305 encrypted test payload"
+    nonce = b"\x03" * 12
+    seq = 42
+
+    ct = encrypt(
+        key=key,
+        nonce=nonce,
+        seq=seq,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        plaintext=plaintext,
+        cipher_suite=CipherSuite.CHACHA20_POLY1305,
+    )
+
+    pt = decrypt(
+        key=key,
+        nonce=nonce,
+        seq=seq,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        length=len(ct),
+        nonce_ct_tag=ct,
+        cipher_suite=CipherSuite.CHACHA20_POLY1305,
+    )
+
+    assert pt == plaintext
+    nonce = b"\x01" * 12
+
+    ct = encrypt(
+        key=key,
+        nonce=nonce,
+        seq=0,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        plaintext=plaintext,
+    )
+
+    pt = decrypt(
+        key=key,
+        nonce=nonce,
+        seq=0,
+        type_=int(PacketType.DATA),
+        version=USMP_VERSION,
+        magic=USMP_MAGIC,
+        length=len(ct),
+        nonce_ct_tag=ct,
+    )
+
+    assert pt == plaintext
+
+
 def test_decrypt_fails_on_tampered_ciphertext():
     key = b"\x05" * 32
     nonce = b"\x01" * 12

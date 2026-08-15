@@ -5,6 +5,31 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-15
+
+Feature release adding ChaCha20-Poly1305 cipher suite support, in-band session rekeying, adaptive UDP RTT estimation, and Arduino port control frame background handling.
+
+### ✨ Added
+
+- **C Core & Python SDK**: ChaCha20-Poly1305 cipher suite support (`USMP_CIPHER_CHACHA20_POLY1305`) alongside AES-256-GCM (#22).
+- **C Core & Python SDK**: In-band session rekeying (`USMP_TYPE_REKEY = 0x0B`) allowing transparent key rotation during active sessions (#20).
+- **Python SDK**: Adaptive RTT estimation and exponential backoff timing for UDP transport retransmission (#18).
+
+### 🐛 Fixed
+
+- **Arduino Port**: Decoupled decrypted application message buffering from control frame processing to drain PING/PONG/REKEY frames automatically in background (#24).
+- **Arduino Examples**: Guarded `Serial.println` with `msg.length() > 0` check to prevent empty line prints when control frames arrive (#23).
+
+### 📦 Version Bumps
+
+- C Core (`usmp.h`, `usmp_connect.c`): `1.1.0` → `1.2.0`
+- ESP32 Port (`idf_component.yml`): `1.1.0` → `1.2.0`
+- Arduino Port (`library.properties`, `library.json`): `1.1.0` → `1.2.0`
+- Python SDK (`pyproject.toml`, `__init__.py`): `1.1.0` → `1.2.0`
+- Root workspace (`pyproject.toml`): `1.1.0` → `1.2.0`
+
+---
+
 ## [1.1.0] — 2026-07-18
 
 Security and hardening release spanning the Python SDK, the C core, and the

@@ -58,8 +58,10 @@ class USMPClient {
   void (*_on_reconnect)();
   void (*_on_message)(const uint8_t* data, size_t len);
   uint8_t _rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES];
+  size_t _rx_len;
   void _apply_psk();
   bool _do_reconnect();
+  void _drain_rx();
 
   // Level-gated Serial log helper — single place the log threshold is checked.
   void _logf(usmp_log_level_t level, const char* fmt, ...);

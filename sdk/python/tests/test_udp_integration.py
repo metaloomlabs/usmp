@@ -4,13 +4,15 @@ Integration tests — real USMPServer + USMPClient over loopback UDP.
 """
 
 import asyncio
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
 from usmp import USMPClient, USMPServer, USMPSession
 from usmp.errors import ConnectionClosedError, SequenceError
+from usmp.transport import USMPTransport
 from usmp.transport.udp import UDPStream
+from usmp.types import PacketType
 
 PSK = b"usmp-test-psk-udp-integration"
 HOST = "127.0.0.1"
@@ -144,7 +146,7 @@ async def test_udp_client_reboot_no_lockout():
             super().__init__(*args, **kwargs)
             self._local_port = local_port
 
-        async def connect(self) -> None:
+        async def connect(self, timeout: float = 10.0) -> None:
             if self._local_port:
                 from usmp._handshake import client_handshake
                 from usmp.transport.udp import ClientUDPProtocol
@@ -226,14 +228,15 @@ async def test_udp_off_path_spoofing_resistance():
 
         # Capture the raw encoded bytes of a valid frame to test replay
         # We can intercept client.write or record the sent packet
-        original_write = client._session._writer.write
+        session = cast(Any, client._session)
+        original_write = session._writer.write
         sent_packets = []
 
         def mock_write(data):
             sent_packets.append(data)
             original_write(data)
 
-        client._session._writer.write = mock_write
+        session._writer.write = mock_write
 
         await client.send(b"valid1")
         assert await client.recv() == b"echo:valid1"
@@ -310,7 +313,7 @@ async def test_session_sequence_overflow():
             # Second frame should fail/raise SequenceError due to rx_seq >= 0xFFFFFFFF
             await session.recv()
         except SequenceError as e:
-            received.append(e)
+            received.append(e)  # type: ignore[arg-type]
 
     async def client_coro():
         client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
@@ -439,7 +442,7 @@ async def test_udp_malformed_frame_robustness():
 
         # Manually feed an invalid frame (bad version) to client stream directly to test robustness
         # client's own transport/stream should drop it on decrypt/parse error and keep running
-        stream = client._session._reader
+        stream = cast(Any, client._session)._reader
 
         # Craft a fake frame: magic=0xABCD, version=99 (invalid), type=5, seq=999, len=10, crc=0
         bad_frame = b"\xcd\xab\x63\x05\xe7\x03\x00\x00\x0a\x00\x00\x00" + b"A" * 10
@@ -609,7 +612,7 @@ async def test_udp_fragment_order_enforcement():
         )
         await asyncio.sleep(0.05)
 
-        client._session._writer.close()
+        cast(Any, client._session)._writer.close()
 
     await _run(server, client_coro())
     assert errors == []
@@ -630,14 +633,17 @@ async def test_udp_utack_authentication_s3():
 
     from usmp.transport.udp import UTACK_MAGIC, UDPStream
 
-    class _DummyTransport:
-        def sendto(self, data, addr):
+    class _DummyTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
             pass
 
-        def get_extra_info(self, name):
+        def get_extra_info(self, name: str, default: Any = None) -> Any:
             return None
 
-        def close(self):
+        def close(self) -> None:
             pass
 
     # Golden UTACK-MAC vector — pins the exact wire bytes, cross-checked byte-for-byte
@@ -784,15 +790,18 @@ async def test_finding_4_oversized_payload_rejection():
     import struct
 
     from usmp.types import USMP_MAGIC
-    class DummyTransport:
-        def __init__(self):
-            self.sent = []
-        def sendto(self, data, addr):
+    class MockTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[tuple[Any, Any]] = []
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
             self.sent.append((data, addr))
-        def close(self):
+
+        def close(self) -> None:
             pass
 
-    stream = UDPStream(DummyTransport(), (HOST, 9999), is_server=False)
+    stream = UDPStream(MockTransport(), (HOST, 9999), is_server=False)
 
     header = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 0) + struct.pack("<H", 481) + struct.pack("<H", 0)
     oversized_data = header + b"\x00" * 481
@@ -859,15 +868,19 @@ async def test_finding_7_disconnect_leaks():
         async def bye(self):
             raise ConnectionResetError("mock error")
 
-    class DummyTransport:
-        def __init__(self):
-            self.closed = False
-        def close(self):
+    class DummyTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
+            pass
+
+        def close(self) -> None:
             self.closed = True
 
     client = USMPClient(host=HOST, port=9999, psk=PSK)
-    client._session = BadSession()
-    client._transport = DummyTransport()
+    client._session = cast(Any, BadSession())
+    client._transport = cast(Any, DummyTransport())
 
     with pytest.raises(ConnectionResetError):
         await client.disconnect()
@@ -974,12 +987,16 @@ async def test_finding_10_utack_buffer_full():
     import struct
 
     from usmp.types import USMP_MAGIC
-    class MockTransport:
-        def __init__(self):
-            self.sent = []
-        def sendto(self, data, addr):
+
+    class MockTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[Any] = []
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
             self.sent.append(data)
-        def close(self):
+
+        def close(self) -> None:
             pass
 
     stream = UDPStream(MockTransport(), (HOST, 9999), is_server=True)
@@ -989,7 +1006,7 @@ async def test_finding_10_utack_buffer_full():
     data = header + b"\x00" * 8
 
     stream.feed_packet(data)
-    assert len(stream._transport.sent) == 0
+    assert len(cast(Any, stream._transport).sent) == 0
 
 
 @pytest.mark.asyncio
@@ -1099,34 +1116,50 @@ def _dummy_session_info():
     )
 
 
-class _FakeTransport:
+class _FakeTransport(USMPTransport):
     """Minimal transport recording what _send_encrypted puts on the wire."""
 
-    is_reliable = False
-
-    def __init__(self, fail: bool = False, yield_between: bool = False):
+    def __init__(self, fail: bool = False, yield_between: bool = False) -> None:
         self._fail = fail
         self._yield_between = yield_between
         self.seqs: list[int] = []
         self.types: list = []
 
-    async def write_frame(self, ptype, ciphertext, seq=0):
+    @property
+    def is_reliable(self) -> bool:
+        return False
+
+    async def read_frame(self, verify_crc: bool = True) -> Any:
+        return None
+
+    async def write_frame(
+        self, type_: PacketType, payload: bytes, seq: int = 0
+    ) -> None:
         # The frame reaches the wire *before* any failure, exactly like UDP's ARQ,
         # which sendto()s up to 5 times and only then raises OSError.
         self.seqs.append(seq)
-        self.types.append(ptype)
+        self.types.append(type_)
         if self._yield_between:
             await asyncio.sleep(0)
         if self._fail:
             raise OSError("peer did not ACK")
 
-    def close(self):
+    async def connect(self, timeout: float = 10.0) -> None:
         pass
 
-    def confirm_authenticated(self, seq):
+    def set_session_keys(self, tx_key: bytes, rx_key: bytes) -> None:
         pass
 
-    def get_extra_info(self, name):
+    async def wait_closed(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+    def confirm_authenticated(self, seq: int) -> None:
+        pass
+
+    def get_extra_info(self, name: str, default: Any = None) -> Any:
         return (HOST, 1)
 
 
@@ -1285,12 +1318,15 @@ async def test_udp_adaptive_rtt_estimation():
     """Verify that UDPStream initializes RTT state and updates srtt/rttvar/rto on ACKs."""
     import struct
 
-    class DummyTransport:
-        def __init__(self):
-            self.sent = []
-        def sendto(self, data, addr):
+    class DummyTransport(asyncio.DatagramTransport):
+        def __init__(self) -> None:
+            super().__init__()
+            self.sent: list[tuple[Any, Any]] = []
+
+        def sendto(self, data: Any, addr: Any = None) -> None:
             self.sent.append((data, addr))
-        def close(self):
+
+        def close(self) -> None:
             pass
 
     stream = UDPStream(DummyTransport(), (HOST, 9999), is_server=False)
