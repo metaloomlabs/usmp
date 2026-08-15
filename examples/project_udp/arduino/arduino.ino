@@ -35,6 +35,8 @@ void loop() {
 
   if (usmp.available()) {
     String msg = usmp.read();
-    Serial.println("RX-UDP: " + msg);
+    if (msg.length() > 0) {
+      Serial.println("RX-UDP: " + msg);
+    }
   }
 }
