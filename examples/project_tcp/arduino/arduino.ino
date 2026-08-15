@@ -37,8 +37,6 @@ void loop() {
 
   if (usmp.available()) {
     String msg = usmp.read();
-    if (msg.length() > 0) {
-      Serial.println("RX: " + msg);
-    }
+    Serial.println("RX: " + msg);
   }
 }
