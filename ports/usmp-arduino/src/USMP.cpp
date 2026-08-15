@@ -12,7 +12,8 @@ USMPClient::USMPClient(const char* psk)
       _on_connect(nullptr),
       _on_disconnect(nullptr),
       _on_reconnect(nullptr),
-      _on_message(nullptr) {
+      _on_message(nullptr),
+      _rx_len(0) {
   memset(&_ctx, 0, sizeof(_ctx));
   memset(&_transport, 0, sizeof(_transport));
   memset(_rx_buf, 0, sizeof(_rx_buf));
@@ -40,6 +41,23 @@ void USMPClient::_logf(usmp_log_level_t level, const char* fmt, ...) {
 bool USMPClient::_do_reconnect() {
   _apply_psk();
   return usmp_reconnect(&_ctx) == 0;
+}
+
+void USMPClient::_drain_rx() {
+  if (!_ctx.established || _rx_len > 0) return;
+  if (!_transport.available) return;
+
+  while (_ctx.established && _rx_len == 0 && _transport.available(&_transport) > 0) {
+    int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
+    if (n > 0) {
+      _rx_len = (size_t)n;
+      break;
+    } else if (n < 0) {
+      _ctx.established = false;
+      if (_on_disconnect) _on_disconnect();
+      break;
+    }
+  }
 }
 
 // begin ─────────────────────────────────────────────────────────────────────
@@ -77,6 +95,7 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
   _initialized = true;
   _backoff_ms = 2000;
   _last_attempt_ms = 0;
+  _rx_len = 0;
 
   if (_on_connect) _on_connect();
   return true;
@@ -105,34 +124,29 @@ bool USMPClient::send(const uint8_t* data, size_t len) {
 // receive ───────────────────────────────────────────────────────────────────
 
 bool USMPClient::available() {
-  if (!_ctx.established) return false;
-  if (!_transport.available) return false;
-  return _transport.available(&_transport) > 0;
+  _drain_rx();
+  return _rx_len > 0;
 }
 
 String USMPClient::read() {
-  int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
-  if (n < 0) {
-    _ctx.established = false;
-    if (_on_disconnect) _on_disconnect();
+  _drain_rx();
+  if (_rx_len == 0) {
     return String();
   }
-  if (n == 0) {
-    return String();
-  }
-  return String((char*)_rx_buf, n);
+  String msg((char*)_rx_buf, _rx_len);
+  _rx_len = 0;
+  return msg;
 }
 
 int USMPClient::read(uint8_t* buf, size_t max_len) {
-  // usmp_recv() takes a uint16_t length; clamp so a large size_t can't silently
-  // wrap and make the core write past what the caller actually asked for.
-  uint16_t capped = (max_len > 0xFFFF) ? 0xFFFF : (uint16_t)max_len;
-  int n = usmp_recv(&_ctx, buf, capped);
-  if (n < 0) {
-    _ctx.established = false;
-    if (_on_disconnect) _on_disconnect();
+  _drain_rx();
+  if (_rx_len == 0) {
+    return 0;
   }
-  return n;
+  size_t to_copy = (_rx_len < max_len) ? _rx_len : max_len;
+  memcpy(buf, _rx_buf, to_copy);
+  _rx_len = 0;
+  return (int)to_copy;
 }
 
 // state ─────────────────────────────────────────────────────────────────────
@@ -186,15 +200,14 @@ void USMPClient::maintain() {
     return;
   }
 
-  // Non-blocking receive — fire onMessage if data waiting
-  if (_on_message && available()) {
-    int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
-    if (n > 0) {
-      _on_message(_rx_buf, (size_t)n);
-    } else if (n < 0) {
-      _ctx.established = false;
-      if (_on_disconnect) _on_disconnect();
-    }
+  // Non-blocking receive — drain control frames into background & buffer application data
+  _drain_rx();
+
+  // Fire onMessage if application data is buffered
+  if (_on_message && _rx_len > 0) {
+    size_t len = _rx_len;
+    _rx_len = 0;
+    _on_message(_rx_buf, len);
   }
 }
 
@@ -221,5 +234,6 @@ void USMPClient::close() {
   if (_transport.destroy) {
     _transport.destroy(&_transport);
   }
+  _rx_len = 0;
   _initialized = false;
 }

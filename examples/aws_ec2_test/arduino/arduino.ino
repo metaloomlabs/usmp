@@ -69,10 +69,8 @@ void loop() {
   // Handle incoming decrypted messages from the EC2 server
   if (usmp.available()) {
     String msg = usmp.read();
-    if (msg.length() > 0) {
-      Serial.print("Received from EC2: ");
-      Serial.println(msg);
-    }
+    Serial.print("Received from EC2: ");
+    Serial.println(msg);
   }
 
   // Periodically send data to the server

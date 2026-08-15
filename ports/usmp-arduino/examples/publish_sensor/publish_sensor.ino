@@ -68,8 +68,6 @@ void loop() {
   // Handle any incoming command or confirmation messages from the gateway
   if (usmp.available()) {
     String msg = usmp.read();
-    if (msg.length() > 0) {
-      Serial.println("Received from gateway: " + msg);
-    }
+    Serial.println("Received from gateway: " + msg);
   }
 }
