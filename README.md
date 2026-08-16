@@ -36,9 +36,10 @@ Every single session is hardened:
 
 * **Mutual Authentication**: Both sides verify identity using HMAC-SHA256 and a Pre-Shared Key (PSK) before exchanging payloads.
 * **Perfect Forward Secrecy**: An ephemeral X25519 key exchange occurs with every session, protecting past traffic even if keys are compromised later.
-* **Mandatory Encryption**: All payload data is encrypted using AES-256-GCM.
+* **Mandatory Encryption**: All payload data is encrypted using AES-256-GCM or ChaCha20-Poly1305.
+* **In-Band Session Rekeying**: Transparent key rotation during active sessions via `PKT_REKEY`.
 * **Replay Protection**: Strict, monotonic 32-bit sequence numbers are verified for every frame.
-* **Deterministic Nonces**: Under the hood, AES-GCM nonces are constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate nonce collision risks.
+* **Deterministic Nonces**: Under the hood, AEAD nonces are constructed as `seq (4 bytes, Little-Endian) || session_id[0..7]` to eliminate nonce collision risks.
 
 ---
 
@@ -51,7 +52,7 @@ Every single session is hardened:
 * **Registry-Based Distribution**:
   * **Python**: Fully async SDK available on **PyPI** (`pip install usmp`).
   * **ESP-IDF**: Native component on the **ESP Component Registry** (`metaloomlabs/usmp`).
-  * **Arduino**: Standard packaged offline ZIP library (`usmp-1.0.1-arduino.zip`).
+  * **Arduino**: Standard packaged offline ZIP library (`usmp-1.2.0-arduino.zip`).
 
 ---
 
@@ -217,8 +218,8 @@ See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. 
 * [x] **v0.4.0**: Published on ESP Component Registry and PyPI, making it stable.
 * [x] **v0.4.7**: Security hardening (Deterministic Nonces, Lockout Rate Limiting, Dynamic Fragmentation).
 * [x] **v0.5.0**: UDP transport support fully complete and production-ready.
-* [ ] **v1.1.0**: CLI tools and auto-discovery (mDNS / UDP).
-* [ ] **v1.2.0**: Secure OTA firmware updates with Ed25519 signatures.
+* [x] **v1.1.0**: Hardening & security fixes, CLI tools reference.
+* [x] **v1.2.0**: ChaCha20-Poly1305 cipher suite, In-Band Session Rekeying (`PKT_REKEY`), Adaptive UDP RTT estimation, and Arduino control frame decoupling.
 
 ---
 
