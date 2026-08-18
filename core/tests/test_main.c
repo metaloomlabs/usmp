@@ -485,9 +485,9 @@ void test_send_failure_no_nonce_reuse(void) {
 
   uint8_t msg1[] = "first-plaintext";
   int r1 = usmp_send(&ctx, msg1, sizeof(msg1));
-  assert(r1 == -1);                  // send reports failure...
-  assert(ctx.tx_seq == 1);           // ...but the seq is burned regardless
-  assert(ctx.established == false);  // ...and the session is torn down
+  assert(r1 == USMP_ERR_TRANSPORT_FAILED);  // send reports failure...
+  assert(ctx.tx_seq == 1);                   // ...but the seq is burned regardless
+  assert(ctx.established == false);          // ...and the session is torn down
 
   // Model the shipped example's continue-on-failure loop: a naive caller
   // re-arms `established` (without a fresh key/seq) and sends different
@@ -495,7 +495,7 @@ void test_send_failure_no_nonce_reuse(void) {
   ctx.established = true;
   uint8_t msg2[] = "second-different-plaintext";
   int r2 = usmp_send(&ctx, msg2, sizeof(msg2));
-  assert(r2 == -1);
+  assert(r2 == USMP_ERR_TRANSPORT_FAILED);
   assert(ctx.established == false);
 
   // Every transmitted frame must carry a distinct sequence number, hence a
@@ -525,7 +525,7 @@ void test_control_seq_overflow(void) {
   ctx.tx_seq = 0xFFFFFFFF;
 
   int r = usmp_ping(&ctx);
-  assert(r == -1);                   // refused
+  assert(r == USMP_ERR_TRANSPORT_FAILED);  // refused
   assert(ctx.tx_seq == 0xFFFFFFFF);  // did NOT wrap to 0
   assert(ctx.established == false);  // session torn down
   assert(loopback.write_pos == 0);   // nothing was transmitted

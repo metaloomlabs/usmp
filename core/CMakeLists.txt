@@ -33,7 +33,7 @@ else()
         PUBLIC  include
         PRIVATE src
     )
-    if(NOT MbedTLS_FOUND)
+    if(TARGET mbedtls)
         target_link_libraries(usmp-core PUBLIC mbedtls)
     endif()
 
