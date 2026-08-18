@@ -352,7 +352,7 @@ class UDPListener(USMPListener):
             lambda: ServerUDPProtocol(self),
             local_addr=(self._host, self._port),
         )
-        logger.info("Listening on UDP %s:%d", self._host, self._port)
+        logger.info("🚀 Listening on UDP %s:%d", self._host, self._port)
 
     async def stop(self) -> None:
         if self._transport:

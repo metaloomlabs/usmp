@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import signal
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
@@ -85,6 +86,7 @@ class USMPServer:
         self._handshake_semaphore = asyncio.Semaphore(10)
         self._listener: USMPListener | None = None
         self._conn_tasks: set[asyncio.Task[None]] = set()
+        self._shutdown_event: asyncio.Event | None = None
 
     def on_session(
         self,
@@ -251,7 +253,7 @@ class USMPServer:
 
             proto_str = "TCP" if transport.is_reliable else "UDP"
             logger.info(
-                "Session established (%s): device=%s session=%s",
+                "🔒 Session established (%s): device=%s session=%s",
                 proto_str,
                 info.device_id_str,
                 info.session_id_str,
@@ -319,7 +321,7 @@ class USMPServer:
                 if self._udp_sessions.get(addr) is transport:
                     self._udp_sessions.pop(addr, None)
 
-            logger.info("Disconnected (%s): %s", "TCP" if transport.is_reliable else "UDP", addr)
+            logger.info("🔌 Disconnected (%s): %s", "TCP" if transport.is_reliable else "UDP", addr)
 
             if watchdog_task is not None and not watchdog_task.done():
                 watchdog_task.cancel()
@@ -333,8 +335,13 @@ class USMPServer:
             except Exception:
                 logger.debug("Error during transport wait_closed", exc_info=True)
 
+    def stop(self) -> None:
+        """Signal the server to stop serving."""
+        if self._shutdown_event is not None and not self._shutdown_event.is_set():
+            self._shutdown_event.set()
+
     async def serve(self) -> None:
-        """Start the server and serve forever."""
+        """Start the server and serve until stopped or interrupted."""
         if self._handler is None:
             raise RuntimeError("No session handler registered. Use @server.on_session")
 
@@ -345,7 +352,43 @@ class USMPServer:
             server=self,
         )
         await self._listener.start(self._on_transport_connect)
+
+        self._shutdown_event = asyncio.Event()
+
+        loop = asyncio.get_running_loop()
+        signals = (signal.SIGINT, signal.SIGTERM) if hasattr(signal, "SIGINT") else ()
+
+        def _on_signal() -> None:
+            logger.info("⚡ Received signal to stop server")
+            if self._shutdown_event is not None:
+                self._shutdown_event.set()
+
+        for sig in signals:
+            try:
+                loop.add_signal_handler(sig, _on_signal)
+            except (NotImplementedError, AttributeError):
+                # Windows ProactorEventLoop does not support add_signal_handler
+                pass
+
         try:
-            await asyncio.Event().wait()
+            await self._shutdown_event.wait()
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            logger.info("⚡ Server received interrupt signal")
         finally:
-            await self._listener.stop()
+            for sig in signals:
+                try:
+                    loop.remove_signal_handler(sig)
+                except (NotImplementedError, AttributeError):
+                    pass
+
+            if self._listener:
+                await self._listener.stop()
+
+            if self._conn_tasks:
+                tasks = list(self._conn_tasks)
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+            logger.info("✨ USMP Server shut down gracefully.")

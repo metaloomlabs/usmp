@@ -20,12 +20,14 @@ from .errors import (
     USMPTimeoutError,
     VersionError,
 )
+from ._logging import ColoredFormatter, setup_logging
 from .transport import register_transport
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
 __all__ = [
     "AuthError",
     "CRCError",
+    "ColoredFormatter",
     "ConnectionClosedError",
     "CryptoError",
     "ErrorCode",
@@ -57,6 +59,7 @@ __all__ = [
     "read_frame",
     # Transport registry
     "register_transport",
+    "setup_logging",
     "write_frame",
 ]
 

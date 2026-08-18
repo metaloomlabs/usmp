@@ -78,7 +78,7 @@ class TCPListener(USMPListener):
             self._host,
             self._port,
         )
-        logger.info("Listening on TCP %s:%d", self._host, self._port)
+        logger.info("🚀 Listening on TCP %s:%d", self._host, self._port)
 
     async def stop(self) -> None:
         if self._srv:
