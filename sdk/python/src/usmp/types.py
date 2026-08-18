@@ -32,6 +32,19 @@ class ErrorCode(IntEnum):
     ERR_INTERNAL = 0x07
 
 
+class USMPErrorCode(IntEnum):
+    OK = 0
+    INVALID_ARG = -1
+    TRANSPORT_FAILED = -2
+    AUTH_FAILED = -3
+    TIMEOUT = -4
+    REPLAY_DETECTED = -5
+    BUFFER_OVERFLOW = -6
+    SEQ_EXHAUSTED = -7
+    CRYPTO_FAILED = -8
+    NOT_CONNECTED = -9
+
+
 # Protocol constants
 USMP_MAGIC = 0xABCD
 USMP_VERSION = 0x02

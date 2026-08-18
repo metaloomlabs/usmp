@@ -10,8 +10,25 @@
 #include "usmp_transport.h"
 
 #ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
+static inline int win_inet_pton(int af, const char* src, void* dst) {
+  (void)af;
+  struct sockaddr_in in;
+  int size = sizeof(in);
+  char src_copy[64];
+  strncpy(src_copy, src, sizeof(src_copy) - 1);
+  src_copy[sizeof(src_copy) - 1] = '\0';
+  if (WSAStringToAddressA(src_copy, AF_INET, NULL, (LPSOCKADDR)&in, &size) == 0) {
+    memcpy(dst, &in.sin_addr, sizeof(struct in_addr));
+    return 1;
+  }
+  return 0;
+}
+#define inet_pton win_inet_pton
 // Dedicated socket-close macro. A blanket `#define close closesocket` would also rewrite
 // the `t->close` struct-member assignments below into `t->closesocket` and break the build.
 #define usmp_sock_close(s) closesocket(s)
