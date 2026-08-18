@@ -81,6 +81,19 @@ const char* usmp_get_version(void);
 #define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN - 12)
 
 typedef enum {
+  USMP_OK                      =  0,
+  USMP_ERR_INVALID_ARG         = -1,
+  USMP_ERR_TRANSPORT_FAILED    = -2,
+  USMP_ERR_AUTH_FAILED         = -3,
+  USMP_ERR_TIMEOUT             = -4,
+  USMP_ERR_REPLAY_DETECTED     = -5,
+  USMP_ERR_BUFFER_OVERFLOW     = -6,
+  USMP_ERR_SEQ_EXHAUSTED       = -7,
+  USMP_ERR_CRYPTO_FAILED       = -8,
+  USMP_ERR_NOT_CONNECTED       = -9,
+} usmp_err_t;
+
+typedef enum {
   USMP_CIPHER_AES256_GCM = 1,
   USMP_CIPHER_CHACHA20_POLY1305 = 2,
 } usmp_cipher_suite_t;
@@ -124,16 +137,16 @@ typedef struct {
 /**
  * Connect using a transport and perform USMP handshake.
  * ctx->psk and ctx->psk_len must be set before calling.
- * Returns 0 on success, -1 on failure.
+ * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
-int usmp_connect(usmp_t* ctx, usmp_transport_t* transport);
+usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport);
 
 /**
  * Explicit reconnect — re-dials transport and performs a full new handshake.
  * Resets tx_seq and rx_seq. Caller must handle session change.
- * Returns 0 on success, -1 on failure.
+ * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
-int usmp_reconnect(usmp_t* ctx);
+usmp_err_t usmp_reconnect(usmp_t* ctx);
 
 /**
  * Close the USMP session gracefully.
@@ -149,14 +162,14 @@ static inline bool usmp_is_connected(const usmp_t* ctx) { return ctx && ctx->est
 
 /**
  * Send encrypted data. Max len: USMP_MAX_DATA_LEN (452) bytes.
- * Returns 0 on success, -1 on failure.
+ * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
-int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len);
+usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len);
 
 /**
  * Receive and decrypt data. Transparently handles inbound PING/PONG frames
  * (up to 8 consecutive control frames before returning error).
- * Returns byte count on success, -1 on failure.
+ * Returns byte count (>0) on success, 0 on timeout/empty, or negative usmp_err_t code on error.
  */
 int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len);
 
@@ -164,23 +177,23 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len);
 
 /**
  * Send an encrypted PING frame. Updates last_tx_ms.
- * Returns 0 on success, -1 on failure (dead socket).
+ * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure (dead socket).
  */
-int usmp_ping(usmp_t* ctx);
+usmp_err_t usmp_ping(usmp_t* ctx);
 
 /**
  * Call in main loop. Sends PING if keepalive_ms has elapsed since last tx.
  * No-op if ctx->keepalive_ms == 0.
- * Returns 0 ok, -1 if PING failed (time to call usmp_reconnect).
+ * Returns USMP_OK (0) ok, or a negative usmp_err_t code if PING failed (time to call usmp_reconnect).
  */
-int usmp_keepalive_tick(usmp_t* ctx);
+usmp_err_t usmp_keepalive_tick(usmp_t* ctx);
 
 /**
  * Perform in-band session rekeying. Rotates tx_key and rx_key using HKDF
  * and resets tx_seq and rx_seq to 0 without tearing down the socket.
- * Returns 0 on success, -1 on failure.
+ * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
-int usmp_rekey(usmp_t* ctx);
+usmp_err_t usmp_rekey(usmp_t* ctx);
 
 #ifdef __cplusplus
 }

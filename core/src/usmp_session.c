@@ -155,27 +155,27 @@ static int send_control(usmp_t* ctx, uint8_t type) { return emit_frame(ctx, type
  * session immediately instead of waiting for its inactivity watchdog. The
  * caller owns teardown regardless, so the return value is advisory only.
  */
-int usmp_send_bye(usmp_t* ctx) {
-  if (!ctx || !ctx->established || !ctx->transport.send) return -1;
-  return send_control(ctx, USMP_TYPE_BYE);
+usmp_err_t usmp_send_bye(usmp_t* ctx) {
+  if (!ctx || !ctx->established || !ctx->transport.send) return USMP_ERR_NOT_CONNECTED;
+  return (send_control(ctx, USMP_TYPE_BYE) == 0) ? USMP_OK : USMP_ERR_TRANSPORT_FAILED;
 }
 
 // Public API ────────────────────────────────────────────────────────────────
 
-int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
-  if (!ctx || !ctx->established) return -1;
+usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
+  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
 
   uint32_t num_fragments =
       (len == 0) ? 1 : (uint32_t)((len + USMP_MAX_DATA_LEN - 1) / USMP_MAX_DATA_LEN);
   if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
-    return -1;
+    return USMP_ERR_SEQ_EXHAUSTED;
   }
 
   if (len > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES) {
     USMP_LOGE(TAG, "Payload too large for fragmentation limits");
-    return -1;
+    return USMP_ERR_BUFFER_OVERFLOW;
   }
 
   uint16_t offset = 0;
@@ -193,7 +193,7 @@ int usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     int rc = emit_frame(ctx, type, data + offset, chunk_len);
     if (rc != 0) {
       USMP_LOGE(TAG, rc == -2 ? "Encryption failed" : "Send failed");
-      return -1;
+      return (rc == -2) ? USMP_ERR_CRYPTO_FAILED : USMP_ERR_TRANSPORT_FAILED;
     }
 
     snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u type=0x%02x", (unsigned long)frame_seq,
@@ -476,44 +476,44 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
   }
 }
 
-int usmp_ping(usmp_t* ctx) {
-  if (!ctx || !ctx->established) return -1;
+usmp_err_t usmp_ping(usmp_t* ctx) {
+  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
 
   if (send_control(ctx, USMP_TYPE_PING) != 0) {
     USMP_LOGE(TAG, "PING send failed");
     ctx->established = false;
-    return -1;
+    return USMP_ERR_TRANSPORT_FAILED;
   }
 
   USMP_LOGI(TAG, "PING sent");
-  return 0;
+  return USMP_OK;
 }
 
-int usmp_keepalive_tick(usmp_t* ctx) {
-  if (!ctx || !ctx->established) return -1;
+usmp_err_t usmp_keepalive_tick(usmp_t* ctx) {
+  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
 
-  if (ctx->keepalive_ms == 0) return 0;  // disabled
+  if (ctx->keepalive_ms == 0) return USMP_OK;  // disabled
 
   uint32_t now = usmp_port_millis();
   if ((now - ctx->last_tx_ms) >= ctx->keepalive_ms) return usmp_ping(ctx);
 
-  return 0;
+  return USMP_OK;
 }
 
-int usmp_rekey(usmp_t* ctx) {
-  if (!ctx || !ctx->established) return -1;
+usmp_err_t usmp_rekey(usmp_t* ctx) {
+  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
 
   uint8_t salt[32];
   if (usmp_port_random(salt, sizeof(salt)) != 0) {
     USMP_LOGE(TAG, "Failed to generate random salt for rekey");
-    return -1;
+    return USMP_ERR_CRYPTO_FAILED;
   }
 
   int rc = emit_frame(ctx, USMP_TYPE_REKEY, salt, sizeof(salt));
   if (rc != 0) {
     USMP_LOGE(TAG, "Failed to emit REKEY frame");
     mbedtls_platform_zeroize(salt, sizeof(salt));
-    return -1;
+    return USMP_ERR_TRANSPORT_FAILED;
   }
 
   uint8_t new_tx[USMP_SESSION_KEY_LEN];
@@ -522,7 +522,7 @@ int usmp_rekey(usmp_t* ctx) {
       0) {
     USMP_LOGE(TAG, "Failed to derive new keys for rekey");
     mbedtls_platform_zeroize(salt, sizeof(salt));
-    return -1;
+    return USMP_ERR_CRYPTO_FAILED;
   }
 
   memcpy(ctx->tx_key, new_tx, USMP_SESSION_KEY_LEN);
@@ -540,5 +540,5 @@ int usmp_rekey(usmp_t* ctx) {
   mbedtls_platform_zeroize(new_rx, sizeof(new_rx));
 
   USMP_LOGI(TAG, "In-band session rekeying initiated successfully");
-  return 0;
+  return USMP_OK;
 }

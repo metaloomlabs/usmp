@@ -24,13 +24,13 @@ static void log_session_id(const char* prefix, const uint8_t* session_id) {
   USMP_LOGI(TAG, _msg);
 }
 
-int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
-  if (!ctx || !transport) return -1;
+usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
+  if (!ctx || !transport) return USMP_ERR_INVALID_ARG;
 
   /* Validate required transport function pointers before use */
   if (!transport->send || !transport->recv) {
     USMP_LOGE(TAG, "Transport missing send or recv — cannot connect");
-    return -1;
+    return USMP_ERR_INVALID_ARG;
   }
 
   const uint8_t* psk = ctx->psk;
@@ -48,11 +48,12 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
 
-  int ret = 0;
-  if (usmp_handshake(&ctx->transport, &hs) != 0) {
+  usmp_err_t ret = USMP_OK;
+  usmp_err_t hs_ret = usmp_handshake(&ctx->transport, &hs);
+  if (hs_ret != USMP_OK) {
     USMP_LOGE(TAG, "Handshake failed");
     if (ctx->transport.close) ctx->transport.close(&ctx->transport);
-    ret = -1;
+    ret = hs_ret;
     goto cleanup;
   }
 
@@ -71,15 +72,15 @@ int usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   ctx->last_tx_ms = usmp_port_millis();
 
   log_session_id("Session established — id: ", ctx->session_id);
-  ret = 0;
+  ret = USMP_OK;
 
 cleanup:
   mbedtls_platform_zeroize(&hs, sizeof(hs));
   return ret;
 }
 
-int usmp_reconnect(usmp_t* ctx) {
-  if (!ctx) return -1;
+usmp_err_t usmp_reconnect(usmp_t* ctx) {
+  if (!ctx) return USMP_ERR_INVALID_ARG;
 
   /* Zeroise the old session key immediately on entering reconnect */
   mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
@@ -87,7 +88,7 @@ int usmp_reconnect(usmp_t* ctx) {
 
   if (!ctx->transport.reconnect) {
     USMP_LOGE(TAG, "Transport does not support reconnect");
-    return -1;
+    return USMP_ERR_TRANSPORT_FAILED;
   }
 
   ctx->established = false;
@@ -95,7 +96,7 @@ int usmp_reconnect(usmp_t* ctx) {
   //  Re-dial transport ─────────────────────────────────────────────────────
   if (ctx->transport.reconnect(&ctx->transport) != 0) {
     USMP_LOGE(TAG, "Transport reconnect failed");
-    return -1;
+    return USMP_ERR_TRANSPORT_FAILED;
   }
   USMP_LOGI(TAG, "Transport reconnected — starting handshake");
 
@@ -104,11 +105,12 @@ int usmp_reconnect(usmp_t* ctx) {
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
 
-  int ret = 0;
-  if (usmp_handshake(&ctx->transport, &hs) != 0) {
+  usmp_err_t ret = USMP_OK;
+  usmp_err_t hs_ret = usmp_handshake(&ctx->transport, &hs);
+  if (hs_ret != USMP_OK) {
     USMP_LOGE(TAG, "Handshake failed after reconnect");
     if (ctx->transport.close) ctx->transport.close(&ctx->transport);
-    ret = -1;
+    ret = hs_ret;
     goto cleanup;
   }
 
@@ -127,7 +129,7 @@ int usmp_reconnect(usmp_t* ctx) {
   ctx->last_tx_ms = usmp_port_millis();
 
   log_session_id("Reconnected — new session: ", ctx->session_id);
-  ret = 0;
+  ret = USMP_OK;
 
 cleanup:
   mbedtls_platform_zeroize(&hs, sizeof(hs));
