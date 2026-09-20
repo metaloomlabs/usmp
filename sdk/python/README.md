@@ -1,5 +1,8 @@
 # USMP - Unified Secure Multi-transport Protocol
 
+> ⚠️ **Note:** This repository is a read-only distribution mirror of the USMP monorepo.
+> All development, pull requests, and issues should be submitted to [metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
+
 Secure, encrypted communication for ESP32, Arduino, and IoT devices.
 
 USMP sits between raw sockets (no security) and full TLS/DTLS (too heavy for microcontrollers) - giving any constrained device a fully encrypted, mutually authenticated session in three function calls.

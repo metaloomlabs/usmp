@@ -2,6 +2,9 @@
 
 [![ESP Component Registry](https://components.espressif.com/components/metaloomlabs/usmp/badge.svg)](https://components.espressif.com/components/metaloomlabs/usmp)
 
+> ⚠️ **Note:** This repository is a read-only distribution mirror of the USMP monorepo.
+> All development, pull requests, and issues should be submitted to [metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
+
 Lightweight, mutually authenticated, AES-256-GCM encrypted communication for ESP32.  
 No TLS stack. No certificates. Three function calls.
 
