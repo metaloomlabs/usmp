@@ -20,6 +20,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine Tag
         id: tag
@@ -30,7 +31,10 @@ jobs:
 
       - name: Split and Push to usmp-python
         run: |
-          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-python.git"
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-python.git"
           SPLIT_SHA=$(git subtree split --prefix=sdk/python)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
@@ -46,6 +50,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine Tag
         id: tag
@@ -65,7 +70,8 @@ jobs:
 
       - name: Split and Push to usmp-arduino
         run: |
-          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-arduino.git"
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-arduino.git"
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-arduino)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
@@ -81,6 +87,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Determine Tag
         id: tag
@@ -100,7 +107,8 @@ jobs:
 
       - name: Split and Push to usmp-esp32
         run: |
-          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-esp32.git"
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-esp32.git"
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-esp32)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
