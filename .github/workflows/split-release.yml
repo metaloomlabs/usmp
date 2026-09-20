@@ -1,0 +1,106 @@
+name: Split & Release Downstream
+
+on:
+  push:
+    tags:
+      - "python-v*"
+      - "arduino-v*"
+      - "esp-v*"
+      - "v*"
+
+jobs:
+  # ==========================================================
+  # PYTHON SPLIT & RELEASE (Pure Subtree)
+  # ==========================================================
+  release-python:
+    if: startsWith(github.ref, 'refs/tags/python-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Tag
+        id: tag
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/python-//')
+          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
+
+      - name: Split and Push to usmp-python
+        run: |
+          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-python.git"
+          SPLIT_SHA=$(git subtree split --prefix=sdk/python)
+          git push dest "$SPLIT_SHA:refs/heads/main" --force
+          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
+
+  # ==========================================================
+  # ARDUINO SPLIT & RELEASE (Transient Bundling + Subtree)
+  # ==========================================================
+  release-arduino:
+    if: startsWith(github.ref, 'refs/tags/arduino-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Tag
+        id: tag
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/arduino-//')
+          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
+
+      - name: Bundle Core and Commit Ephemeral Release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b release-temp-arduino
+          python scripts/bundle-ports.py --target arduino
+          git add ports/usmp-arduino
+          git commit -m "chore(release): bundle core protocol engine for ${{ steps.tag.outputs.TAG }}"
+
+      - name: Split and Push to usmp-arduino
+        run: |
+          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-arduino.git"
+          SPLIT_SHA=$(git subtree split --prefix=ports/usmp-arduino)
+          git push dest "$SPLIT_SHA:refs/heads/main" --force
+          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
+
+  # ==========================================================
+  # ESP32 SPLIT & RELEASE (Transient Bundling + Subtree)
+  # ==========================================================
+  release-esp32:
+    if: startsWith(github.ref, 'refs/tags/esp-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine Tag
+        id: tag
+        run: |
+          RAW_TAG="${{ github.ref_name }}"
+          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/esp-//')
+          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
+
+      - name: Bundle Core and Commit Ephemeral Release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b release-temp-esp32
+          python scripts/bundle-ports.py --target esp32
+          git add ports/usmp-esp32
+          git commit -m "chore(release): bundle core protocol engine for ${{ steps.tag.outputs.TAG }}"
+
+      - name: Split and Push to usmp-esp32
+        run: |
+          git remote add dest "https://x-access-token:${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-esp32.git"
+          SPLIT_SHA=$(git subtree split --prefix=ports/usmp-esp32)
+          git push dest "$SPLIT_SHA:refs/heads/main" --force
+          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
