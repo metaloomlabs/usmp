@@ -249,10 +249,14 @@ def test_golden_vectors():
 
     from usmp._frame import crc16, encode_frame
 
-    base_dir = os.path.dirname(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    )
-    json_path = os.path.join(base_dir, "tests", "golden_vectors.json")
+    local_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "golden_vectors.json")
+    if os.path.exists(local_path):
+        json_path = local_path
+    else:
+        base_dir = os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        )
+        json_path = os.path.join(base_dir, "tests", "golden_vectors.json")
     with open(json_path, "r") as f:
         golden = json.load(f)
 
