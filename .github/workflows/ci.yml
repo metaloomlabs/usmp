@@ -72,16 +72,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
-      - name: Install zip utility
-        run: sudo apt-get update && sudo apt-get install -y zip
-
-      # Assemble the Arduino library exactly as it ships (vendors core/ into a
-      # flat src/), then unpack it so we compile the real published artifact.
-      - name: Assemble Arduino library
-        run: |
-          chmod +x scripts/build-arduino-zip.sh
-          ./scripts/build-arduino-zip.sh
-          unzip -q usmp-*-arduino.zip -d assembled
+      # Transiently stage core sources into the Arduino library exactly as
+      # packaged downstream, then clean up after test compilation.
+      - name: Bundle Arduino library for test compilation
+        run: python scripts/bundle-ports.py --target arduino
 
       - name: Install arduino-cli
         run: |
@@ -97,10 +91,10 @@ jobs:
           arduino-cli core update-index
           arduino-cli core install esp32:esp32
 
-      - name: Install assembled USMP library
+      - name: Install USMP library
         run: |
           mkdir -p "$HOME/Arduino/libraries"
-          cp -r assembled/usmp-arduino "$HOME/Arduino/libraries/USMP"
+          cp -r ports/usmp-arduino "$HOME/Arduino/libraries/USMP"
 
       - name: Compile examples for ESP32
         run: |
@@ -110,3 +104,8 @@ jobs:
               --libraries "$HOME/Arduino/libraries" "$(dirname "$ex")"
             echo "::endgroup::"
           done
+
+      - name: Clean transient port files
+        if: always()
+        run: python scripts/bundle-ports.py --clean
+
