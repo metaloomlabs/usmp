@@ -1,0 +1,32 @@
+name: Upload Component to Espressif Registry
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upload:
+    name: Upload to Espressif Component Registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Upload to Espressif Component Registry
+        uses: espressif/upload-components-ci-action@v2
+        with:
+          name: "usmp"
+          namespace: "metaloomlabs"
+          api_token: ${{ secrets.IDF_COMPONENT_API_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
