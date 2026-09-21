@@ -39,20 +39,6 @@ jobs:
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
 
-      - name: Trigger Downstream PyPI Publish Workflow
-        run: |
-          echo "Dispatching workflow on metaloomlabs/usmp-python..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.SPLIT_TOKEN }}" \
-            https://api.github.com/repos/metaloomlabs/usmp-python/actions/workflows/publish.yml/dispatches \
-            -d "{\"ref\":\"${{ steps.tag.outputs.TAG }}\"}")
-          if [ "$HTTP_STATUS" -eq 204 ]; then
-            echo "Successfully dispatched downstream PyPI publish workflow!"
-          else
-            echo "Workflow dispatch returned HTTP $HTTP_STATUS"
-          fi
-
   # ==========================================================
   # ARDUINO SPLIT & RELEASE (Transient Bundling + Subtree)
   # ==========================================================
@@ -90,20 +76,6 @@ jobs:
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
 
-      - name: Trigger Downstream Arduino Verify Workflow
-        run: |
-          echo "Dispatching workflow on metaloomlabs/usmp-arduino..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.SPLIT_TOKEN }}" \
-            https://api.github.com/repos/metaloomlabs/usmp-arduino/actions/workflows/verify.yml/dispatches \
-            -d "{\"ref\":\"${{ steps.tag.outputs.TAG }}\"}")
-          if [ "$HTTP_STATUS" -eq 204 ]; then
-            echo "Successfully dispatched downstream Arduino verify workflow!"
-          else
-            echo "Workflow dispatch returned HTTP $HTTP_STATUS"
-          fi
-
   # ==========================================================
   # ESP32 SPLIT & RELEASE (Transient Bundling + Subtree)
   # ==========================================================
@@ -140,17 +112,3 @@ jobs:
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-esp32)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
           git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
-
-      - name: Trigger Downstream ESP32 Upload Workflow
-        run: |
-          echo "Dispatching workflow on metaloomlabs/usmp-esp32..."
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${{ secrets.SPLIT_TOKEN }}" \
-            https://api.github.com/repos/metaloomlabs/usmp-esp32/actions/workflows/upload_component.yml/dispatches \
-            -d "{\"ref\":\"${{ steps.tag.outputs.TAG }}\"}")
-          if [ "$HTTP_STATUS" -eq 204 ]; then
-            echo "Successfully dispatched downstream ESP32 upload workflow!"
-          else
-            echo "Workflow dispatch returned HTTP $HTTP_STATUS"
-          fi
