@@ -159,11 +159,6 @@ def clean_ports() -> None:
         shutil.rmtree(core_dest)
         print("  Removed ports/usmp-esp32/core/")
 
-    license_dest = ESP32_PORT_DIR / "LICENSE"
-    if license_dest.exists():
-        license_dest.unlink()
-        print("  Removed ports/usmp-esp32/LICENSE")
-
     print("[USMP] Ports cleaned successfully.")
 
 
