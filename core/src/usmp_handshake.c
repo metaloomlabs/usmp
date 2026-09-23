@@ -110,6 +110,15 @@ static int compute_transcript_hmac(const uint8_t* psk, size_t psk_len, uint8_t t
   return compute_hmac(psk, psk_len, input, off, out);
 }
 
+static int usmp_mbedtls_entropy_callback(void* data, unsigned char* output, size_t len, size_t* olen) {
+  (void)data;
+  if (usmp_port_random(output, len) == 0) {
+    *olen = len;
+    return 0;
+  }
+  return -1;
+}
+
 usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   usmp_err_t ret = USMP_ERR_AUTH_FAILED;
   char _msg[128];
@@ -134,6 +143,8 @@ usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   mbedtls_ecdh_init(&ecdh);
   mbedtls_entropy_init(&entropy);
   mbedtls_ctr_drbg_init(&ctr_drbg);
+
+  mbedtls_entropy_add_source(&entropy, usmp_mbedtls_entropy_callback, NULL, 32, MBEDTLS_ENTROPY_SOURCE_STRONG);
 
   /*
    * Heap-allocate TX/RX buffers.

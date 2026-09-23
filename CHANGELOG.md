@@ -5,6 +5,31 @@ All notable changes to USMP are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+DevOps and developer experience overhaul spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
+
+### ✨ Added
+
+- **CI/CD — Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
+- **CI/CD — Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
+- **CI/CD — Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
+- **CI/CD — Toolchain Caching**: Integrated GitHub Actions caching for Arduino CLI cores (`esp32:esp32`) and ESP-IDF tools, slashing build times (#35).
+- **CI/CD — Unified Branch Protection Check**: Added aggregate `ci-checks` gate job requiring `c-core`, `python-tests`, `python-lint-security`, and `arduino-esp32-compile` before PR merges (#35).
+- **CI/CD — Release Pre-Flight Validation**: Automated multi-manifest version consistency checks (`scripts/preflight-release.py`) before release deployments, verifying matching version numbers across Python, C Core, ESP32, and Arduino manifests (#34).
+- **CI/CD — Workflow Concurrency Controls**: Enforced `concurrency` groups (`cancel-in-progress: true`) across test and release workflows to prevent redundant runner execution and race conditions (#34).
+- **Developer Experience — Root Makefile**: Added cross-platform `Makefile` with targets for testing (`test`, `test-v`, `test-c`, `test-all`), linting & formatting (`lint`, `format`), security scanning (`security`), port packaging (`bundle-arduino`, `bundle-esp32`), and artifact cleaning (`clean-ports`, `clean`). Automatically detects `uv` with fallback to active virtual environments.
+- **Tests — Pytest Timeout Guard**: Added `pytest-timeout` (`--timeout=60`) to guard against hung event loops and deadlock regressions during integration test execution.
+
+### 🐛 Fixed
+
+- **Python SDK — Python 3.11 Datagram Transport**: Fixed `AttributeError: '_SelectorDatagramTransport' object has no attribute '_address'` in `USMPClient.connect()` on Python 3.11 by safely resolving endpoint addresses using standard socket peer discovery (#35).
+- **Tests — Rate Limiter State Pollution**: Added autouse session-isolation fixture in `conftest.py` ensuring global rate-limiter caches are reset before and after every test, preventing cascading flaky test failures in test suites.
+- **Tests — Concurrent Handshake Teardown**: Optimized listener shutdown in `test_concurrent_handshakes_exceeding_capacity` using cancellation task groups, preventing hanging background tasks.
+- **Ports — Shim Alignment**: Synchronized `usmp_api.h` shim in `scripts/bundle-ports.py` with port development shims, ensuring `bundle-ports.py --clean` leaves working trees completely clean.
+
+---
+
 ## [1.2.0] — 2026-08-15
 
 Feature release adding ChaCha20-Poly1305 cipher suite support, in-band session rekeying, adaptive UDP RTT estimation, and Arduino port control frame background handling.

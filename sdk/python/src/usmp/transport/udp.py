@@ -290,10 +290,12 @@ class ClientUDPProtocol(asyncio.DatagramProtocol):
         self.stream: UDPStream | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        if not isinstance(transport, asyncio.DatagramTransport):
+        if not (isinstance(transport, asyncio.DatagramTransport) or hasattr(transport, "sendto")):
             raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
         remote_addr = transport.get_extra_info("peername")
-        self.stream = UDPStream(transport, remote_addr, is_server=False)
+        self.stream = UDPStream(
+            typing.cast(asyncio.DatagramTransport, transport), remote_addr, is_server=False
+        )
         self.stream_future.set_result(self.stream)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
@@ -315,9 +317,9 @@ class ServerUDPProtocol(asyncio.DatagramProtocol):
         self.transport: asyncio.DatagramTransport | None = None
 
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
-        if not isinstance(transport, asyncio.DatagramTransport):
+        if not (isinstance(transport, asyncio.DatagramTransport) or hasattr(transport, "sendto")):
             raise TypeError(f"Expected DatagramTransport, got {type(transport).__name__}")
-        self.transport = transport
+        self.transport = typing.cast(asyncio.DatagramTransport, transport)
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
         if self.transport:
