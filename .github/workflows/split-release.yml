@@ -7,6 +7,17 @@ on:
       - "arduino-v*"
       - "esp-v*"
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to test or release (e.g. v1.2.1, v1.3.0, python-v1.3.0)"
+        required: true
+        type: string
+      dry_run:
+        description: "Dry-run mode (bundle and slice subtree, but DO NOT push to downstream repositories)"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -29,14 +40,26 @@ jobs:
       is_python: ${{ steps.validate.outputs.is_python }}
       is_arduino: ${{ steps.validate.outputs.is_arduino }}
       is_esp32: ${{ steps.validate.outputs.is_esp32 }}
+      is_dry_run: ${{ steps.dry_run.outputs.is_dry_run }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Determine Dry-Run Mode
+        id: dry_run
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "is_dry_run=true" >> "$GITHUB_OUTPUT"
+            echo "[USMP] Simulation mode enabled: Dry-run active. Downstream pushes will be skipped."
+          else
+            echo "is_dry_run=false" >> "$GITHUB_OUTPUT"
+            echo "[USMP] Live release mode enabled: Downstream pushes will be executed."
+          fi
+
       - name: Validate Tag & Manifests
         id: validate
         env:
-          RAW_TAG: ${{ github.ref_name }}
+          RAW_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: python3 scripts/validate-release-tag.py
 
   # ==========================================================
@@ -58,20 +81,28 @@ jobs:
         env:
           SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
           TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+          IS_DRY_RUN: ${{ needs.preflight-validation.outputs.is_dry_run }}
         run: |
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
-          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
-          git remote add dest "https://github.com/metaloomlabs/usmp-python.git"
-
           SPLIT_SHA=$(git subtree split --prefix=sdk/python)
-          git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+          echo "[USMP] Subtree split generated SHA: $SPLIT_SHA"
 
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          if [ "$IS_DRY_RUN" = "true" ]; then
+            echo "[DRY-RUN] Verified python subtree split ($TARGET_TAG) at commit $SPLIT_SHA."
+            echo "[DRY-RUN] Skipped git push to https://github.com/metaloomlabs/usmp-python.git"
+          else
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+            git remote add dest "https://github.com/metaloomlabs/usmp-python.git"
+
+            git push dest "$SPLIT_SHA:refs/heads/main" --force
+            git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+          fi
 
   # ==========================================================
   # ARDUINO SPLIT & RELEASE (Transient Bundling + Subtree)
@@ -103,20 +134,28 @@ jobs:
         env:
           SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
           TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+          IS_DRY_RUN: ${{ needs.preflight-validation.outputs.is_dry_run }}
         run: |
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
-          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
-          git remote add dest "https://github.com/metaloomlabs/usmp-arduino.git"
-
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-arduino)
-          git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+          echo "[USMP] Subtree split generated SHA: $SPLIT_SHA"
 
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          if [ "$IS_DRY_RUN" = "true" ]; then
+            echo "[DRY-RUN] Verified arduino bundling and subtree split ($TARGET_TAG) at commit $SPLIT_SHA."
+            echo "[DRY-RUN] Skipped git push to https://github.com/metaloomlabs/usmp-arduino.git"
+          else
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+            git remote add dest "https://github.com/metaloomlabs/usmp-arduino.git"
+
+            git push dest "$SPLIT_SHA:refs/heads/main" --force
+            git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+          fi
 
   # ==========================================================
   # ESP32 SPLIT & RELEASE (Transient Bundling + Subtree)
@@ -148,17 +187,26 @@ jobs:
         env:
           SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
           TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+          IS_DRY_RUN: ${{ needs.preflight-validation.outputs.is_dry_run }}
         run: |
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
-          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
-          git remote add dest "https://github.com/metaloomlabs/usmp-esp32.git"
-
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-esp32)
-          git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+          echo "[USMP] Subtree split generated SHA: $SPLIT_SHA"
 
-          git config --local --unset-all "http.https://github.com/.extraheader" || true
+          if [ "$IS_DRY_RUN" = "true" ]; then
+            echo "[DRY-RUN] Verified esp32 bundling and subtree split ($TARGET_TAG) at commit $SPLIT_SHA."
+            echo "[DRY-RUN] Skipped git push to https://github.com/metaloomlabs/usmp-esp32.git"
+          else
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+            git remote add dest "https://github.com/metaloomlabs/usmp-esp32.git"
+
+            git push dest "$SPLIT_SHA:refs/heads/main" --force
+            git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+            git config --local --unset-all "http.https://github.com/.extraheader" || true
+          fi
+

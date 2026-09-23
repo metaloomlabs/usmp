@@ -37,9 +37,14 @@ ARDUINO_SHIM_CONTENT = """#pragma once
  *
  * In the repo this file forwards to the real core header, so there is ONE source
  * of truth and nothing to hand-sync. At package time
- * scripts/bundle-ports.py OVERWRITES this shim with the actual
+ * scripts/build-arduino-zip.{sh,ps1} OVERWRITES this shim with the actual
  * core/include/usmp.h, so the forward below never ships — it exists only for
  * editor indexing and standalone compilation.
+ *
+ * The path is explicit and relative (not a bare "usmp.h"): on a case-insensitive
+ * filesystem a bare include would match the sibling USMP.h (the Arduino class
+ * header) instead of core's usmp.h — the very collision the packaging step works
+ * around.
  */
 #ifndef USMP_TEST_MAIN
 #include "../../../core/include/usmp.h"
