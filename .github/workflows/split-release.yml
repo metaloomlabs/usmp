@@ -8,12 +8,44 @@ on:
       - "esp-v*"
       - "v*"
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  # ==========================================================
+  # PRE-FLIGHT VALIDATION (Tag & Manifest Consistency Check)
+  # ==========================================================
+  preflight-validation:
+    name: Pre-Flight Release Validation
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.validate.outputs.tag }}
+      semver: ${{ steps.validate.outputs.semver }}
+      target: ${{ steps.validate.outputs.target }}
+      is_python: ${{ steps.validate.outputs.is_python }}
+      is_arduino: ${{ steps.validate.outputs.is_arduino }}
+      is_esp32: ${{ steps.validate.outputs.is_esp32 }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate Tag & Manifests
+        id: validate
+        env:
+          RAW_TAG: ${{ github.ref_name }}
+        run: python3 scripts/validate-release-tag.py
+
   # ==========================================================
   # PYTHON SPLIT & RELEASE (Pure Subtree)
   # ==========================================================
   release-python:
-    if: startsWith(github.ref, 'refs/tags/python-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    name: Release Python
+    needs: [preflight-validation]
+    if: needs.preflight-validation.outputs.is_python == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
@@ -22,28 +54,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Determine Tag
-        id: tag
-        run: |
-          RAW_TAG="${{ github.ref_name }}"
-          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/python-//')
-          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
-
       - name: Split and Push to usmp-python
+        env:
+          SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
         run: |
           git config --local --unset-all "http.https://github.com/.extraheader" || true
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-python.git"
+
+          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+          git remote add dest "https://github.com/metaloomlabs/usmp-python.git"
+
           SPLIT_SHA=$(git subtree split --prefix=sdk/python)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
+          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
 
   # ==========================================================
   # ARDUINO SPLIT & RELEASE (Transient Bundling + Subtree)
   # ==========================================================
   release-arduino:
-    if: startsWith(github.ref, 'refs/tags/arduino-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    name: Release Arduino
+    needs: [preflight-validation]
+    if: needs.preflight-validation.outputs.is_arduino == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
@@ -52,35 +88,43 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Determine Tag
-        id: tag
-        run: |
-          RAW_TAG="${{ github.ref_name }}"
-          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/arduino-//')
-          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
-
       - name: Bundle Core and Commit Ephemeral Release
+        env:
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b release-temp-arduino
           python scripts/bundle-ports.py --target arduino
           git add ports/usmp-arduino
-          git commit -m "chore(release): bundle core protocol engine for ${{ steps.tag.outputs.TAG }}"
+          git commit -m "chore(release): bundle core protocol engine for $TARGET_TAG"
 
       - name: Split and Push to usmp-arduino
+        env:
+          SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
         run: |
           git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-arduino.git"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+          git remote add dest "https://github.com/metaloomlabs/usmp-arduino.git"
+
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-arduino)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
+          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
 
   # ==========================================================
   # ESP32 SPLIT & RELEASE (Transient Bundling + Subtree)
   # ==========================================================
   release-esp32:
-    if: startsWith(github.ref, 'refs/tags/esp-v') || (startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    name: Release ESP32
+    needs: [preflight-validation]
+    if: needs.preflight-validation.outputs.is_esp32 == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full history
@@ -89,26 +133,32 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Determine Tag
-        id: tag
-        run: |
-          RAW_TAG="${{ github.ref_name }}"
-          CLEAN_TAG=$(echo "$RAW_TAG" | sed 's/esp-//')
-          echo "TAG=$CLEAN_TAG" >> $GITHUB_OUTPUT
-
       - name: Bundle Core and Commit Ephemeral Release
+        env:
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b release-temp-esp32
           python scripts/bundle-ports.py --target esp32
           git add ports/usmp-esp32
-          git commit -m "chore(release): bundle core protocol engine for ${{ steps.tag.outputs.TAG }}"
+          git commit -m "chore(release): bundle core protocol engine for $TARGET_TAG"
 
       - name: Split and Push to usmp-esp32
+        env:
+          SPLIT_TOKEN: ${{ secrets.SPLIT_TOKEN }}
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
         run: |
           git config --local --unset-all "http.https://github.com/.extraheader" || true
-          git remote add dest "https://${{ secrets.SPLIT_TOKEN }}@github.com/metaloomlabs/usmp-esp32.git"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+          git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
+          git remote add dest "https://github.com/metaloomlabs/usmp-esp32.git"
+
           SPLIT_SHA=$(git subtree split --prefix=ports/usmp-esp32)
           git push dest "$SPLIT_SHA:refs/heads/main" --force
-          git push dest "$SPLIT_SHA:refs/tags/${{ steps.tag.outputs.TAG }}" --force
+          git push dest "$SPLIT_SHA:refs/tags/$TARGET_TAG" --force
+
+          git config --local --unset-all "http.https://github.com/.extraheader" || true
