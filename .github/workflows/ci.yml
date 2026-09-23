@@ -10,12 +10,74 @@ on:
       - main
       - develop
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+
 jobs:
-  ci-checks:
-    name: CI Checks
+  # ==========================================================
+  # C CORE BUILD & TESTS
+  # ==========================================================
+  c-core:
+    name: C Core (Build & Test)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install mbedtls and compile C core
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmbedtls-dev
+          cmake -B build -S .
+          cmake --build build
+
+      - name: Run C Core unit tests
+        run: |
+          ./build/usmp_tests
+
+  # ==========================================================
+  # PYTHON SDK TESTS (Matrix 3.11, 3.12, 3.13)
+  # ==========================================================
+  python-tests:
+    name: Python Tests (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@b5f58b2abc5763ade55e4e9d0fe52cd1ff7979ca # v5.2.1
+        with:
+          version: "0.5.21"
+          enable-cache: true
+
+      - name: Run Python SDK tests
+        run: |
+          cd sdk/python
+          uv run --python ${{ matrix.python-version }} pytest tests/ -v
+
+  # ==========================================================
+  # PYTHON LINT & SECURITY SCAN
+  # ==========================================================
+  python-lint-security:
+    name: Python Lint & Security Scan
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -31,22 +93,6 @@ jobs:
         with:
           version: "0.5.21"
           enable-cache: true
-
-      - name: Install mbedtls and compile C core
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libmbedtls-dev
-          cmake -B build -S .
-          cmake --build build
-
-      - name: Run C Core unit tests
-        run: |
-          ./build/usmp_tests
-
-      - name: Install dependencies and run tests
-        run: |
-          cd sdk/python
-          uv run pytest tests/ -v
 
       - name: Run Ruff Linter
         run: |
@@ -68,6 +114,9 @@ jobs:
           cd sdk/python
           uv run --with pip-audit pip-audit
 
+  # ==========================================================
+  # ARDUINO ESP32 COMPILE (Cached Toolchain)
+  # ==========================================================
   arduino-esp32-compile:
     name: Arduino ESP32 Compile
     runs-on: ubuntu-latest
@@ -75,35 +124,60 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install zip utility
-        run: sudo apt-get update && sudo apt-get install -y zip
+      - name: Set up Python for bundling
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b # v5.3.0
+        with:
+          python-version: "3.11"
 
-      # Assemble the Arduino library exactly as it ships (vendors core/ into a
-      # flat src/), then unpack it so we compile the real published artifact.
-      - name: Assemble Arduino library
-        run: |
-          chmod +x scripts/build-arduino-zip.sh
-          ./scripts/build-arduino-zip.sh
-          unzip -q usmp-*-arduino.zip -d assembled
+      # Transiently stage core sources into the Arduino library exactly as
+      # packaged downstream, then clean up after test compilation.
+      - name: Bundle Arduino library for test compilation
+        run: python scripts/bundle-ports.py --target arduino
+
+      - name: Cache arduino-cli binary
+        id: cache-arduino-cli
+        uses: actions/cache@v4
+        with:
+          path: bin/arduino-cli
+          key: ${{ runner.os }}-arduino-cli-1.1.1
 
       - name: Install arduino-cli
+        if: steps.cache-arduino-cli.outputs.cache-hit != 'true'
         run: |
           mkdir -p "$PWD/bin"
           curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
             | BINDIR="$PWD/bin" sh -s 1.1.1
-          echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Add arduino-cli to PATH
+        run: echo "$PWD/bin" >> "$GITHUB_PATH"
+
+      - name: Cache ESP32 Arduino Core & Tools
+        id: cache-esp32-core
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.arduino15/packages/esp32
+            ~/.arduino15/package_esp32_index.json
+          key: ${{ runner.os }}-arduino-esp32-core-v1
+          restore-keys: |
+            ${{ runner.os }}-arduino-esp32-core-
 
       - name: Install ESP32 core
         run: |
           arduino-cli config init --additional-urls \
             https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32
+          if [ ! -d "$HOME/.arduino15/packages/esp32" ]; then
+            echo "[USMP] Installing ESP32 core..."
+            arduino-cli core install esp32:esp32
+          else
+            echo "[USMP] ESP32 core restored from cache."
+          fi
 
-      - name: Install assembled USMP library
+      - name: Install USMP library
         run: |
           mkdir -p "$HOME/Arduino/libraries"
-          cp -r assembled/usmp-arduino "$HOME/Arduino/libraries/USMP"
+          cp -r ports/usmp-arduino "$HOME/Arduino/libraries/USMP"
 
       - name: Compile examples for ESP32
         run: |
@@ -113,3 +187,32 @@ jobs:
               --libraries "$HOME/Arduino/libraries" "$(dirname "$ex")"
             echo "::endgroup::"
           done
+
+      - name: Clean transient port files
+        if: always()
+        run: python scripts/bundle-ports.py --clean
+
+  # ==========================================================
+  # CI CHECKS (Aggregator for Branch Protection)
+  # ==========================================================
+  ci-checks:
+    name: CI Checks
+    runs-on: ubuntu-latest
+    needs:
+      - c-core
+      - python-tests
+      - python-lint-security
+      - arduino-esp32-compile
+    if: always()
+    steps:
+      - name: Verify all CI jobs passed
+        run: |
+          if [ "${{ needs.c-core.result }}" != "success" ] || \
+             [ "${{ needs.python-tests.result }}" != "success" ] || \
+             [ "${{ needs.python-lint-security.result }}" != "success" ] || \
+             [ "${{ needs.arduino-esp32-compile.result }}" != "success" ]; then
+            echo "One or more CI jobs failed."
+            exit 1
+          fi
+          echo "All CI jobs passed successfully!"
+
