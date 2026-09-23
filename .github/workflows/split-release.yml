@@ -210,3 +210,91 @@ jobs:
             git config --local --unset-all "http.https://github.com/.extraheader" || true
           fi
 
+  # ==========================================================
+  # MONOREPO GITHUB RELEASE (Curated Notes + Assets + PR Diff)
+  # ==========================================================
+  monorepo-release:
+    name: Monorepo GitHub Release
+    needs:
+      [preflight-validation, release-python, release-arduino, release-esp32]
+    if: always() && needs.preflight-validation.result == 'success' && (needs.release-python.result == 'success' || needs.release-arduino.result == 'success' || needs.release-esp32.result == 'success' || needs.preflight-validation.outputs.is_dry_run == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "0.5.21"
+          enable-cache: true
+
+      - name: Extract Release Notes & Title
+        id: notes
+        env:
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+        run: |
+          mkdir -p release-notes/
+          python3 scripts/extract-release-notes.py --tag "$TARGET_TAG" --output release-notes/RELEASE_NOTES.md
+
+      - name: Build Release Assets (Arduino Zip & Python Wheel)
+        env:
+          IS_PYTHON: ${{ needs.preflight-validation.outputs.is_python }}
+          IS_ARDUINO: ${{ needs.preflight-validation.outputs.is_arduino }}
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+        run: |
+          mkdir -p dist/
+          if [ "$IS_ARDUINO" = "true" ]; then
+            echo "[USMP] Generating Arduino distribution ZIP..."
+            python3 scripts/bundle-ports.py --target arduino --zip
+            mv usmp-*-arduino.zip dist/ 2>/dev/null || true
+          fi
+          if [ "$IS_PYTHON" = "true" ]; then
+            echo "[USMP] Building Python wheel and sdist package..."
+            cd sdk/python && uv build --out-dir ../../dist && cd ../..
+          fi
+
+      - name: Create or Simulate GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_TAG: ${{ needs.preflight-validation.outputs.tag }}
+          RELEASE_TITLE: ${{ steps.notes.outputs.title }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
+          IS_DRY_RUN: ${{ needs.preflight-validation.outputs.is_dry_run }}
+        run: |
+          echo "[USMP] Release Title: $RELEASE_TITLE"
+          echo "[USMP] Release Notes File: $NOTES_FILE"
+          echo "[USMP] Prepared assets in dist/:"
+          ls -la dist/ || true
+
+          if [ "$IS_DRY_RUN" = "true" ]; then
+            echo "[DRY-RUN] Verified GitHub Release creation for tag '$TARGET_TAG'."
+            echo "[DRY-RUN] Title: '$RELEASE_TITLE'"
+            echo "[DRY-RUN] Notes preview:"
+            cat "$NOTES_FILE"
+            echo "[DRY-RUN] Skipping actual 'gh release create' in simulation mode."
+          else
+            shopt -s nullglob
+            ASSETS=(dist/*.whl dist/*.tar.gz dist/*.zip)
+            if [ ${#ASSETS[@]} -gt 0 ]; then
+              gh release create "$TARGET_TAG" \
+                --title "$RELEASE_TITLE" \
+                --notes-file "$NOTES_FILE" \
+                --generate-notes \
+                "${ASSETS[@]}"
+            else
+              gh release create "$TARGET_TAG" \
+                --title "$RELEASE_TITLE" \
+                --notes-file "$NOTES_FILE" \
+                --generate-notes
+            fi
+          fi

@@ -34,4 +34,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: USMP ESP32 Component ${{ inputs.tag_name || github.ref_name }}
+          body: |
+            ## USMP ESP32 Component ${{ inputs.tag_name || github.ref_name }}
+
+            This is an automated distribution release for the Espressif Component Registry.
+
+            * 📦 **Registry Listing**: [components.espressif.com/components/metaloomlabs/usmp](https://components.espressif.com/components/metaloomlabs/usmp)
+            * 📖 **Documentation & Full Changelog**: See the [Official USMP Release Notes](https://github.com/metaloomlabs/usmp/releases/tag/${{ inputs.tag_name || github.ref_name }})
+            * 🛠️ **Active Development**: All development occurs in the primary monorepo at [metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
           generate_release_notes: true
+

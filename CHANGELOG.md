@@ -11,6 +11,7 @@ DevOps and developer experience overhaul spanning automated pre-flight release v
 
 ### ✨ Added
 
+- **CI/CD — Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
 - **CI/CD — Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
 - **CI/CD — Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
 - **CI/CD — Toolchain Caching**: Integrated GitHub Actions caching for Arduino CLI cores (`esp32:esp32`) and ESP-IDF tools, slashing build times (#35).

@@ -32,4 +32,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.tag_name || github.ref_name }}
+          name: USMP Arduino Library ${{ inputs.tag_name || github.ref_name }}
+          body: |
+            ## USMP Arduino Library ${{ inputs.tag_name || github.ref_name }}
+
+            This is an automated distribution release for the Arduino Library Manager.
+
+            * 📦 **Installation**: Available in Arduino IDE Library Manager as `usmp`.
+            * 📖 **Documentation & Full Changelog**: See the [Official USMP Release Notes](https://github.com/metaloomlabs/usmp/releases/tag/${{ inputs.tag_name || github.ref_name }})
+            * 🛠️ **Active Development**: All development occurs in the primary monorepo at [metaloomlabs/usmp](https://github.com/metaloomlabs/usmp).
           generate_release_notes: true
+
