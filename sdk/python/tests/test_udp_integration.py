@@ -373,7 +373,7 @@ async def test_udp_concurrent_handshakes_limit():
         clients = [USMPClient(host=HOST, port=port, psk=PSK, protocol="udp") for _ in range(5)]
 
         # Attempt to connect all 5 concurrently
-        results = await asyncio.gather(*[c.connect() for c in clients], return_exceptions=True)
+        await asyncio.gather(*[c.connect() for c in clients], return_exceptions=True)
 
         # Give server a moment to process all session promotions/rejections
         await asyncio.sleep(0.2)
@@ -384,13 +384,15 @@ async def test_udp_concurrent_handshakes_limit():
             f"Expected at most 3 active UDP sessions (per-IP limit), got {active_sessions}"
         )
 
-        # Clean up successfully connected clients
-        for i, c in enumerate(clients):
-            if not isinstance(results[i], Exception):
-                try:
-                    await c.disconnect()
-                except (OSError, Exception):
-                    pass  # Rejected clients may fail to send BYE
+        # Clean up clients concurrently with a short timeout so unpromoted sessions don't stall on ARQ
+        async def _safe_disconnect(c):
+            try:
+                await asyncio.wait_for(c.disconnect(), timeout=0.5)
+            except (OSError, TimeoutError, Exception):
+                if c._transport is not None:
+                    c._transport.close()
+
+        await asyncio.gather(*[_safe_disconnect(c) for c in clients])
 
     await _run(server, client_coro())
 
