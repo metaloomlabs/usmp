@@ -1,44 +1,57 @@
 import logging
 import sys
-from typing import Any
+from typing import Any, ClassVar
 
 
 class ColoredFormatter(logging.Formatter):
     """
-    Custom ANSI Color Formatter for USMP logs with clean status symbols and timestamp/level styling.
+    Sleek Dev-Tool ANSI Color Formatter for USMP logs with pill badges,
+    dimmed timestamps, and shortened logger namespaces.
     """
 
-    COLORS = {
-        logging.DEBUG: "\033[36m",      # Cyan
-        logging.INFO: "\033[32m",       # Green
-        logging.WARNING: "\033[33m",    # Yellow
-        logging.ERROR: "\033[31m",      # Red
-        logging.CRITICAL: "\033[35m",   # Magenta
+    LEVEL_BADGES: ClassVar[dict[int, str]] = {
+        logging.DEBUG: "\033[46;30m DEBUG \033[0m",       # Cyan pill
+        logging.INFO: "\033[42;30m INFO  \033[0m",       # Emerald green pill
+        logging.WARNING: "\033[43;30m WARN  \033[0m",    # Amber/yellow pill
+        logging.ERROR: "\033[41;97;1m ERROR \033[0m",    # Bold white on red pill
+        logging.CRITICAL: "\033[45;97;1m CRIT  \033[0m", # Bold white on magenta pill
     }
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
+
+    RESET: ClassVar[str] = "\033[0m"
+    DIM: ClassVar[str] = "\033[2m"
+    GRAY: ClassVar[str] = "\033[90m"
+    WHITE_BOLD: ClassVar[str] = "\033[97;1m"
 
     def __init__(self, fmt: str | None = None, datefmt: str | None = None, use_color: bool = True):
         super().__init__(fmt=fmt, datefmt=datefmt)
         self.use_color = use_color
 
     def format(self, record: logging.LogRecord) -> str:
-        if not self.use_color:
-            return super().format(record)
-
-        color = self.COLORS.get(record.levelno, self.RESET)
-        level_name = record.levelname
         timestamp = self.formatTime(record, "%H:%M:%S")
         name = record.name
+        if name.startswith("usmp."):
+            name = name[5:]
+        elif name == "usmp":
+            name = "core"
+
         msg = record.getMessage()
 
-        # Format: 12:00:00 [INFO   ] usmp.server: Message
-        formatted = (
-            f"{self.DIM}{timestamp}{self.RESET} "
-            f"{color}{self.BOLD}[{level_name:<7}]{self.RESET} "
-            f"{self.DIM}{name}:{self.RESET} {msg}"
-        )
+        if not self.use_color:
+            level_name = record.levelname
+            formatted = f"{timestamp} [{level_name:<5}] [{name}] {msg}"
+        else:
+            badge = self.LEVEL_BADGES.get(
+                record.levelno,
+                f"{self.GRAY}[{record.levelname:<5}]{self.RESET}",
+            )
+            # Format: 12:00:00  INFO   [server] Message
+            formatted = (
+                f"{self.GRAY}{timestamp}{self.RESET} "
+                f"{badge} "
+                f"{self.GRAY}[{self.WHITE_BOLD}{name}{self.GRAY}]{self.RESET} "
+                f"{msg}"
+            )
+
         if record.exc_info:
             formatted += "\n" + self.formatException(record.exc_info)
         return formatted
@@ -68,12 +81,18 @@ def setup_logging(
         if not isinstance(handler, logging.NullHandler):
             logger.removeHandler(handler)
 
-    handler = logging.StreamHandler(stream)
-    handler.setLevel(level)
+    # Ensure stream supports UTF-8 on Windows without crashing on unicode characters
+    if hasattr(stream, "reconfigure"):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError, OSError):
+            logger.debug("Stream does not support reconfigure for UTF-8 encoding")
 
     if color is None:
         color = hasattr(stream, "isatty") and stream.isatty()
 
+    handler = logging.StreamHandler(stream)
+    handler.setLevel(level)
     handler.setFormatter(ColoredFormatter(fmt=fmt, use_color=color))
     logger.addHandler(handler)
     return handler

@@ -1,7 +1,9 @@
 import asyncio
 import logging
+
 import pytest
-from usmp import USMPServer, USMPProtocol, USMPSession
+
+from usmp import USMPProtocol, USMPServer, USMPSession
 
 logger = logging.getLogger(__name__)
 

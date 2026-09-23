@@ -2,6 +2,7 @@ import logging
 
 from ._client import USMPClient
 from ._frame import decode_frame, encode_frame, read_frame, write_frame
+from ._logging import ColoredFormatter, setup_logging
 from ._server import USMPServer
 from ._session import USMPSession
 from .errors import (
@@ -20,7 +21,6 @@ from .errors import (
     USMPTimeoutError,
     VersionError,
 )
-from ._logging import ColoredFormatter, setup_logging
 from .transport import register_transport
 from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 
