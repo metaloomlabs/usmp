@@ -73,6 +73,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libmbedtls-dev
 
+      - name: Build C interop client
+        run: |
+          cmake -S . -B build
+          cmake --build build --target usmp_interop_client -j
+
       - name: Run Python SDK tests
         run: |
           cd sdk/python

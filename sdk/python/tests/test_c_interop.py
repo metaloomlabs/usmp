@@ -22,6 +22,17 @@ HAS_MBEDTLS = (
 
 
 def build_c_client():
+    # Locate binary if already compiled
+    candidates = [
+        os.path.join(BUILD_DIR, "usmp_interop_client"),
+        os.path.join(BUILD_DIR, "usmp_interop_client.exe"),
+        os.path.join(BUILD_DIR, "Debug", "usmp_interop_client.exe"),
+        os.path.join(BUILD_DIR, "Release", "usmp_interop_client.exe"),
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return cand
+
     if not HAS_CMAKE:
         pytest.skip("cmake not found, skipping C interop test")
 
@@ -34,9 +45,9 @@ def build_c_client():
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
-        # Run CMake build
+        # Run CMake build for only interop client target in parallel
         subprocess.run(
-            ["cmake", "--build", BUILD_DIR],
+            ["cmake", "--build", BUILD_DIR, "--target", "usmp_interop_client", "-j"],
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -46,13 +57,6 @@ def build_c_client():
         print("CMake build failed:", e.stdout.decode() + "\n" + e.stderr.decode())
         pytest.skip("Failed to compile C interop client (perhaps mbedtls is missing)")
 
-    # Locate binary
-    candidates = [
-        os.path.join(BUILD_DIR, "usmp_interop_client"),
-        os.path.join(BUILD_DIR, "usmp_interop_client.exe"),
-        os.path.join(BUILD_DIR, "Debug", "usmp_interop_client.exe"),
-        os.path.join(BUILD_DIR, "Release", "usmp_interop_client.exe"),
-    ]
     for cand in candidates:
         if os.path.exists(cand):
             return cand
@@ -64,6 +68,7 @@ def c_client_path():
     return build_c_client()
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.asyncio
 async def test_tcp_c_interop(c_client_path):
     port = 9110
@@ -135,6 +140,7 @@ async def test_tcp_c_interop(c_client_path):
             pass
 
 
+@pytest.mark.timeout(60)
 @pytest.mark.asyncio
 async def test_udp_c_interop(c_client_path):
     port = 9111
