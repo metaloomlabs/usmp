@@ -17,6 +17,9 @@ if ($LASTEXITCODE -ne 0) {
     exit 1
 }
 
+Write-Host "[USMP] Cleaning old distribution artifacts..."
+Remove-Item -Recurse -Force "$REPO\dist" -ErrorAction SilentlyContinue
+
 Write-Host "[USMP] Building distribution..."
 uv build --out-dir "$REPO\dist"
 

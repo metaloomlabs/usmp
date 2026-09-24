@@ -13,6 +13,9 @@ cd "$SDKDIR"
 echo "[USMP] Running tests before publish..."
 uv run pytest tests/ -q
 
+echo "[USMP] Cleaning old distribution artifacts..."
+rm -rf "$REPO/dist"
+
 echo "[USMP] Building distribution..."
 uv build --out-dir "$REPO/dist"
 

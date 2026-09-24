@@ -15,6 +15,9 @@ echo "[USMP] Running full test suite..."
 uv run pytest tests/ -v
 
 # ── 2. Build wheel ────────────────────────────────────────────────────────────
+echo "[USMP] Cleaning old wheel artifacts..."
+rm -rf "$SDKDIR/dist"
+
 echo "[USMP] Building wheel..."
 uv build --out-dir dist
 WHEEL=$(ls -t "$SDKDIR/dist/"*.whl | head -1)
@@ -31,9 +34,11 @@ uv pip install --python "$TMPENV/bin/python" "$WHEEL" --quiet
 "$TMPENV/bin/python" - <<'EOF'
 import usmp
 print(f"usmp {usmp.__version__} imported OK")
-assert hasattr(usmp, "USMPServer"),  "missing USMPServer"
-assert hasattr(usmp, "USMPClient"),  "missing USMPClient"
-assert hasattr(usmp, "USMPSession"), "missing USMPSession"
+assert hasattr(usmp, "USMPServer"),       "missing USMPServer"
+assert hasattr(usmp, "USMPClient"),       "missing USMPClient"
+assert hasattr(usmp, "USMPSession"),      "missing USMPSession"
+assert hasattr(usmp, "setup_logging"),    "missing setup_logging"
+assert hasattr(usmp, "ColoredFormatter"), "missing ColoredFormatter"
 print("API surface OK")
 EOF
 
