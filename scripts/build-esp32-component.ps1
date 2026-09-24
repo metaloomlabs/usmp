@@ -34,21 +34,15 @@ if ($InPlace) {
 
 # ── Core sources ──────────────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force "$OUT\core\src" | Out-Null
-Copy-Item "$REPO\core\src\usmp_frame.c"     "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_crypto.c"    "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_crypto.h"    "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_handshake.c" "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_session.c"   "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_session.h"   "$OUT\core\src\"
-Copy-Item "$REPO\core\src\usmp_connect.c"   "$OUT\core\src\"
+Get-ChildItem "$REPO\core\src" -File |
+    Where-Object { $_.Extension -in ".c", ".h" } |
+    Copy-Item -Destination "$OUT\core\src\"
 
 # ── Core public headers ───────────────────────────────────────────────────────
 New-Item -ItemType Directory -Force "$OUT\core\include" | Out-Null
-Copy-Item "$REPO\core\include\usmp.h"            "$OUT\core\include\"
-Copy-Item "$REPO\core\include\usmp_frame.h"      "$OUT\core\include\"
-Copy-Item "$REPO\core\include\usmp_handshake.h"  "$OUT\core\include\"
-Copy-Item "$REPO\core\include\usmp_port.h"       "$OUT\core\include\"
-Copy-Item "$REPO\core\include\usmp_transport.h"  "$OUT\core\include\"
+Get-ChildItem "$REPO\core\include" -File |
+    Where-Object { $_.Extension -eq ".h" } |
+    Copy-Item -Destination "$OUT\core\include\"
 
 # ── LICENSE (registry-required) ──────────────────────────────────────────────
 Copy-Item "$REPO\LICENSE" "$OUT\LICENSE"

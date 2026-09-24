@@ -16,6 +16,9 @@ uv run pytest tests/ -v
 if ($LASTEXITCODE -ne 0) { Write-Error "Tests failed"; exit 1 }
 
 # ── 2. Build wheel ────────────────────────────────────────────────────────────
+Write-Host "[USMP] Cleaning old wheel artifacts..."
+Remove-Item -Recurse -Force "$SDKDIR\dist" -ErrorAction SilentlyContinue
+
 Write-Host "[USMP] Building wheel..."
 uv build --out-dir dist
 $wheel = Get-ChildItem "$SDKDIR\dist\*.whl" | Sort-Object LastWriteTime | Select-Object -Last 1
@@ -31,9 +34,11 @@ uv pip install --python "$TMPENV\Scripts\python.exe" $wheel.FullName --quiet
 $result = & "$TMPENV\Scripts\python.exe" -c @"
 import usmp
 print(f'usmp {usmp.__version__} imported OK')
-assert hasattr(usmp, 'USMPServer'),  'missing USMPServer'
-assert hasattr(usmp, 'USMPClient'),  'missing USMPClient'
-assert hasattr(usmp, 'USMPSession'), 'missing USMPSession'
+assert hasattr(usmp, 'USMPServer'),       'missing USMPServer'
+assert hasattr(usmp, 'USMPClient'),       'missing USMPClient'
+assert hasattr(usmp, 'USMPSession'),      'missing USMPSession'
+assert hasattr(usmp, 'setup_logging'),    'missing setup_logging'
+assert hasattr(usmp, 'ColoredFormatter'), 'missing ColoredFormatter'
 print('API surface OK')
 "@
 
