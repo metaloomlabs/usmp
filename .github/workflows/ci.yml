@@ -68,6 +68,11 @@ jobs:
           version: "0.5.21"
           enable-cache: true
 
+      - name: Install mbedtls for C interop tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmbedtls-dev
+
       - name: Run Python SDK tests
         run: |
           cd sdk/python
