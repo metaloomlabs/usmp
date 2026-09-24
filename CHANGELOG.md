@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] — 2026-09-24
+
 Core error handling modernization, Python SDK server resilience and logging UI overhaul, alongside DevOps and developer experience improvements spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
 
 ### ✨ Added
