@@ -50,7 +50,9 @@ def test_colored_formatter_levels_and_namespace():
     assert "[custom_app]" in formatter_plain.format(rec_custom)
 
     # Test error and critical pill badges
-    rec_err = logging.LogRecord("usmp.transport", logging.ERROR, "test.py", 1, "error msg", (), None)
+    rec_err = logging.LogRecord(
+        "usmp.transport", logging.ERROR, "test.py", 1, "error msg", (), None
+    )
     colored_err = formatter_color.format(rec_err)
     assert "ERROR" in colored_err
     assert "\033[41;97;1m" in colored_err
@@ -60,9 +62,9 @@ def test_colored_formatter_levels_and_namespace():
         raise ValueError("simulated test error")
     except ValueError:
         import sys
+
         rec_exc = logging.LogRecord(
             "usmp.client", logging.ERROR, "test.py", 1, "caught error", (), sys.exc_info()
         )
         exc_output = formatter_color.format(rec_exc)
         assert "ValueError: simulated test error" in exc_output
-
