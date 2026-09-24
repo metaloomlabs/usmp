@@ -7,10 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-DevOps and developer experience overhaul spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
+Core error handling modernization, Python SDK server resilience and logging UI overhaul, alongside DevOps and developer experience improvements spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
 
 ### ✨ Added
 
+- **Python SDK — Graceful Server Shutdown & Signal Traps**: Added programmatic `server.stop()`, OS signal traps (`SIGINT`, `SIGTERM`) on the running asyncio event loop, and clean cancellation/teardown awaiting all active client session tasks without hanging coroutines.
+- **Python SDK — Immediate TCP Socket Rebinding**: Added `reuse_address=True` to `TCPListener` to enable immediate server restarts without `EADDRINUSE` / socket `TIME_WAIT` errors.
+- **Python SDK — Dev-Tool Colored Logging UI**: Added `usmp._logging` module featuring a sleek ANSI `ColoredFormatter` with pill-style level badges (`INFO`, `WARN`, `ERROR`, `CRIT`, `DEBUG`), dimmed timestamps, shortened logger namespaces (`[server]`, `[client]`), and `usmp.setup_logging()` helper with UTF-8 stream handling.
+- **Core & SDK — Programmatic `usmp_err_t` Typed Status Codes**: Introduced `usmp_err_t` enum across C core API, Arduino wrappers, and Python SDK (`USMPErrorCode` IntEnum and `code: USMPErrorCode` attributes on all exception classes) (#27).
 - **CI/CD — Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
 - **CI/CD — Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
 - **CI/CD — Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
@@ -23,6 +27,8 @@ DevOps and developer experience overhaul spanning automated pre-flight release v
 
 ### 🐛 Fixed
 
+- **C Core — Handshake Entropy Source Registration**: Registered `usmp_mbedtls_entropy_callback` using `usmp_port_random` with `mbedtls_entropy_add_source` to prevent `mbedtls_ctr_drbg_seed` failures on platforms without default system entropy (#38).
+- **CI/CD — Node 24 Action Enforcement**: Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` across CI workflows to enforce Node 24 runtime (#28).
 - **Python SDK — Python 3.11 Datagram Transport**: Fixed `AttributeError: '_SelectorDatagramTransport' object has no attribute '_address'` in `USMPClient.connect()` on Python 3.11 by safely resolving endpoint addresses using standard socket peer discovery (#35).
 - **Tests — Rate Limiter State Pollution**: Added autouse session-isolation fixture in `conftest.py` ensuring global rate-limiter caches are reset before and after every test, preventing cascading flaky test failures in test suites.
 - **Tests — Concurrent Handshake Teardown**: Optimized listener shutdown in `test_concurrent_handshakes_exceeding_capacity` using cancellation task groups, preventing hanging background tasks.

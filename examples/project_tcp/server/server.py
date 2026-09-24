@@ -1,12 +1,10 @@
-# examples/project_tcp/server/server.py
 import asyncio
 import logging
+import usmp
 from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
-# The SDK logs via the "usmp" logger and ships a NullHandler, so it stays silent
-# until the application configures logging. Route its INFO/WARNING/ERROR to the
-# console so server-side events (handshake failures, timeouts, errors) are visible.
-logging.basicConfig(level=logging.INFO)
+# Route USMP INFO/WARNING/ERROR to console with rich colored output
+usmp.setup_logging(level=logging.INFO)
 
 # WARNING: Do NOT use hardcoded PSK constants in production environments.
 # In production, provision and load the PSK from a secure storage mechanism

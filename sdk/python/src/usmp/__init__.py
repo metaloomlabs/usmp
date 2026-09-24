@@ -2,6 +2,7 @@ import logging
 
 from ._client import USMPClient
 from ._frame import decode_frame, encode_frame, read_frame, write_frame
+from ._logging import ColoredFormatter, setup_logging
 from ._server import USMPServer
 from ._session import USMPSession
 from .errors import (
@@ -26,6 +27,7 @@ from .types import ErrorCode, PacketType, SessionInfo, USMPFrame, USMPProtocol
 __all__ = [
     "AuthError",
     "CRCError",
+    "ColoredFormatter",
     "ConnectionClosedError",
     "CryptoError",
     "ErrorCode",
@@ -57,6 +59,7 @@ __all__ = [
     "read_frame",
     # Transport registry
     "register_transport",
+    "setup_logging",
     "write_frame",
 ]
 
