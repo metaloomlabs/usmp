@@ -131,7 +131,9 @@ def bundle_esp32() -> None:
         shutil.rmtree(core_dest)
 
     # Copy core/src and core/include
-    shutil.copytree(CORE_DIR / "src", core_dest / "src", ignore=shutil.ignore_patterns("tests"))
+    shutil.copytree(
+        CORE_DIR / "src", core_dest / "src", ignore=shutil.ignore_patterns("tests")
+    )
     shutil.copytree(CORE_DIR / "include", core_dest / "include")
 
     # Copy LICENSE if exists

@@ -87,7 +87,7 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
   _apply_psk();
   _ctx.keepalive_ms = 30000;  // 30s default
 
-  if (usmp_connect(&_ctx, &_transport) != 0) {
+  if (usmp_connect(&_ctx, &_transport) != USMP_OK) {
     _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
     return false;
   }
@@ -113,7 +113,7 @@ bool USMPClient::send(const String& str) { return send((const uint8_t*)str.c_str
 
 bool USMPClient::send(const uint8_t* data, size_t len) {
   if (!_ctx.established) return false;
-  if (usmp_send(&_ctx, data, (uint16_t)len) != 0) {
+  if (usmp_send(&_ctx, data, (uint16_t)len) != USMP_OK) {
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();
     return false;
@@ -194,7 +194,7 @@ void USMPClient::maintain() {
   }
 
   // Alive — send keepalive PING if idle
-  if (usmp_keepalive_tick(&_ctx) < 0) {
+  if (usmp_keepalive_tick(&_ctx) != USMP_OK) {
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();
     return;

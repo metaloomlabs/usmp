@@ -53,7 +53,9 @@ def parse_tag_info(raw_tag: str) -> tuple[str, str, str]:
     return semver, component, title
 
 
-def extract_changelog_section(changelog_path: Path, semver: str) -> tuple[str | None, bool]:
+def extract_changelog_section(
+    changelog_path: Path, semver: str
+) -> tuple[str | None, bool]:
     """Extract notes section for semver from CHANGELOG.md.
 
     Returns:
@@ -66,7 +68,9 @@ def extract_changelog_section(changelog_path: Path, semver: str) -> tuple[str | 
 
     # Match heading like `## [1.2.0]` or `## [1.2.0] — 2026-08-15` or `## [v1.2.0]`
     escaped_ver = re.escape(semver)
-    pattern = rf"(?m)^##\s+\[(?:v)?{escaped_ver}\](?:[^\n]*)\n([\s\S]*?)(?=(?:\n##\s+\[|\Z))"
+    pattern = (
+        rf"(?m)^##\s+\[(?:v)?{escaped_ver}\](?:[^\n]*)\n([\s\S]*?)(?=(?:\n##\s+\[|\Z))"
+    )
     match = re.search(pattern, content)
 
     if match:
@@ -79,8 +83,12 @@ def extract_changelog_section(changelog_path: Path, semver: str) -> tuple[str | 
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Extract release notes from CHANGELOG.md")
-    parser.add_argument("--tag", required=True, help="Release tag name (e.g. v1.2.0, python-v1.3.0)")
+    parser = argparse.ArgumentParser(
+        description="Extract release notes from CHANGELOG.md"
+    )
+    parser.add_argument(
+        "--tag", required=True, help="Release tag name (e.g. v1.2.0, python-v1.3.0)"
+    )
     parser.add_argument(
         "--changelog",
         default=str(REPO_ROOT / "CHANGELOG.md"),
@@ -105,8 +113,18 @@ def main() -> int:
 
     notes, found = extract_changelog_section(changelog_path, semver)
 
+    if not found and "-" in semver:
+        base_semver = semver.split("-")[0]
+        notes, found = extract_changelog_section(changelog_path, base_semver)
+        if found:
+            print(
+                f"[Release Notes] Extracted section for base version v{base_semver} from {changelog_path.name}"
+            )
+
     if found and notes:
-        print(f"[Release Notes] Extracted section for v{semver} from {changelog_path.name}")
+        print(
+            f"[Release Notes] Extracted section for v{semver} from {changelog_path.name}"
+        )
         final_notes = notes
     else:
         print(

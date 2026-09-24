@@ -38,21 +38,12 @@ fi
 
 # ── Core sources ──────────────────────────────────────────────────────────────
 mkdir -p "$OUT/core/src"
-cp "$REPO/core/src/usmp_frame.c"      "$OUT/core/src/"
-cp "$REPO/core/src/usmp_crypto.c"     "$OUT/core/src/"
-cp "$REPO/core/src/usmp_crypto.h"     "$OUT/core/src/"
-cp "$REPO/core/src/usmp_handshake.c"  "$OUT/core/src/"
-cp "$REPO/core/src/usmp_session.c"    "$OUT/core/src/"
-cp "$REPO/core/src/usmp_session.h"    "$OUT/core/src/"
-cp "$REPO/core/src/usmp_connect.c"    "$OUT/core/src/"
+cp "$REPO"/core/src/*.c "$OUT/core/src/" 2>/dev/null || true
+cp "$REPO"/core/src/*.h "$OUT/core/src/" 2>/dev/null || true
 
 # ── Core public headers ───────────────────────────────────────────────────────
 mkdir -p "$OUT/core/include"
-cp "$REPO/core/include/usmp.h"            "$OUT/core/include/"
-cp "$REPO/core/include/usmp_frame.h"      "$OUT/core/include/"
-cp "$REPO/core/include/usmp_handshake.h"  "$OUT/core/include/"
-cp "$REPO/core/include/usmp_port.h"       "$OUT/core/include/"
-cp "$REPO/core/include/usmp_transport.h"  "$OUT/core/include/"
+cp "$REPO"/core/include/*.h "$OUT/core/include/"
 
 # ── LICENSE (registry-required) ──────────────────────────────────────────────
 cp "$REPO/LICENSE" "$OUT/LICENSE"

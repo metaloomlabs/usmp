@@ -7,26 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-DevOps and developer experience overhaul spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
+## [1.2.2] — 2026-09-24
+
+Core error handling modernization, Python SDK server resilience and logging UI overhaul, alongside DevOps and developer experience improvements spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
 
 ### ✨ Added
 
+- **Python SDK — Graceful Server Shutdown & Signal Traps**: Added programmatic `server.stop()`, OS signal traps (`SIGINT`, `SIGTERM`) on the running asyncio event loop, and clean cancellation/teardown awaiting all active client session tasks without hanging coroutines.
+- **Python SDK — Immediate TCP Socket Rebinding**: Added `reuse_address=True` to `TCPListener` to enable immediate server restarts without `EADDRINUSE` / socket `TIME_WAIT` errors.
+- **Python SDK — Dev-Tool Colored Logging UI**: Added `usmp._logging` module featuring a sleek ANSI `ColoredFormatter` with pill-style level badges (`INFO`, `WARN`, `ERROR`, `CRIT`, `DEBUG`), dimmed timestamps, shortened logger namespaces (`[server]`, `[client]`), and `usmp.setup_logging()` helper with UTF-8 stream handling.
+- **Core & SDK — Programmatic `usmp_err_t` Typed Status Codes**: Introduced `usmp_err_t` enum across C core API, Arduino wrappers, and Python SDK (`USMPErrorCode` IntEnum and `code: USMPErrorCode` attributes on all exception classes) (#27).
 - **CI/CD — Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
 - **CI/CD — Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
 - **CI/CD — Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
 - **CI/CD — Toolchain Caching**: Integrated GitHub Actions caching for Arduino CLI cores (`esp32:esp32`) and ESP-IDF tools, slashing build times (#35).
 - **CI/CD — Unified Branch Protection Check**: Added aggregate `ci-checks` gate job requiring `c-core`, `python-tests`, `python-lint-security`, and `arduino-esp32-compile` before PR merges (#35).
 - **CI/CD — Release Pre-Flight Validation**: Automated multi-manifest version consistency checks (`scripts/preflight-release.py`) before release deployments, verifying matching version numbers across Python, C Core, ESP32, and Arduino manifests (#34).
+- **CI/CD — Automated C-Python Interoperability Testing**: Added `libmbedtls-dev` to CI Python test runners, enabling automated end-to-end wire compatibility tests (`test_c_interop.py`) between the compiled C core client binary and Python `USMPServer` across TCP and UDP.
 - **CI/CD — Workflow Concurrency Controls**: Enforced `concurrency` groups (`cancel-in-progress: true`) across test and release workflows to prevent redundant runner execution and race conditions (#34).
 - **Developer Experience — Root Makefile**: Added cross-platform `Makefile` with targets for testing (`test`, `test-v`, `test-c`, `test-all`), linting & formatting (`lint`, `format`), security scanning (`security`), port packaging (`bundle-arduino`, `bundle-esp32`), and artifact cleaning (`clean-ports`, `clean`). Automatically detects `uv` with fallback to active virtual environments.
 - **Tests — Pytest Timeout Guard**: Added `pytest-timeout` (`--timeout=60`) to guard against hung event loops and deadlock regressions during integration test execution.
 
 ### 🐛 Fixed
 
+- **C Core — Handshake Entropy Source Registration**: Registered `usmp_mbedtls_entropy_callback` using `usmp_port_random` with `mbedtls_entropy_add_source` to prevent `mbedtls_ctr_drbg_seed` failures on platforms without default system entropy (#38).
+- **CI/CD — Node 24 Action Enforcement**: Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` across CI workflows to enforce Node 24 runtime (#28).
 - **Python SDK — Python 3.11 Datagram Transport**: Fixed `AttributeError: '_SelectorDatagramTransport' object has no attribute '_address'` in `USMPClient.connect()` on Python 3.11 by safely resolving endpoint addresses using standard socket peer discovery (#35).
 - **Tests — Rate Limiter State Pollution**: Added autouse session-isolation fixture in `conftest.py` ensuring global rate-limiter caches are reset before and after every test, preventing cascading flaky test failures in test suites.
 - **Tests — Concurrent Handshake Teardown**: Optimized listener shutdown in `test_concurrent_handshakes_exceeding_capacity` using cancellation task groups, preventing hanging background tasks.
+- **Tests — UDP Teardown Test Session Liveness**: Kept server sessions alive in `test_udp_integration.py` until client teardown, allowing the server to acknowledge `BYE` frames with instant ACKs instead of triggering 15-second ARQ timeouts under Python 3.12/3.13 eager scheduling.
 - **Ports — Shim Alignment**: Synchronized `usmp_api.h` shim in `scripts/bundle-ports.py` with port development shims, ensuring `bundle-ports.py --clean` leaves working trees completely clean.
+- **DevOps & Tooling — Scripts Audit & Port Packaging Hardening**: Hardened utility scripts across Windows PowerShell and POSIX Bash. Resolved working-directory path sensitivity in `build-arduino-zip.ps1`, eliminated case-insensitive filesystem collisions during Arduino staging, included `.cpp` files in include patching, cleaned `dist/` before builds in SDK test scripts to prevent stale wheel conflicts, expanded release tag validation to verify `core/include/usmp.h`, `__init__.py`, and root `pyproject.toml`, added base SemVer fallback to release notes extraction, and pruned obsolete local `publish-pypi.{ps1,sh}` scripts in favor of downstream OIDC trusted publishing.
 
 ---
 
