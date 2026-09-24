@@ -7,6 +7,7 @@ from usmp import USMPProtocol, USMPServer, USMPSession
 
 logger = logging.getLogger(__name__)
 
+
 @pytest.mark.asyncio
 async def test_server_programmatic_stop():
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
@@ -28,6 +29,7 @@ async def test_server_programmatic_stop():
     assert serve_task.done()
     assert serve_task.exception() is None
 
+
 @pytest.mark.asyncio
 async def test_server_cancellation_graceful():
     psk = b"this_is_a_very_secret_key_32_bytes!!"[:32]
@@ -46,6 +48,7 @@ async def test_server_cancellation_graceful():
     serve_task.cancel()
     await asyncio.gather(serve_task, return_exceptions=True)
     assert serve_task.done()
+
 
 @pytest.mark.asyncio
 async def test_server_task_cleanup_on_stop():

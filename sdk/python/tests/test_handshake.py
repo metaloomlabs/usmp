@@ -190,7 +190,9 @@ async def test_rate_limiter_non_ip_fallback():
     # A well-formed but non-HELLO frame makes server_handshake raise HandshakeError
     # ("Expected HELLO") — a realistic protocol failure that counts toward the limiter,
     # unlike a bare Mock (whose TypeError is now treated as an internal error).
-    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack("<HH", 0, 0)
+    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack(
+        "<HH", 0, 0
+    )
     mock_reader = Mock(spec=asyncio.StreamReader)
     mock_reader.readexactly = AsyncMock(return_value=bad_frame)
     mock_writer = Mock(spec=asyncio.StreamWriter)
@@ -228,7 +230,9 @@ async def test_rate_limiter_table_capping():
         _failed_handshakes[f"ip_{i}"] = (1, 0.0, now - 500.0 + float(i) * 0.1)
 
     # Well-formed non-HELLO frame → HandshakeError, a counted protocol failure.
-    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack("<HH", 0, 0)
+    bad_frame = struct.pack("<HBBI", 0xABCD, 0x02, int(PacketType.PING), 0) + struct.pack(
+        "<HH", 0, 0
+    )
     mock_reader = Mock(spec=asyncio.StreamReader)
     mock_reader.readexactly = AsyncMock(return_value=bad_frame)
     mock_writer = Mock(spec=asyncio.StreamWriter)

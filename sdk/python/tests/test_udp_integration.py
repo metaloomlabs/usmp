@@ -686,10 +686,12 @@ async def test_udp_utack_authentication_s3():
 
 # ── Security Audit Findings 1-13 Regression Tests ───────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_finding_1_lock_nonce_reuse():
     """Finding 1: Concurrent sends must be serialized under a lock to prevent nonce reuse."""
     import struct
+
     port = _free_port()
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
     nonces_seen = []
@@ -698,6 +700,7 @@ async def test_finding_1_lock_nonce_reuse():
     @server.on_session
     async def handler(session: USMPSession):
         original_write_frame = session._transport.write_frame
+
         async def mock_write_frame(ptype, ciphertext, seq=0):
             sequences_seen.append(seq)
             nonce = struct.pack("<I", seq) + session._info.session_id[:8]
@@ -706,10 +709,7 @@ async def test_finding_1_lock_nonce_reuse():
 
         session._transport.write_frame = mock_write_frame
 
-        await asyncio.gather(
-            session.send(b"payload A"),
-            session.send(b"payload B")
-        )
+        await asyncio.gather(session.send(b"payload A"), session.send(b"payload B"))
         try:
             await session.recv()
         except Exception:
@@ -792,6 +792,7 @@ async def test_finding_4_oversized_payload_rejection():
     import struct
 
     from usmp.types import USMP_MAGIC
+
     class MockTransport(asyncio.DatagramTransport):
         def __init__(self) -> None:
             super().__init__()
@@ -805,14 +806,26 @@ async def test_finding_4_oversized_payload_rejection():
 
     stream = UDPStream(MockTransport(), (HOST, 9999), is_server=False)
 
-    header = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 0) + struct.pack("<H", 481) + struct.pack("<H", 0)
+    header = (
+        struct.pack("<H", USMP_MAGIC)
+        + bytes([2, 5])
+        + struct.pack("<I", 0)
+        + struct.pack("<H", 481)
+        + struct.pack("<H", 0)
+    )
     oversized_data = header + b"\x00" * 481
     stream.feed_packet(oversized_data)
 
     assert len(stream._read_buffer) == 0
 
     valid_payload = b"\x00\x11\x22\x33"
-    header2 = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 1) + struct.pack("<H", 4) + struct.pack("<H", 0)
+    header2 = (
+        struct.pack("<H", USMP_MAGIC)
+        + bytes([2, 5])
+        + struct.pack("<I", 1)
+        + struct.pack("<H", 4)
+        + struct.pack("<H", 0)
+    )
     valid_data = header2 + valid_payload
     stream.feed_packet(valid_data)
 
@@ -824,6 +837,7 @@ async def test_finding_4_oversized_payload_rejection():
 async def test_finding_5_client_handshake_timeout():
     """Finding 5: client_handshake must respect timeout to prevent hanging."""
     from usmp.errors import USMPTimeoutError
+
     port = _free_port()
     client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
     with pytest.raises(USMPTimeoutError):
@@ -834,6 +848,7 @@ async def test_finding_5_client_handshake_timeout():
 async def test_finding_6_tcp_listener_stop_hang():
     """Finding 6: TCPListener.stop() must not hang on active handlers."""
     import time
+
     port = _free_port()
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="tcp")
 
@@ -865,8 +880,10 @@ async def test_finding_6_tcp_listener_stop_hang():
 @pytest.mark.asyncio
 async def test_finding_7_disconnect_leaks():
     """Finding 7: disconnect() must close transport even if bye() raises error."""
+
     class BadSession:
         session_id = "mock-session-id"
+
         async def bye(self):
             raise ConnectionResetError("mock error")
 
@@ -896,6 +913,7 @@ async def test_finding_8_handshake_timeout_rate_limiter():
     """Finding 8: Handshake timeout must cover queue time and update failed handshakes limiter."""
     from usmp._handshake import _failed_handshakes
     from usmp.types import PacketType
+
     _failed_handshakes.clear()
 
     port = _free_port()
@@ -906,6 +924,7 @@ async def test_finding_8_handshake_timeout_rate_limiter():
         pass
 
     original_write = UDPStream.write_frame
+
     async def mock_write(self, *args, **kwargs):
         ptype = args[0] if args else kwargs.get("ptype")
         if ptype == PacketType.HELLO_ACK:
@@ -915,6 +934,7 @@ async def test_finding_8_handshake_timeout_rate_limiter():
     UDPStream.write_frame = mock_write
 
     try:
+
         async def client_coro():
             client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
             task = asyncio.create_task(client.connect(timeout=5.0))
@@ -941,6 +961,7 @@ async def test_finding_9_watchdog_unauthenticated_timer():
     import struct
 
     from usmp.types import USMP_MAGIC, PacketType
+
     port = _free_port()
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
 
@@ -953,7 +974,13 @@ async def test_finding_9_watchdog_unauthenticated_timer():
         initial_last_recv = session._last_recv
         await asyncio.sleep(0.05)
 
-        header = struct.pack("<H", USMP_MAGIC) + bytes([2, PacketType.DATA]) + struct.pack("<I", 99) + struct.pack("<H", 20) + struct.pack("<H", 0)
+        header = (
+            struct.pack("<H", USMP_MAGIC)
+            + bytes([2, PacketType.DATA])
+            + struct.pack("<I", 99)
+            + struct.pack("<H", 20)
+            + struct.pack("<H", 0)
+        )
         garbage_data = header + b"\xff" * 20
         server._handle_udp_datagram(None, garbage_data, ("127.0.0.1", client_port))
 
@@ -965,6 +992,7 @@ async def test_finding_9_watchdog_unauthenticated_timer():
             pass
 
     client_port = 0
+
     async def client_coro():
         nonlocal client_port
         client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
@@ -1004,7 +1032,13 @@ async def test_finding_10_utack_buffer_full():
     stream = UDPStream(MockTransport(), (HOST, 9999), is_server=True)
     stream._read_buffer.extend(b"\x00" * 4090)
 
-    header = struct.pack("<H", USMP_MAGIC) + bytes([2, 5]) + struct.pack("<I", 10) + struct.pack("<H", 8) + struct.pack("<H", 0)
+    header = (
+        struct.pack("<H", USMP_MAGIC)
+        + bytes([2, 5])
+        + struct.pack("<I", 10)
+        + struct.pack("<H", 8)
+        + struct.pack("<H", 0)
+    )
     data = header + b"\x00" * 8
 
     stream.feed_packet(data)
@@ -1019,7 +1053,10 @@ async def test_finding_11_bye_idempotent_sequence_clamp():
 
     @server.on_session
     async def handler(session: USMPSession):
-        pass
+        try:
+            await session.recv()
+        except (ConnectionClosedError, OSError, asyncio.CancelledError):
+            pass
 
     async def client_coro():
         client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
@@ -1070,15 +1107,20 @@ async def test_finding_12_on_transport_connect_finally_safety():
 async def test_finding_13_handshake_sequence():
     """Finding 13: Client handshake writes must use consecutive sequence numbers."""
     from usmp.types import PacketType
+
     port = _free_port()
     server = USMPServer(host=HOST, port=port, psk=PSK, protocol="udp")
     sequences_seen = []
 
     @server.on_session
     async def handler(session: USMPSession):
-        pass
+        try:
+            await session.recv()
+        except (ConnectionClosedError, OSError, asyncio.CancelledError):
+            pass
 
     original_write = UDPStream.write_frame
+
     async def mock_write(self, *args, **kwargs):
         ptype = args[0] if args else kwargs.get("ptype")
         seq = kwargs.get("seq")
@@ -1088,6 +1130,7 @@ async def test_finding_13_handshake_sequence():
     UDPStream.write_frame = mock_write
 
     try:
+
         async def client_coro():
             client = USMPClient(host=HOST, port=port, psk=PSK, protocol="udp")
             await client.connect()
@@ -1134,9 +1177,7 @@ class _FakeTransport(USMPTransport):
     async def read_frame(self, verify_crc: bool = True) -> Any:
         return None
 
-    async def write_frame(
-        self, type_: PacketType, payload: bytes, seq: int = 0
-    ) -> None:
+    async def write_frame(self, type_: PacketType, payload: bytes, seq: int = 0) -> None:
         # The frame reaches the wire *before* any failure, exactly like UDP's ARQ,
         # which sendto()s up to 5 times and only then raises OSError.
         self.seqs.append(seq)
@@ -1353,7 +1394,3 @@ async def test_udp_adaptive_rtt_estimation():
     # RTT should have updated from the sample
     assert stream._srtt < 0.2
     assert 0.1 <= stream._rto <= 5.0
-
-
-
-
