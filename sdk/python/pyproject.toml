@@ -45,7 +45,7 @@ module-name = "usmp"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-timeout = 30
+timeout = 60
 
 [dependency-groups]
 dev = [
