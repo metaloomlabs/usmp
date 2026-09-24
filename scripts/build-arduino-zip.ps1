@@ -1,59 +1,65 @@
 # build-arduino-zip.ps1
+# Packages the Arduino port and core protocol engine into a self-contained library ZIP.
 
 Set-StrictMode -Off
 $ErrorActionPreference = "Stop"
 
-$REPO = "./"
+$REPO = (Resolve-Path "$PSScriptRoot\..").Path
 
 # Parse version from library.properties
-$properties = Get-Content "$REPO\ports\usmp-arduino\library.properties"
+$propPath = Join-Path $REPO "ports\usmp-arduino\library.properties"
+$properties = Get-Content $propPath
 $VERSION = "unknown"
 foreach ($line in $properties) {
     if ($line -match "^version=(.+)$") {
-        $VERSION = $Matches[1]
+        $VERSION = $Matches[1].Trim()
         break
     }
 }
 
-$OUT  = "usmp-arduino"
-$ZIP  = "usmp-$VERSION-arduino.zip"
+$OUT  = Join-Path $REPO "usmp-arduino"
+$ZIP  = Join-Path $REPO "usmp-$VERSION-arduino.zip"
 
-Write-Host "Cleaning..."
+Write-Host "[USMP] Cleaning..."
 Remove-Item -Recurse -Force $OUT -ErrorAction SilentlyContinue
 Remove-Item -Force $ZIP          -ErrorAction SilentlyContinue
-Remove-Item -Force "usmp-arduino.zip" -ErrorAction SilentlyContinue
+Remove-Item -Force (Join-Path $REPO "usmp-arduino.zip") -ErrorAction SilentlyContinue
 
-Write-Host "Staging files..."
-New-Item -ItemType Directory -Force -Path "$OUT\src" | Out-Null
+Write-Host "[USMP] Staging files..."
+New-Item -ItemType Directory -Force -Path (Join-Path $OUT "src") | Out-Null
 
-# Arduino port files only (no subfolders)
-Get-ChildItem "$REPO\ports\usmp-arduino\src" -File | Copy-Item -Destination "$OUT\src\"
+# 1. Arduino port source files
+Get-ChildItem (Join-Path $REPO "ports\usmp-arduino\src") -File | Copy-Item -Destination (Join-Path $OUT "src")
 
-# Core C source files flat (no subfolders)
-Get-ChildItem "$REPO\core\src" -File | Copy-Item -Destination "$OUT\src\"
+# 2. Core C source files and internal headers
+Get-ChildItem (Join-Path $REPO "core\src") -File |
+    Where-Object { $_.Extension -in ".c", ".h" } |
+    Copy-Item -Destination (Join-Path $OUT "src")
 
-# Core headers flat
-Get-ChildItem "$REPO\core\include" -File | Copy-Item -Destination "$OUT\src\"
+# 3. Core public headers (rename usmp.h -> usmp_api.h directly to prevent collision with USMP.h)
+Get-ChildItem (Join-Path $REPO "core\include") -File |
+    Where-Object { $_.Extension -eq ".h" } |
+    ForEach-Object {
+        if ($_.Name -eq "usmp.h") {
+            Copy-Item $_.FullName (Join-Path $OUT "src\usmp_api.h") -Force
+        } else {
+            Copy-Item $_.FullName (Join-Path $OUT "src") -Force
+        }
+    }
 
-# Examples + metadata
-Copy-Item -Recurse "$REPO\ports\usmp-arduino\examples" "$OUT\"
-Copy-Item "$REPO\ports\usmp-arduino\library.properties" "$OUT\"
-Copy-Item "$REPO\ports\usmp-arduino\keywords.txt"       "$OUT\"
-
-# ── Fix Windows usmp.h / USMP.h case collision ─────────────────────────────────
-Write-Host "Fixing USMP.h / usmp_api.h collision..."
-Remove-Item "$OUT\src\usmp_api.h" -ErrorAction SilentlyContinue
-Rename-Item "$OUT\src\USMP.h" "usmp_api.h"
-Copy-Item "$REPO\ports\usmp-arduino\src\USMP.h" "$OUT\src\USMP.h"
+# 4. Examples + metadata
+Copy-Item -Recurse (Join-Path $REPO "ports\usmp-arduino\examples") (Join-Path $OUT "examples")
+Copy-Item (Join-Path $REPO "ports\usmp-arduino\library.properties") (Join-Path $OUT "library.properties")
+Copy-Item (Join-Path $REPO "ports\usmp-arduino\keywords.txt")       (Join-Path $OUT "keywords.txt")
 
 # ── Patch all #include "usmp.h" → #include "usmp_api.h" ────────────────────────
-Write-Host "Patching includes..."
-Get-ChildItem "$OUT\src" -File |
-    Where-Object { $_.Extension -in ".c", ".h" } |
+Write-Host "[USMP] Patching includes..."
+Get-ChildItem (Join-Path $OUT "src") -File |
+    Where-Object { $_.Extension -in ".c", ".h", ".cpp" } |
     ForEach-Object {
         $content = Get-Content $_.FullName -Raw
-        if ($content -match '#include "usmp\.h"') {
-            $content = $content -replace '#include "usmp\.h"', '#include "usmp_api.h"'
+        if ($content -match '#include\s+["<]usmp\.h[">]') {
+            $content = $content -replace '#include\s+["<]usmp\.h[">]', '#include "usmp_api.h"'
             [System.IO.File]::WriteAllText($_.FullName, $content,
                 [System.Text.UTF8Encoding]::new($false))
             Write-Host "  Patched: $($_.Name)"
@@ -61,8 +67,8 @@ Get-ChildItem "$OUT\src" -File |
     }
 
 # ── Zip ───────────────────────────────────────────────────────────────────────
-Write-Host "Zipping..."
+Write-Host "[USMP] Zipping..."
 Compress-Archive -Path $OUT -DestinationPath $ZIP -Force
 Remove-Item -Recurse -Force $OUT
 
-Write-Host "Done: $ZIP"
+Write-Host "[USMP] Done: $ZIP"
