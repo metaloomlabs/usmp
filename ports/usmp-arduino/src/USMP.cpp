@@ -13,15 +13,52 @@ USMPClient::USMPClient(const char* psk)
       _on_disconnect(nullptr),
       _on_reconnect(nullptr),
       _on_message(nullptr),
+      _rx_buf(nullptr),
+      _rx_buf_capacity(USMP_MAX_DATA_LEN * USMP_MAX_FRAMES),
+      _owns_rx_buf(true),
       _rx_len(0) {
+  _rx_buf = new uint8_t[_rx_buf_capacity];
+  if (_rx_buf) {
+    memset(_rx_buf, 0, _rx_buf_capacity);
+  }
   memset(&_ctx, 0, sizeof(_ctx));
   memset(&_transport, 0, sizeof(_transport));
-  memset(_rx_buf, 0, sizeof(_rx_buf));
 }
 
-USMPClient::~USMPClient() { close(); }
+USMPClient::USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size)
+    : _psk(psk),
+      _initialized(false),
+      _backoff_ms(2000),
+      _last_attempt_ms(0),
+      _on_connect(nullptr),
+      _on_disconnect(nullptr),
+      _on_reconnect(nullptr),
+      _on_message(nullptr),
+      _rx_buf(rx_buffer),
+      _rx_buf_capacity(rx_buffer_size),
+      _owns_rx_buf(false),
+      _rx_len(0) {
+  if (_rx_buf && _rx_buf_capacity > 0) {
+    memset(_rx_buf, 0, _rx_buf_capacity);
+  }
+  memset(&_ctx, 0, sizeof(_ctx));
+  memset(&_transport, 0, sizeof(_transport));
+}
+
+USMPClient::~USMPClient() {
+  close();
+  if (_owns_rx_buf && _rx_buf) {
+    delete[] _rx_buf;
+    _rx_buf = nullptr;
+  }
+}
 
 // Internal helpers ──────────────────────────────────────────────────────────
+
+void USMPClient::setHandshakeScratch(uint8_t* scratch, size_t len) {
+  _ctx.scratch = scratch;
+  _ctx.scratch_len = len;
+}
 
 void USMPClient::_apply_psk() {
   _ctx.psk = (const uint8_t*)_psk;
@@ -45,10 +82,10 @@ bool USMPClient::_do_reconnect() {
 
 void USMPClient::_drain_rx() {
   if (!_ctx.established || _rx_len > 0) return;
-  if (!_transport.available) return;
+  if (!_transport.available || !_rx_buf || _rx_buf_capacity == 0) return;
 
   while (_ctx.established && _rx_len == 0 && _transport.available(&_transport) > 0) {
-    int n = usmp_recv(&_ctx, _rx_buf, sizeof(_rx_buf));
+    int n = usmp_recv(&_ctx, _rx_buf, (uint16_t)_rx_buf_capacity);
     if (n > 0) {
       _rx_len = (size_t)n;
       break;
@@ -62,8 +99,8 @@ void USMPClient::_drain_rx() {
 
 // begin ─────────────────────────────────────────────────────────────────────
 
-template <typename Transport>
-bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
+template <typename Transport, typename CtxType>
+bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx) {
   // WiFi — only if USMP is managing it (SSID was supplied via .wifi()).
   if (transport._ssid) {
     _logf(USMP_LOG_LEVEL_INFO, "[USMP] Connecting to WiFi: %s", transport._ssid);
@@ -77,15 +114,26 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
 
   // Transport init ─────────────────────────────────────────────────────────
   memset(&_transport, 0, sizeof(_transport));
-  if (!transport.init(&_transport)) {
+  bool init_ok = false;
+  if (static_ctx) {
+    init_ok = transport.init_static(&_transport, static_ctx);
+  } else {
+    init_ok = transport.init(&_transport);
+  }
+
+  if (!init_ok) {
     _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: %s connect failed", proto);
     return false;
   }
 
   // USMP handshake ─────────────────────────────────────────────────────────
+  uint8_t* scratch = _ctx.scratch;
+  size_t scratch_len = _ctx.scratch_len;
   memset(&_ctx, 0, sizeof(_ctx));
   _apply_psk();
   _ctx.keepalive_ms = 30000;  // 30s default
+  _ctx.scratch = scratch;
+  _ctx.scratch_len = scratch_len;
 
   if (usmp_connect(&_ctx, &_transport) != USMP_OK) {
     _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
@@ -101,9 +149,13 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto) {
   return true;
 }
 
-bool USMPClient::begin(USMPTCPTransport transport) { return _beginImpl(transport, "TCP"); }
+bool USMPClient::begin(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx) {
+  return _beginImpl(transport, "TCP", static_ctx);
+}
 
-bool USMPClient::begin(USMPUDPTransport transport) { return _beginImpl(transport, "UDP"); }
+bool USMPClient::begin(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx) {
+  return _beginImpl(transport, "UDP", static_ctx);
+}
 
 // send ──────────────────────────────────────────────────────────────────────
 
@@ -130,7 +182,7 @@ bool USMPClient::available() {
 
 String USMPClient::read() {
   _drain_rx();
-  if (_rx_len == 0) {
+  if (_rx_len == 0 || !_rx_buf) {
     return String();
   }
   String msg((char*)_rx_buf, _rx_len);
@@ -140,7 +192,7 @@ String USMPClient::read() {
 
 int USMPClient::read(uint8_t* buf, size_t max_len) {
   _drain_rx();
-  if (_rx_len == 0) {
+  if (_rx_len == 0 || !_rx_buf) {
     return 0;
   }
   size_t to_copy = (_rx_len < max_len) ? _rx_len : max_len;
@@ -204,7 +256,7 @@ void USMPClient::maintain() {
   _drain_rx();
 
   // Fire onMessage if application data is buffered
-  if (_on_message && _rx_len > 0) {
+  if (_on_message && _rx_len > 0 && _rx_buf) {
     size_t len = _rx_len;
     _rx_len = 0;
     _on_message(_rx_buf, len);
