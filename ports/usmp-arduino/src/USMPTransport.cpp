@@ -151,6 +151,15 @@ static void arduino_tcp_destroy(usmp_transport_t* t) {
   }
 }
 
+static void arduino_tcp_destroy_static(usmp_transport_t* t) {
+  USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
+  if (ctx) {
+    ctx->client.stop();
+    // Do NOT delete ctx — caller/static memory
+    t->ctx = NULL;
+  }
+}
+
 static int arduino_tcp_reconnect(usmp_transport_t* t) {
   USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
   if (!ctx) return -1;
@@ -181,9 +190,8 @@ static void arduino_tcp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_
 
 // USMPTCPTransport methods
 
-bool USMPTCPTransport::init(usmp_transport_t* t) const {
-  USMPArduinoTcpCtx* ctx = new USMPArduinoTcpCtx();
-  if (!ctx) return false;
+bool USMPTCPTransport::init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx) const {
+  if (!t || !ctx) return false;
 
   strncpy(ctx->host, _host, sizeof(ctx->host) - 1);
   ctx->host[sizeof(ctx->host) - 1] = '\0';
@@ -191,7 +199,6 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   ctx->session_active = false;  // handshake runs first with unbounded recv
 
   if (!ctx->client.connect(_host, _port)) {
-    delete ctx;
     return false;
   }
 
@@ -200,12 +207,23 @@ bool USMPTCPTransport::init(usmp_transport_t* t) const {
   t->close = arduino_tcp_close;
   t->reconnect = arduino_tcp_reconnect;
   t->available = arduino_tcp_available;
-  t->destroy = arduino_tcp_destroy;
+  t->destroy = arduino_tcp_destroy_static;
   t->confirm_authenticated = NULL;
-  // Not for UTACK auth (TCP has none) — only to flip recv() to its bounded
-  // stall-timeout path once the handshake completes. See arduino_tcp_recv.
   t->set_session_keys = arduino_tcp_set_session_keys;
   t->ctx = ctx;
+  return true;
+}
+
+bool USMPTCPTransport::init(usmp_transport_t* t) const {
+  USMPArduinoTcpCtx* ctx = new USMPArduinoTcpCtx();
+  if (!ctx) return false;
+
+  if (!init_static(t, ctx)) {
+    delete ctx;
+    return false;
+  }
+
+  t->destroy = arduino_tcp_destroy;
   return true;
 }
 
@@ -379,6 +397,15 @@ static void arduino_udp_destroy(usmp_transport_t* t) {
   }
 }
 
+static void arduino_udp_destroy_static(usmp_transport_t* t) {
+  USMPArduinoUdpCtx* ctx = (USMPArduinoUdpCtx*)t->ctx;
+  if (ctx) {
+    ctx->udp.stop();
+    // Do NOT delete ctx — caller/static memory
+    t->ctx = NULL;
+  }
+}
+
 static int arduino_udp_reconnect(usmp_transport_t* t) {
   USMPArduinoUdpCtx* ctx = (USMPArduinoUdpCtx*)t->ctx;
   if (!ctx) return -1;
@@ -443,18 +470,18 @@ static void arduino_udp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_
 }
 
 // USMPUDPTransport methods
-bool USMPUDPTransport::init(usmp_transport_t* t) const {
-  USMPArduinoUdpCtx* ctx = new USMPArduinoUdpCtx();
-  if (!ctx) return false;
+bool USMPUDPTransport::init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx) const {
+  if (!t || !ctx) return false;
 
   strncpy(ctx->host, _host, sizeof(ctx->host) - 1);
   ctx->host[sizeof(ctx->host) - 1] = '\0';
   ctx->port = _port;
   ctx->rx_len = 0;
   ctx->last_rx_seq_set = false;
+  ctx->last_rx_type = 0;
+  ctx->keys_set = false;
 
   if (!ctx->udp.begin(0)) {
-    delete ctx;
     return false;
   }
 
@@ -463,9 +490,22 @@ bool USMPUDPTransport::init(usmp_transport_t* t) const {
   t->close = arduino_udp_close;
   t->reconnect = arduino_udp_reconnect;
   t->available = arduino_udp_available;
-  t->destroy = arduino_udp_destroy;
+  t->destroy = arduino_udp_destroy_static;
   t->confirm_authenticated = arduino_udp_confirm_authenticated;
   t->set_session_keys = arduino_udp_set_session_keys;
   t->ctx = ctx;
   return true;
 }
+
+bool USMPUDPTransport::init(usmp_transport_t* t) const {
+  USMPArduinoUdpCtx* ctx = new USMPArduinoUdpCtx();
+  if (!ctx) return false;
+
+  if (!init_static(t, ctx)) {
+    delete ctx;
+    return false;
+  }
+
+  t->destroy = arduino_udp_destroy;
+  return true;
+}

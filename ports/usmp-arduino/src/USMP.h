@@ -10,9 +10,10 @@ extern "C" {
 class USMPClient {
  public:
   explicit USMPClient(const char* psk);
-  ~USMPClient();
-  bool begin(USMPTCPTransport transport);
-  bool begin(USMPUDPTransport transport);
+  USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size);
+  virtual ~USMPClient();
+  bool begin(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx = nullptr);
+  bool begin(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx = nullptr);
   bool send(const char* str);
   bool send(const String& str);
   bool send(const uint8_t* data, size_t len);
@@ -24,6 +25,7 @@ class USMPClient {
   String sessionId();
   void keepalive(uint32_t ms);
   void setLogLevel(usmp_log_level_t level);
+  void setHandshakeScratch(uint8_t* scratch, size_t len);
   void maintain();
 
   /*
@@ -57,7 +59,9 @@ class USMPClient {
   void (*_on_disconnect)();
   void (*_on_reconnect)();
   void (*_on_message)(const uint8_t* data, size_t len);
-  uint8_t _rx_buf[USMP_MAX_DATA_LEN * USMP_MAX_FRAMES];
+  uint8_t* _rx_buf;
+  size_t _rx_buf_capacity;
+  bool _owns_rx_buf;
   size_t _rx_len;
   void _apply_psk();
   bool _do_reconnect();
@@ -69,6 +73,24 @@ class USMPClient {
   // Shared body of the two begin() overloads. `Transport` is USMPTCPTransport or
   // USMPUDPTransport; they differ only in connectWiFi()/init() and the proto tag.
   // Defined in USMP.cpp (both instantiations live in that TU).
-  template <typename Transport>
-  bool _beginImpl(const Transport& transport, const char* proto);
+  template <typename Transport, typename CtxType>
+  bool _beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx);
 };
+
+/**
+ * Zero-heap client wrapper with embedded static RX and handshake scratch buffers.
+ * Suitable for microcontrollers without heap or strict zero-fragmentation requirements.
+ */
+template <size_t RxBufferSize = USMP_MAX_DATA_LEN * USMP_MAX_FRAMES,
+          size_t ScratchBufferSize = USMP_HANDSHAKE_SCRATCH_LEN>
+class USMPClientStatic : public USMPClient {
+ public:
+  explicit USMPClientStatic(const char* psk)
+      : USMPClient(psk, _embedded_rx_buf, RxBufferSize) {
+    setHandshakeScratch(_embedded_scratch, ScratchBufferSize);
+  }
+
+ private:
+  uint8_t _embedded_rx_buf[RxBufferSize];
+  uint8_t _embedded_scratch[ScratchBufferSize];
+};

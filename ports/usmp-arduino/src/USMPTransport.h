@@ -62,6 +62,7 @@ class USMPTCPTransport : public USMPTransportBase {
   }
 
   bool init(usmp_transport_t* t) const;
+  bool init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx) const;
 };
 
 // Internal UDP context ──────────────────────────────────────────────────────
@@ -90,6 +91,7 @@ class USMPUDPTransport : public USMPTransportBase {
   }
 
   bool init(usmp_transport_t* t) const;
+  bool init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx) const;
 };
 
 // Ergonomic namespace: USMP::TCP("ip", port).wifi("ssid", "pass")
