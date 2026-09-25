@@ -43,6 +43,13 @@ void usmp_port_delay_ms(uint32_t ms) { delay(ms); }
 
 uint32_t usmp_port_millis(void) { return millis(); }
 
+void usmp_port_wdt_feed(void) {
+  yield();
+#if defined(ESP8266)
+  ESP.wdtFeed();
+#endif
+}
+
 void usmp_port_log(char level, const char* tag, const char* msg) {
   if (level == 'E') {
     char lower_tag[64];
