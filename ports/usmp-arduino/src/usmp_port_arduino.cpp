@@ -5,6 +5,8 @@
 #ifdef ESP32
 #include <esp_mac.h>
 #include <esp_random.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #endif
 
 extern "C" {
@@ -49,6 +51,51 @@ void usmp_port_wdt_feed(void) {
   ESP.wdtFeed();
 #endif
 }
+
+#if defined(ESP32)
+int usmp_port_mutex_create(usmp_mutex_t* mutex) {
+  if (!mutex) return -1;
+  SemaphoreHandle_t sem = xSemaphoreCreateMutex();
+  if (!sem) return -1;
+  *mutex = (usmp_mutex_t)sem;
+  return 0;
+}
+
+int usmp_port_mutex_lock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  return (xSemaphoreTake((SemaphoreHandle_t)mutex, portMAX_DELAY) == pdTRUE) ? 0 : -1;
+}
+
+int usmp_port_mutex_unlock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  return (xSemaphoreGive((SemaphoreHandle_t)mutex) == pdTRUE) ? 0 : -1;
+}
+
+void usmp_port_mutex_destroy(usmp_mutex_t mutex) {
+  if (!mutex) return;
+  vSemaphoreDelete((SemaphoreHandle_t)mutex);
+}
+#else
+int usmp_port_mutex_create(usmp_mutex_t* mutex) {
+  if (!mutex) return -1;
+  *mutex = (usmp_mutex_t)1;
+  return 0;
+}
+
+int usmp_port_mutex_lock(usmp_mutex_t mutex) {
+  (void)mutex;
+  return 0;
+}
+
+int usmp_port_mutex_unlock(usmp_mutex_t mutex) {
+  (void)mutex;
+  return 0;
+}
+
+void usmp_port_mutex_destroy(usmp_mutex_t mutex) {
+  (void)mutex;
+}
+#endif
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
   if (level == 'E') {

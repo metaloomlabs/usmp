@@ -83,6 +83,83 @@ void usmp_test_reset_wdt_feed_count(void) {
   g_wdt_feed_count = 0;
 }
 
+#ifdef _WIN32
+static volatile LONG g_mutex_lock_count = 0;
+static volatile LONG g_mutex_unlock_count = 0;
+#define ATOMIC_INC(var) InterlockedIncrement(&(var))
+
+int usmp_port_mutex_create(usmp_mutex_t* mutex) {
+  if (!mutex) return -1;
+  CRITICAL_SECTION* cs = (CRITICAL_SECTION*)malloc(sizeof(CRITICAL_SECTION));
+  if (!cs) return -1;
+  InitializeCriticalSection(cs);
+  *mutex = (usmp_mutex_t)cs;
+  return 0;
+}
+
+int usmp_port_mutex_lock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  ATOMIC_INC(g_mutex_lock_count);
+  EnterCriticalSection((CRITICAL_SECTION*)mutex);
+  return 0;
+}
+
+int usmp_port_mutex_unlock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  ATOMIC_INC(g_mutex_unlock_count);
+  LeaveCriticalSection((CRITICAL_SECTION*)mutex);
+  return 0;
+}
+
+void usmp_port_mutex_destroy(usmp_mutex_t mutex) {
+  if (!mutex) return;
+  DeleteCriticalSection((CRITICAL_SECTION*)mutex);
+  free(mutex);
+}
+#else
+#include <pthread.h>
+static volatile long g_mutex_lock_count = 0;
+static volatile long g_mutex_unlock_count = 0;
+#define ATOMIC_INC(var) __sync_fetch_and_add(&(var), 1)
+
+int usmp_port_mutex_create(usmp_mutex_t* mutex) {
+  if (!mutex) return -1;
+  pthread_mutex_t* m = (pthread_mutex_t*)malloc(sizeof(pthread_mutex_t));
+  if (!m) return -1;
+  if (pthread_mutex_init(m, NULL) != 0) {
+    free(m);
+    return -1;
+  }
+  *mutex = (usmp_mutex_t)m;
+  return 0;
+}
+
+int usmp_port_mutex_lock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  ATOMIC_INC(g_mutex_lock_count);
+  return pthread_mutex_lock((pthread_mutex_t*)mutex) == 0 ? 0 : -1;
+}
+
+int usmp_port_mutex_unlock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  ATOMIC_INC(g_mutex_unlock_count);
+  return pthread_mutex_unlock((pthread_mutex_t*)mutex) == 0 ? 0 : -1;
+}
+
+void usmp_port_mutex_destroy(usmp_mutex_t mutex) {
+  if (!mutex) return;
+  pthread_mutex_destroy((pthread_mutex_t*)mutex);
+  free(mutex);
+}
+#endif
+
+uint32_t usmp_test_get_mutex_lock_count(void) { return (uint32_t)g_mutex_lock_count; }
+uint32_t usmp_test_get_mutex_unlock_count(void) { return (uint32_t)g_mutex_unlock_count; }
+void usmp_test_reset_mutex_counts(void) {
+  g_mutex_lock_count = 0;
+  g_mutex_unlock_count = 0;
+}
+
 char g_last_log_level = 0;
 char g_last_log_tag[64] = {0};
 char g_last_log_msg[256] = {0};
