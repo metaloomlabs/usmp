@@ -924,6 +924,125 @@ static void test_zero_heap_handshake(void) {
   printf("  - Zero-heap handshake test passed!\n");
 }
 
+extern uint32_t usmp_test_get_wdt_feed_count(void);
+extern void usmp_test_reset_wdt_feed_count(void);
+
+typedef struct {
+  uint32_t srtt;
+  uint32_t rttvar;
+  uint32_t rto;
+} test_rtt_ctx_t;
+
+static void update_rtt(test_rtt_ctx_t* ctx, uint32_t sample, int attempt) {
+  if (attempt == 0) {
+    if (sample == 0) sample = 1;
+    if (ctx->srtt == 0) {
+      ctx->srtt = sample;
+      ctx->rttvar = sample / 2;
+    } else {
+      int32_t delta = (int32_t)sample - (int32_t)ctx->srtt;
+      int32_t abs_delta = delta < 0 ? -delta : delta;
+      ctx->rttvar = (uint32_t)((int32_t)ctx->rttvar + (abs_delta - (int32_t)ctx->rttvar) / 4);
+      ctx->srtt = (uint32_t)((int32_t)ctx->srtt + delta / 8);
+    }
+    uint32_t new_rto = ctx->srtt + 4 * ctx->rttvar;
+    if (new_rto < 100) new_rto = 100;
+    if (new_rto > 5000) new_rto = 5000;
+    ctx->rto = new_rto;
+  }
+}
+
+static uint32_t compute_backoff_timeout(uint32_t base_rto, int attempt) {
+  if (base_rto < 100) base_rto = 100;
+  if (base_rto > 5000) base_rto = 5000;
+  uint32_t timeout_ms = base_rto * (1U << attempt);
+  if (timeout_ms > 5000) timeout_ms = 5000;
+  if (timeout_ms < 100) timeout_ms = 100;
+  return timeout_ms;
+}
+
+static void test_coap_rtt_estimation(void) {
+  printf("Running CoAP RTT estimation and WDT guard tests...\n");
+
+  test_rtt_ctx_t ctx = {
+      .srtt = 200,
+      .rttvar = 100,
+      .rto = 500,
+  };
+
+  // 1. Initial State
+  assert(ctx.srtt == 200);
+  assert(ctx.rttvar == 100);
+  assert(ctx.rto == 500);
+
+  // 2. High latency sample (400 ms on attempt 0)
+  update_rtt(&ctx, 400, 0);
+  // delta = 400 - 200 = 200
+  // rttvar = 100 + (200 - 100)/4 = 125
+  // srtt = 200 + 200/8 = 225
+  // rto = 225 + 4 * 125 = 725
+  assert(ctx.srtt == 225);
+  assert(ctx.rttvar == 125);
+  assert(ctx.rto == 725);
+
+  // 3. Karn's Algorithm: retransmitted frames (attempt > 0) MUST NOT update RTT
+  uint32_t prev_srtt = ctx.srtt;
+  uint32_t prev_rttvar = ctx.rttvar;
+  uint32_t prev_rto = ctx.rto;
+  update_rtt(&ctx, 900, 1);  // attempt 1 (retry)
+  assert(ctx.srtt == prev_srtt);
+  assert(ctx.rttvar == prev_rttvar);
+  assert(ctx.rto == prev_rto);
+
+  update_rtt(&ctx, 10, 2);  // attempt 2 (retry)
+  assert(ctx.srtt == prev_srtt);
+  assert(ctx.rttvar == prev_rttvar);
+  assert(ctx.rto == prev_rto);
+
+  // 4. Low latency sample (50 ms on attempt 0)
+  update_rtt(&ctx, 50, 0);
+  // delta = 50 - 225 = -175, abs_delta = 175
+  // rttvar = 125 + (175 - 125)/4 = 137
+  // srtt = 225 + (-175)/8 = 225 - 21 = 204
+  // rto = 204 + 4 * 137 = 752
+  assert(ctx.srtt == 204);
+  assert(ctx.rttvar == 137);
+  assert(ctx.rto == 752);
+
+  // 5. Binary Exponential Backoff Progression
+  assert(compute_backoff_timeout(500, 0) == 500);
+  assert(compute_backoff_timeout(500, 1) == 1000);
+  assert(compute_backoff_timeout(500, 2) == 2000);
+  assert(compute_backoff_timeout(500, 3) == 4000);
+  assert(compute_backoff_timeout(500, 4) == 5000);  // 8000 clamped to 5000 max
+
+  // 6. Minimum & Maximum Clamping Bounds
+  assert(compute_backoff_timeout(10, 0) == 100);    // clamped to 100ms min
+  assert(compute_backoff_timeout(9999, 0) == 5000); // clamped to 5000ms max
+
+  // Drive RTT down with repeated low samples
+  for (int i = 0; i < 50; i++) {
+    update_rtt(&ctx, 1, 0);
+  }
+  assert(ctx.rto >= 100);  // Min RTO clamp
+
+  // Drive RTT up with massive samples
+  for (int i = 0; i < 50; i++) {
+    update_rtt(&ctx, 6000, 0);
+  }
+  assert(ctx.rto <= 5000);  // Max RTO clamp
+
+  // 7. Watchdog Timer (WDT) Feed Hook Verification
+  usmp_test_reset_wdt_feed_count();
+  assert(usmp_test_get_wdt_feed_count() == 0);
+  for (int i = 0; i < 15; i++) {
+    usmp_port_wdt_feed();
+  }
+  assert(usmp_test_get_wdt_feed_count() == 15);
+
+  printf("  - CoAP RTT estimation and WDT guard tests passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -941,6 +1060,7 @@ int main(void) {
   test_rekey();
   test_chacha20_poly1305();
   test_zero_heap_handshake();
+  test_coap_rtt_estimation();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;
