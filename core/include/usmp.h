@@ -97,6 +97,7 @@ typedef enum {
   USMP_ERR_SEQ_EXHAUSTED       = -7,
   USMP_ERR_CRYPTO_FAILED       = -8,
   USMP_ERR_NOT_CONNECTED       = -9,
+  USMP_ERR_MUTEX_FAILED        = -10,
 } usmp_err_t;
 
 typedef enum {
@@ -135,17 +136,25 @@ typedef struct {
    */
   uint8_t* scratch;
   size_t scratch_len;
+
+  /*
+   * Split RTOS Mutex Architecture:
+   * tx_mutex: Guards tx_seq reservation, payload encryption, and egress transmission.
+   * rx_mutex: Guards rx_seq, sliding replay window bitmap, and defragmentation.
+   * Prevents full-duplex socket deadlock and eliminates AES-GCM nonce reuse under concurrent sender tasks.
+   */
+  usmp_mutex_t tx_mutex;
+  usmp_mutex_t rx_mutex;
 } usmp_t;
 
 // Threading ─────────────────────────────────────────────────────────────────
 //
-// A usmp_t session is NOT thread-safe and carries no internal locking. All
-// calls that touch one session (usmp_send, usmp_recv, usmp_ping,
-// usmp_keepalive_tick, usmp_close, usmp_reconnect) must be serialized by the
-// caller. Concurrent senders in particular would race on tx_seq and reuse an
-// AES-GCM nonce. On FreeRTOS/ESP32, drive a session from a single task or guard
-// it with your own mutex. Distinct sessions on distinct usmp_t objects are
-// independent and may run on separate threads.
+// A usmp_t session embeds split RTOS mutexes (tx_mutex and rx_mutex). Full-duplex
+// concurrent operations (e.g. one task calling usmp_send while another task calls
+// usmp_recv) are completely non-blocking and thread-safe. Multiple concurrent senders
+// are safely serialized by tx_mutex, preventing tx_seq race conditions and nonce reuse.
+// Rekeying automatically acquires both mutexes in strict hierarchical order (tx_mutex
+// followed by rx_mutex) to prevent deadlocks.
 
 // Connection API ────────────────────────────────────────────────────────────
 
