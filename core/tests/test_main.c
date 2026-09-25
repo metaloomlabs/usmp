@@ -1085,7 +1085,11 @@ typedef struct {
 } concurrent_worker_arg_t;
 
 static uint32_t g_concurrent_seen_seqs[TOTAL_CONCURRENT_SENDS];
+#ifdef _WIN32
 static volatile LONG g_concurrent_seen_count = 0;
+#else
+static volatile long g_concurrent_seen_count = 0;
+#endif
 
 static int concurrent_mock_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
   (void)t;

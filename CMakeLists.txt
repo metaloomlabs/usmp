@@ -76,6 +76,12 @@ target_include_directories(usmp_interop_client PRIVATE
 
 target_link_libraries(usmp_interop_client PRIVATE usmp-core)
 
+find_package(Threads)
+if(Threads_FOUND)
+    target_link_libraries(usmp_tests PRIVATE Threads::Threads)
+    target_link_libraries(usmp_interop_client PRIVATE Threads::Threads)
+endif()
+
 # If mbedtls include directories and libraries were found, link them explicitly to the tests
 if(MbedTLS_FOUND)
     target_include_directories(usmp-core PUBLIC ${MBEDTLS_INCLUDE_DIRS})
