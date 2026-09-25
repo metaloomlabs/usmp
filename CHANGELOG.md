@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ✨ Added
+
+- **C Core — Zero-Heap Handshake Scratchpad Memory**: Added `scratch` and `scratch_len` fields to `usmp_t` and `#define USMP_HANDSHAKE_SCRATCH_LEN 1024` in `core/include/usmp.h`. When provided, `usmp_handshake()` slices caller-managed memory into 512-byte TX and RX frame buffers with **zero dynamic heap allocations**, securely zeroizes scratchpad contents upon completion via `mbedtls_platform_zeroize()`, and preserves scratchpad pointers across `usmp_connect()` and `usmp_reconnect()`. Includes `#ifdef USMP_ZERO_HEAP` guard for strict static-only build verification.
+- **Arduino Port — Static Memory Transport Contexts (`init_static`)**: Added `init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx)` and `init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx)` to `USMPTCPTransport` and `USMPUDPTransport`. Enables caller/BSS allocation of transport contexts, delegating standard `init()` to `init_static()` and installing `destroy_static()` hooks that safely stop sockets without calling `delete` on static pointers.
+- **Arduino Port — Zero-Heap Client Architecture & `USMPClientStatic`**: Refactored `USMPClient` to decouple RX buffer storage into pointer + capacity (`_rx_buf`, `_rx_buf_capacity`, `_owns_rx_buf`). Added constructor overload accepting external buffer memory, `setHandshakeScratch()` for cryptographic scratchpad injection, and `begin(transport, static_ctx = nullptr)` overloads. Added `USMPClientStatic<RxBufferSize, ScratchBufferSize>` template wrapper embedding both buffers directly in object memory for pure `.bss` zero-heap embedded deployments.
+- **Arduino Examples — Zero-Heap Reference Sketch**: Added [`ports/usmp-arduino/examples/zero_heap/zero_heap.ino`](file:///c:/Users/main/codinways/MetaLoom/products/usmp/ports/usmp-arduino/examples/zero_heap/zero_heap.ino) demonstrating 100% static allocation with `USMPClientStatic` and static transport contexts.
+- **Tests — C Core Handshake & Scratchpad Verification**: Added `test_zero_heap_handshake()` in `core/tests/test_main.c` validating complete mock handshake execution, session key derivation parity, and post-handshake memory zeroization. Added `_Static_assert` validations for `cipher_suite`, `scratch`, and `scratch_len` struct offsets between C Core and Arduino headers.
+
 ## [1.2.2] — 2026-09-24
 
 Core error handling modernization, Python SDK server resilience and logging UI overhaul, alongside DevOps and developer experience improvements spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
