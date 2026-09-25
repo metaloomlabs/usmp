@@ -36,6 +36,8 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   const uint8_t* psk = ctx->psk;
   size_t psk_len = ctx->psk_len;
   uint32_t keepalive_ms = ctx->keepalive_ms;
+  uint8_t* scratch = ctx->scratch;
+  size_t scratch_len = ctx->scratch_len;
 
   memset(ctx, 0, sizeof(usmp_t));
 
@@ -43,10 +45,14 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   ctx->psk = psk;
   ctx->psk_len = psk_len;
   ctx->keepalive_ms = keepalive_ms;
+  ctx->scratch = scratch;
+  ctx->scratch_len = scratch_len;
 
   usmp_t hs = {0};
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
+  hs.scratch = ctx->scratch;
+  hs.scratch_len = ctx->scratch_len;
 
   usmp_err_t ret = USMP_OK;
   usmp_err_t hs_ret = usmp_handshake(&ctx->transport, &hs);
@@ -104,6 +110,8 @@ usmp_err_t usmp_reconnect(usmp_t* ctx) {
   usmp_t hs = {0};
   hs.psk = ctx->psk;
   hs.psk_len = ctx->psk_len;
+  hs.scratch = ctx->scratch;
+  hs.scratch_len = ctx->scratch_len;
 
   usmp_err_t ret = USMP_OK;
   usmp_err_t hs_ret = usmp_handshake(&ctx->transport, &hs);

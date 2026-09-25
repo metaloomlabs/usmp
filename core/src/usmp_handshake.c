@@ -147,18 +147,33 @@ usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   mbedtls_entropy_add_source(&entropy, usmp_mbedtls_entropy_callback, NULL, 32, MBEDTLS_ENTROPY_SOURCE_STRONG);
 
   /*
-   * Heap-allocate TX/RX buffers.
-   * Stack allocation of 512-byte buffers is fatal on Arduino (256-512 bytes
-   * total stack). Even on ESP32, the combined mbedtls context + two 512-byte
-   * buffers exceeds comfortable stack limits for nested tasks.
+   * Handshake TX/RX buffers:
+   * Slices caller-managed scratch buffer if provided (>= 1024 bytes), achieving
+   * 0 heap allocations. Otherwise falls back to malloc(512) if permitted.
    */
-  uint8_t* tx_buf = (uint8_t*)malloc(512);
-  uint8_t* rx_buf = (uint8_t*)malloc(512);
-  if (!tx_buf || !rx_buf) {
-    USMP_LOGE(TAG, "Out of memory for handshake buffers");
-    free(tx_buf);
-    free(rx_buf);
-    return USMP_ERR_BUFFER_OVERFLOW;
+  bool allocated_buffers = false;
+  uint8_t* tx_buf = NULL;
+  uint8_t* rx_buf = NULL;
+
+  if (session && session->scratch && session->scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN) {
+    tx_buf = session->scratch;
+    rx_buf = session->scratch + 512;
+  } else {
+#ifdef USMP_ZERO_HEAP
+    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %d bytes", USMP_HANDSHAKE_SCRATCH_LEN);
+    ret = USMP_ERR_BUFFER_OVERFLOW;
+    goto cleanup;
+#else
+    tx_buf = (uint8_t*)malloc(512);
+    rx_buf = (uint8_t*)malloc(512);
+    if (!tx_buf || !rx_buf) {
+      USMP_LOGE(TAG, "Out of memory for handshake buffers");
+      free(tx_buf);
+      free(rx_buf);
+      return USMP_ERR_BUFFER_OVERFLOW;
+    }
+    allocated_buffers = true;
+#endif
   }
 
   usmp_packet_t pkt;
@@ -435,11 +450,15 @@ cleanup:
 
   if (tx_buf) {
     mbedtls_platform_zeroize(tx_buf, 512);
-    free(tx_buf);
+    if (allocated_buffers) {
+      free(tx_buf);
+    }
   }
   if (rx_buf) {
     mbedtls_platform_zeroize(rx_buf, 512);
-    free(rx_buf);
+    if (allocated_buffers) {
+      free(rx_buf);
+    }
   }
 
   return ret;

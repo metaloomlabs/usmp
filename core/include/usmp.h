@@ -80,6 +80,12 @@ const char* usmp_get_version(void);
  */
 #define USMP_MAX_DATA_LEN (USMP_MAX_PAYLOAD - USMP_GCM_TAG_LEN - 12)
 
+/*
+ * Minimum size in bytes required for caller-managed scratchpad memory to execute
+ * the handshake with zero heap allocations (512-byte TX frame + 512-byte RX frame).
+ */
+#define USMP_HANDSHAKE_SCRATCH_LEN 1024
+
 typedef enum {
   USMP_OK                      =  0,
   USMP_ERR_INVALID_ARG         = -1,
@@ -120,6 +126,15 @@ typedef struct {
    */
   const uint8_t* psk;
   size_t psk_len;
+
+  /*
+   * Optional caller-provided scratch buffer for zero-heap handshake.
+   * If scratch is non-NULL and scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN (1024),
+   * usmp_handshake() slices it into tx_buf (512) and rx_buf (512) without
+   * calling malloc() or free().
+   */
+  uint8_t* scratch;
+  size_t scratch_len;
 } usmp_t;
 
 // Threading ─────────────────────────────────────────────────────────────────

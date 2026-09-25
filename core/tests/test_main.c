@@ -45,9 +45,16 @@ typedef usmp_t arduino_usmp_t;
 
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
+#include "usmp_handshake.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/hkdf.h"
+#include "mbedtls/md.h"
+#include "mbedtls/platform_util.h"
 
 // Assert layout compatibility between core and Arduino usmp_t structures (A1)
-// All 13 fields must have identical offsets to ensure binary compatibility.
+// All fields must have identical offsets to ensure binary compatibility.
 _Static_assert(sizeof(arduino_usmp_t) == sizeof(usmp_t),
                "usmp_t size mismatch between Core and Arduino!");
 _Static_assert(offsetof(arduino_usmp_t, device_id) == offsetof(usmp_t, device_id),
@@ -72,9 +79,15 @@ _Static_assert(offsetof(arduino_usmp_t, last_tx_ms) == offsetof(usmp_t, last_tx_
                "last_tx_ms offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, rx_window_bitmap) == offsetof(usmp_t, rx_window_bitmap),
                "rx_window_bitmap offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, cipher_suite) == offsetof(usmp_t, cipher_suite),
+               "cipher_suite offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, psk) == offsetof(usmp_t, psk), "psk offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, psk_len) == offsetof(usmp_t, psk_len),
                "psk_len offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, scratch) == offsetof(usmp_t, scratch),
+               "scratch offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, scratch_len) == offsetof(usmp_t, scratch_len),
+               "scratch_len offset mismatch!");
 
 // Forward declaration from test_golden.c
 void test_golden(void);
@@ -694,6 +707,223 @@ static void test_chacha20_poly1305(void) {
   printf("  - ChaCha20-Poly1305 test passed!\n");
 }
 
+typedef struct {
+  mbedtls_ecdh_context srv_ecdh;
+  mbedtls_entropy_context entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
+  const uint8_t* psk;
+  size_t psk_len;
+  uint8_t server_nonce[USMP_NONCE_LEN];
+  uint8_t server_pub[32];
+  uint8_t client_pub[32];
+  uint8_t client_device_id[USMP_DEVICE_ID_LEN];
+  uint8_t session_id[USMP_SESSION_ID_LEN];
+  uint8_t srv_tx_key[32];
+  uint8_t srv_rx_key[32];
+  uint8_t rx_queue[512];
+  size_t rx_queue_len;
+  size_t rx_queue_pos;
+  int step;
+} mock_hs_server_t;
+
+static int mock_hs_entropy(void* data, unsigned char* output, size_t len, size_t* olen) {
+  (void)data;
+  for (size_t i = 0; i < len; i++) {
+    output[i] = (unsigned char)(rand() & 0xFF);
+  }
+  *olen = len;
+  return 0;
+}
+
+static int mock_hs_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  usmp_packet_t pkt;
+  if (usmp_parse_packet((uint8_t*)(uintptr_t)data, (int)len, &pkt) != 0) return -1;
+
+  if (pkt.type == USMP_TYPE_HELLO) {
+    srv->step = 1;
+    memcpy(srv->client_device_id, pkt.payload, USMP_DEVICE_ID_LEN);
+    memcpy(srv->client_pub, pkt.payload + USMP_DEVICE_ID_LEN, 32);
+
+    mbedtls_ecdh_init(&srv->srv_ecdh);
+    mbedtls_entropy_init(&srv->entropy);
+    mbedtls_ctr_drbg_init(&srv->ctr_drbg);
+    mbedtls_entropy_add_source(&srv->entropy, mock_hs_entropy, NULL, 32, MBEDTLS_ENTROPY_SOURCE_STRONG);
+    mbedtls_ctr_drbg_seed(&srv->ctr_drbg, mbedtls_entropy_func, &srv->entropy,
+                          (const unsigned char*)"srv-rng", 7);
+    mbedtls_ecdh_setup(&srv->srv_ecdh, MBEDTLS_ECP_DP_CURVE25519);
+
+    uint8_t srv_pub_buf[65];
+    size_t srv_pub_len = 0;
+    mbedtls_ecdh_make_public(&srv->srv_ecdh, &srv_pub_len, srv_pub_buf, sizeof(srv_pub_buf),
+                             mbedtls_ctr_drbg_random, &srv->ctr_drbg);
+    memcpy(srv->server_pub, srv_pub_buf + (srv_pub_len - 32), 32);
+
+    uint8_t peer_buf[33];
+    peer_buf[0] = 32;
+    memcpy(peer_buf + 1, srv->client_pub, 32);
+    mbedtls_ecdh_read_public(&srv->srv_ecdh, peer_buf, sizeof(peer_buf));
+
+    uint8_t shared_secret[32];
+    size_t shared_len = 0;
+    mbedtls_ecdh_calc_secret(&srv->srv_ecdh, &shared_len, shared_secret, sizeof(shared_secret),
+                             mbedtls_ctr_drbg_random, &srv->ctr_drbg);
+
+    memset(srv->server_nonce, 0x5A, USMP_NONCE_LEN);
+
+    const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    uint8_t info[7 + 32 + 32];
+    memcpy(info, "usmp-v2", 7);
+    memcpy(info + 7, srv->client_pub, 32);
+    memcpy(info + 7 + 32, srv->server_pub, 32);
+
+    uint8_t key_material[64];
+    mbedtls_hkdf(md, srv->server_nonce, USMP_NONCE_LEN, shared_secret, shared_len,
+                 info, sizeof(info), key_material, sizeof(key_material));
+    memcpy(srv->srv_rx_key, key_material, 32);       // client tx is server rx
+    memcpy(srv->srv_tx_key, key_material + 32, 32);  // client rx is server tx
+    mbedtls_platform_zeroize(key_material, sizeof(key_material));
+    mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+
+    usmp_packet_t chal = {0};
+    chal.magic = USMP_MAGIC;
+    chal.version = USMP_VERSION;
+    chal.type = USMP_TYPE_CHALLENGE;
+    chal.seq = 1;
+    chal.length = USMP_NONCE_LEN + 32;
+    memcpy(chal.payload, srv->server_nonce, USMP_NONCE_LEN);
+    memcpy(chal.payload + USMP_NONCE_LEN, srv->server_pub, 32);
+
+    uint16_t out_len = 0;
+    usmp_build_packet(&chal, srv->rx_queue, &out_len);
+    srv->rx_queue_len = out_len;
+    srv->rx_queue_pos = 0;
+    return 0;
+  }
+
+  if (pkt.type == USMP_TYPE_HELLO_ACK) {
+    srv->step = 2;
+    const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+
+    uint8_t input_c[4 + 32 + 6 + 32 + 32];
+    input_c[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input_c[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input_c[2] = USMP_VERSION;
+    input_c[3] = USMP_TYPE_HELLO_ACK;
+    memcpy(input_c + 4, srv->server_nonce, 32);
+    memcpy(input_c + 36, srv->client_device_id, 6);
+    memcpy(input_c + 42, srv->client_pub, 32);
+    memcpy(input_c + 74, srv->server_pub, 32);
+
+    uint8_t expected_c_hmac[32];
+    mbedtls_md_hmac(md, srv->psk, srv->psk_len, input_c, sizeof(input_c), expected_c_hmac);
+    assert(memcmp(pkt.payload, expected_c_hmac, 32) == 0);
+
+    memset(srv->session_id, 0x77, USMP_SESSION_ID_LEN);
+    uint8_t input_s[4 + 32 + 16 + 32 + 32];
+    input_s[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input_s[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input_s[2] = USMP_VERSION;
+    input_s[3] = USMP_TYPE_SESSION_OK;
+    memcpy(input_s + 4, srv->server_nonce, 32);
+    memcpy(input_s + 36, srv->session_id, 16);
+    memcpy(input_s + 52, srv->client_pub, 32);
+    memcpy(input_s + 84, srv->server_pub, 32);
+
+    uint8_t srv_hmac[32];
+    mbedtls_md_hmac(md, srv->psk, srv->psk_len, input_s, sizeof(input_s), srv_hmac);
+
+    usmp_packet_t ok_pkt = {0};
+    ok_pkt.magic = USMP_MAGIC;
+    ok_pkt.version = USMP_VERSION;
+    ok_pkt.type = USMP_TYPE_SESSION_OK;
+    ok_pkt.seq = 3;
+    ok_pkt.length = USMP_SESSION_ID_LEN + 32;
+    memcpy(ok_pkt.payload, srv->session_id, USMP_SESSION_ID_LEN);
+    memcpy(ok_pkt.payload + USMP_SESSION_ID_LEN, srv_hmac, 32);
+
+    uint16_t out_len = 0;
+    usmp_build_packet(&ok_pkt, srv->rx_queue, &out_len);
+    srv->rx_queue_len = out_len;
+    srv->rx_queue_pos = 0;
+    return 0;
+  }
+
+  return -1;
+}
+
+static int mock_hs_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  if (srv->rx_queue_len == 0 || srv->rx_queue_pos >= srv->rx_queue_len) return -1;
+  size_t avail = srv->rx_queue_len - srv->rx_queue_pos;
+  if (avail > max_len) return -1;
+  memcpy(buf, srv->rx_queue + srv->rx_queue_pos, avail);
+  srv->rx_queue_pos += avail;
+  return (int)avail;
+}
+
+static void test_zero_heap_handshake(void) {
+  printf("Running zero-heap handshake test...\n");
+  const uint8_t psk[16] = "usmp-test-psk-16";
+
+  mock_hs_server_t srv = {0};
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  usmp_transport_t transport = {0};
+  transport.send = mock_hs_send;
+  transport.recv = mock_hs_recv;
+  transport.ctx = &srv;
+
+  uint8_t scratch[USMP_HANDSHAKE_SCRATCH_LEN];
+  memset(scratch, 0xEE, sizeof(scratch));
+
+  usmp_t session = {0};
+  session.psk = psk;
+  session.psk_len = sizeof(psk);
+  session.scratch = scratch;
+  session.scratch_len = sizeof(scratch);
+
+  int ret = usmp_handshake(&transport, &session);
+  assert(ret == USMP_OK);
+  assert(session.established == true);
+  assert(memcmp(session.tx_key, srv.srv_rx_key, 32) == 0);
+  assert(memcmp(session.rx_key, srv.srv_tx_key, 32) == 0);
+
+  // Validate that scratchpad buffers were wiped (zeroized) upon completion
+  uint8_t zero_block[USMP_HANDSHAKE_SCRATCH_LEN] = {0};
+  assert(memcmp(scratch, zero_block, sizeof(scratch)) == 0);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  // Test usmp_connect propagation of scratchpad
+  memset(&srv, 0, sizeof(srv));
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+  memset(scratch, 0xCC, sizeof(scratch));
+
+  usmp_t client_ctx = {0};
+  client_ctx.psk = psk;
+  client_ctx.psk_len = sizeof(psk);
+  client_ctx.scratch = scratch;
+  client_ctx.scratch_len = sizeof(scratch);
+
+  ret = usmp_connect(&client_ctx, &transport);
+  assert(ret == USMP_OK);
+  assert(client_ctx.established == true);
+  assert(client_ctx.scratch == scratch);
+  assert(client_ctx.scratch_len == sizeof(scratch));
+  assert(memcmp(scratch, zero_block, sizeof(scratch)) == 0);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  printf("  - Zero-heap handshake test passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -710,6 +940,7 @@ int main(void) {
   test_logging();
   test_rekey();
   test_chacha20_poly1305();
+  test_zero_heap_handshake();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;
