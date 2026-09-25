@@ -59,6 +59,15 @@ void usmp_port_delay_ms(uint32_t ms);
 uint32_t usmp_port_millis(void);
 
 /**
+ * Feed the platform watchdog timer (WDT).
+ * Prevents system reset during lengthy blocking operations or retries.
+ * On ESP32 / FreeRTOS: esp_task_wdt_reset()
+ * On Arduino: yield() / wdt_reset()
+ * On POSIX / host: no-op stub
+ */
+void usmp_port_wdt_feed(void);
+
+/**
  * Log a message.
  * On ESP32: ESP_LOGI/LOGE
  * On STM32: UART printf

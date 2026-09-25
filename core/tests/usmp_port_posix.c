@@ -70,6 +70,19 @@ uint32_t usmp_port_millis(void) {
 }
 #endif
 
+static uint32_t g_wdt_feed_count = 0;
+void usmp_port_wdt_feed(void) {
+  g_wdt_feed_count++;
+}
+
+uint32_t usmp_test_get_wdt_feed_count(void) {
+  return g_wdt_feed_count;
+}
+
+void usmp_test_reset_wdt_feed_count(void) {
+  g_wdt_feed_count = 0;
+}
+
 char g_last_log_level = 0;
 char g_last_log_tag[64] = {0};
 char g_last_log_msg[256] = {0};

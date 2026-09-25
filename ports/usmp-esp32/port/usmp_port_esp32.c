@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
+#include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -23,6 +24,8 @@ int usmp_port_random(uint8_t* out, size_t len) {
 void usmp_port_delay_ms(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 
 uint32_t usmp_port_millis(void) { return (uint32_t)((uint64_t)esp_timer_get_time() / 1000ULL); }
+
+void usmp_port_wdt_feed(void) { esp_task_wdt_reset(); }
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
   switch (level) {

@@ -249,15 +249,26 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
     return ctx->udp.endPacket() ? 0 : -1;
   }
 
-  // Stop-and-wait ARQ
+  // Stop-and-wait ARQ with CoAP (RFC 7252) / Jacobson-Karn RTT, exponential backoff, and WDT servicing
   uint8_t temp[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
+  uint32_t base_rto = (ctx->rto > 0) ? ctx->rto : 500;
+  if (base_rto < 100) base_rto = 100;
+  if (base_rto > 5000) base_rto = 5000;
+
   for (int attempt = 0; attempt < 5; attempt++) {
     ctx->udp.beginPacket(ctx->host, ctx->port);
     ctx->udp.write(data, len);
     if (!ctx->udp.endPacket()) return -1;
 
+    // Binary exponential backoff: base_rto * (2 ^ attempt), clamped to [100ms, 5000ms]
+    uint32_t timeout_ms = base_rto * (1U << attempt);
+    if (timeout_ms > 5000) timeout_ms = 5000;
+    if (timeout_ms < 100) timeout_ms = 100;
+
     uint32_t start_ms = millis();
-    while (millis() - start_ms < 500) {
+    while (millis() - start_ms < timeout_ms) {
+      usmp_port_wdt_feed();
+
       int packetSize = ctx->udp.parsePacket();
       if (packetSize <= 0) {
         delay(1);
@@ -281,6 +292,27 @@ static int arduino_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len
             utack_mac(ctx->tx_key, temp, expected);
             if (mbedtls_ct_memcmp(expected, temp + UTACK_HEADER_LEN, UTACK_MAC_LEN) != 0) continue;
           }
+
+          // Karn's algorithm: update RTT only on first-attempt ACKs (attempt == 0)
+          if (attempt == 0) {
+            uint32_t sample = millis() - start_ms;
+            if (sample == 0) sample = 1;
+            if (ctx->srtt == 0) {
+              ctx->srtt = sample;
+              ctx->rttvar = sample / 2;
+            } else {
+              int32_t delta = (int32_t)sample - (int32_t)ctx->srtt;
+              int32_t abs_delta = delta < 0 ? -delta : delta;
+              ctx->rttvar =
+                  (uint32_t)((int32_t)ctx->rttvar + (abs_delta - (int32_t)ctx->rttvar) / 4);
+              ctx->srtt = (uint32_t)((int32_t)ctx->srtt + delta / 8);
+            }
+            uint32_t new_rto = ctx->srtt + 4 * ctx->rttvar;
+            if (new_rto < 100) new_rto = 100;
+            if (new_rto > 5000) new_rto = 5000;
+            ctx->rto = new_rto;
+          }
+
           return 0;  // Success! ACK received (and authenticated for session frames)
         }
         continue;
@@ -321,6 +353,7 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
         if (bounded && (millis() - start) >= USMP_UDP_RECV_TIMEOUT_MS) {
           return 0;  // no data within budget — non-fatal empty read
         }
+        usmp_port_wdt_feed();
         delay(1);
         continue;
       }
@@ -417,6 +450,9 @@ static int arduino_udp_reconnect(usmp_transport_t* t) {
   // 1-4) and must use the unbounded recv path, exactly like the first connect.
   // usmp_connect() reinstalls fresh keys via set_session_keys() on success.
   ctx->keys_set = false;
+  ctx->srtt = 200;
+  ctx->rttvar = 100;
+  ctx->rto = 500;
   return ctx->udp.begin(0) ? 0 : -1;
 }
 
@@ -480,6 +516,9 @@ bool USMPUDPTransport::init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx) 
   ctx->last_rx_seq_set = false;
   ctx->last_rx_type = 0;
   ctx->keys_set = false;
+  ctx->srtt = 200;
+  ctx->rttvar = 100;
+  ctx->rto = 500;
 
   if (!ctx->udp.begin(0)) {
     return false;
