@@ -94,7 +94,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:" + os.environ["SPLIT_TOKEN"].encode()).decode())')
             git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
             git remote add dest "https://github.com/metaloomlabs/usmp-python.git"
 
@@ -147,7 +147,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:" + os.environ["SPLIT_TOKEN"].encode()).decode())')
             git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
             git remote add dest "https://github.com/metaloomlabs/usmp-arduino.git"
 
@@ -200,7 +200,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
 
-            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(f"x-access-token:{os.environ[\"SPLIT_TOKEN\"]}".encode()).decode())')
+            AUTH_HEADER=$(python3 -c 'import base64, os; print("AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:" + os.environ["SPLIT_TOKEN"].encode()).decode())')
             git config --local http.https://github.com/.extraheader "$AUTH_HEADER"
             git remote add dest "https://github.com/metaloomlabs/usmp-esp32.git"
 

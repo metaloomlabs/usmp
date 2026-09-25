@@ -67,4 +67,4 @@ __all__ = [
 # logging's "last resort" handler when the consuming app has not configured logging.
 logging.getLogger("usmp").addHandler(logging.NullHandler())
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
