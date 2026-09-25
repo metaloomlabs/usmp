@@ -154,32 +154,53 @@ static int send_control(usmp_t* ctx, uint8_t type) { return emit_frame(ctx, type
  * Best-effort graceful BYE, used by usmp_close(). Lets the peer release the
  * session immediately instead of waiting for its inactivity watchdog. The
  * caller owns teardown regardless, so the return value is advisory only.
+ * usmp_send_bye_locked assumes tx_mutex is already held by caller.
  */
-usmp_err_t usmp_send_bye(usmp_t* ctx) {
+usmp_err_t usmp_send_bye_locked(usmp_t* ctx) {
   if (!ctx || !ctx->established || !ctx->transport.send) return USMP_ERR_NOT_CONNECTED;
   return (send_control(ctx, USMP_TYPE_BYE) == 0) ? USMP_OK : USMP_ERR_TRANSPORT_FAILED;
+}
+
+usmp_err_t usmp_send_bye(usmp_t* ctx) {
+  if (!ctx) return USMP_ERR_INVALID_ARG;
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
+  usmp_err_t ret = usmp_send_bye_locked(ctx);
+  usmp_port_mutex_unlock(ctx->tx_mutex);
+  return ret;
 }
 
 // Public API ────────────────────────────────────────────────────────────────
 
 usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
-  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
+  if (!ctx) return USMP_ERR_INVALID_ARG;
+
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) {
+    return USMP_ERR_MUTEX_FAILED;
+  }
+
+  if (!ctx->established) {
+    usmp_port_mutex_unlock(ctx->tx_mutex);
+    return USMP_ERR_NOT_CONNECTED;
+  }
 
   uint32_t num_fragments =
       (len == 0) ? 1 : (uint32_t)((len + USMP_MAX_DATA_LEN - 1) / USMP_MAX_DATA_LEN);
   if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_SEQ_EXHAUSTED;
   }
 
   if (len > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES) {
     USMP_LOGE(TAG, "Payload too large for fragmentation limits");
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_BUFFER_OVERFLOW;
   }
 
   uint16_t offset = 0;
   char _msg[64];
+  usmp_err_t ret = USMP_OK;
 
   while (offset < len || len == 0) {
     uint16_t chunk_len = len - offset;
@@ -193,7 +214,8 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     int rc = emit_frame(ctx, type, data + offset, chunk_len);
     if (rc != 0) {
       USMP_LOGE(TAG, rc == -2 ? "Encryption failed" : "Send failed");
-      return (rc == -2) ? USMP_ERR_CRYPTO_FAILED : USMP_ERR_TRANSPORT_FAILED;
+      ret = (rc == -2) ? USMP_ERR_CRYPTO_FAILED : USMP_ERR_TRANSPORT_FAILED;
+      break;
     }
 
     snprintf(_msg, sizeof(_msg), "TX seq=%lu len=%u type=0x%02x", (unsigned long)frame_seq,
@@ -207,11 +229,19 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     }
   }
 
-  return 0;
+  usmp_port_mutex_unlock(ctx->tx_mutex);
+  return ret;
 }
 
 int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
-  if (!ctx || !ctx->established) return -1;
+  if (!ctx) return -1;
+
+  if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) return -1;
+
+  if (!ctx->established) {
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    return -1;
+  }
 
   char _msg[64];
   uint8_t rx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
@@ -236,14 +266,17 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
          */
         USMP_LOGE(TAG, "Incomplete reassembly after max attempts — session desynced");
         ctx->established = false;
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return 0;
     }
     int len = ctx->transport.recv(&ctx->transport, rx_buf, sizeof(rx_buf));
     if (len < 0) {
       USMP_LOGE(TAG, "Recv failed");
       ctx->established = false;
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -252,6 +285,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (ctx->transport.confirm_authenticated) {
         continue;  // UDP: drop unauthenticated packet and continue reading
       }
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -260,6 +294,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (pkt.seq >= 0xFFFFFFFF) {
         USMP_LOGE(TAG, "RX sequence overflowed");
         ctx->established = false;
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       if (ctx->rx_seq >= 64 && pkt.seq <= ctx->rx_seq - 64) {
@@ -286,6 +321,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
         USMP_LOGE(TAG, "Protocol error: control frame during fragmentation");
         if (ctx->transport.confirm_authenticated)
           continue;  // UDP: drop spoofed frame, keep reading
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       dec_dest = dummy_out;
@@ -294,6 +330,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (bytes_written > 0) {
         USMP_LOGE(TAG, "Protocol error: REKEY frame during fragmentation");
         if (ctx->transport.confirm_authenticated) continue;
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       dec_dest = rekey_salt_buf;
@@ -302,6 +339,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       dec_dest = out + bytes_written;
       if (max_len < bytes_written) {
         USMP_LOGE(TAG, "Buffer overflow sanity check failed");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       dec_max = max_len - bytes_written;
@@ -309,6 +347,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       snprintf(_msg, sizeof(_msg), "Unexpected type 0x%02x", pkt.type);
       USMP_LOGE(TAG, _msg);
       if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -316,12 +355,14 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     if (pkt.length < USMP_GCM_NONCE_LEN + USMP_GCM_TAG_LEN) {
       USMP_LOGE(TAG, "Payload too short");
       if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
     uint16_t plain_len = pkt.length - USMP_GCM_NONCE_LEN - USMP_GCM_TAG_LEN;
     if (plain_len > dec_max) {
       USMP_LOGE(TAG, "Buffer too small for payload");
       if (ctx->transport.confirm_authenticated) continue;  // UDP: drop spoofed frame, keep reading
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -342,6 +383,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (ctx->transport.confirm_authenticated) {
         continue;  // UDP: drop unauthenticated packet and continue reading
       }
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -364,6 +406,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (ctx->rx_seq >= 0xFFFFFFFF) {
         USMP_LOGE(TAG, "RX sequence overflowed");
         ctx->established = false;
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
 
@@ -371,6 +414,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
         snprintf(_msg, sizeof(_msg), "Seq mismatch: expected %lu got %lu",
                  (unsigned long)ctx->rx_seq, (unsigned long)pkt.seq);
         USMP_LOGE(TAG, _msg);
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       ctx->rx_seq++;
@@ -381,25 +425,43 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       USMP_LOGI(TAG, "PONG received");
       if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return 0;
       }
       continue;
 
     } else if (pkt.type == USMP_TYPE_PING) {
       USMP_LOGI(TAG, "PING received — responding with PONG");
-      if (send_control(ctx, USMP_TYPE_PONG) != 0) {
+      // Hierarchy-conforming PONG response: release rx_mutex, acquire tx_mutex, emit PONG, release tx_mutex, re-acquire rx_mutex.
+      usmp_port_mutex_unlock(ctx->rx_mutex);
+      int pong_rc = -1;
+      if (usmp_port_mutex_lock(ctx->tx_mutex) == 0) {
+        if (ctx->established) {
+          pong_rc = send_control(ctx, USMP_TYPE_PONG);
+        }
+        usmp_port_mutex_unlock(ctx->tx_mutex);
+      }
+      if (usmp_port_mutex_lock(ctx->rx_mutex) != 0 || !ctx->established) {
+        if (ctx->rx_mutex) usmp_port_mutex_unlock(ctx->rx_mutex);
+        return -1;
+      }
+      if (pong_rc != 0) {
         USMP_LOGE(TAG, "Failed to send PONG");
         ctx->established = false;
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return 0;
       }
       continue;
@@ -407,11 +469,25 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     } else if (pkt.type == USMP_TYPE_BYE) {
       USMP_LOGI(TAG, "BYE received — session closed by peer");
       ctx->established = false;
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     } else if (pkt.type == USMP_TYPE_REKEY) {
       USMP_LOGI(TAG, "REKEY frame received — rotating session keys");
       if (out_len != 32) {
         USMP_LOGE(TAG, "Invalid REKEY payload size");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
+        return -1;
+      }
+      // Hierarchy-conforming key rotation: unlock rx_mutex, lock tx_mutex, lock rx_mutex
+      usmp_port_mutex_unlock(ctx->rx_mutex);
+      if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return -1;
+      if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) {
+        usmp_port_mutex_unlock(ctx->tx_mutex);
+        return -1;
+      }
+      if (!ctx->established) {
+        usmp_port_mutex_unlock(ctx->rx_mutex);
+        usmp_port_mutex_unlock(ctx->tx_mutex);
         return -1;
       }
       uint8_t new_tx[USMP_SESSION_KEY_LEN];
@@ -419,6 +495,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       if (derive_rekey_keys(false, ctx->tx_key, ctx->rx_key, ctx->session_id, rekey_salt_buf,
                             new_tx, new_rx) != 0) {
         USMP_LOGE(TAG, "Failed to derive new keys on REKEY");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
+        usmp_port_mutex_unlock(ctx->tx_mutex);
         return -1;
       }
       memcpy(ctx->tx_key, new_tx, USMP_SESSION_KEY_LEN);
@@ -435,11 +513,15 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       mbedtls_platform_zeroize(new_rx, sizeof(new_rx));
       mbedtls_platform_zeroize(rekey_salt_buf, sizeof(rekey_salt_buf));
 
+      usmp_port_mutex_unlock(ctx->tx_mutex);
+
       if (++ctrl_count > USMP_MAX_CTRL_FRAMES) {
         USMP_LOGE(TAG, "Too many consecutive control frames — possible flood");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       if (ctx->transport.available && ctx->transport.available(&ctx->transport) <= 0) {
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return 0;
       }
       continue;
@@ -449,6 +531,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     if (frame_count > 0) {
       if (pkt.seq != expected_frag_seq) {
         USMP_LOGE(TAG, "Protocol error: out-of-order fragment sequence");
+        usmp_port_mutex_unlock(ctx->rx_mutex);
         return -1;
       }
       expected_frag_seq++;
@@ -463,12 +546,14 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       /* Reassembly complete */
       snprintf(_msg, sizeof(_msg), "RX total len=%u frames=%u", bytes_written, frame_count);
       USMP_LOGI(TAG, _msg);
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return bytes_written;
     }
 
     /* It was a DATA_FRAG frame. Verify we haven't hit the frame limit */
     if (frame_count >= USMP_MAX_FRAMES) {
       USMP_LOGE(TAG, "Protocol error: exceeded max fragments limit");
+      usmp_port_mutex_unlock(ctx->rx_mutex);
       return -1;
     }
 
@@ -477,9 +562,19 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 }
 
 usmp_err_t usmp_ping(usmp_t* ctx) {
-  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
+  if (!ctx) return USMP_ERR_INVALID_ARG;
 
-  if (send_control(ctx, USMP_TYPE_PING) != 0) {
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
+
+  if (!ctx->established) {
+    usmp_port_mutex_unlock(ctx->tx_mutex);
+    return USMP_ERR_NOT_CONNECTED;
+  }
+
+  int rc = send_control(ctx, USMP_TYPE_PING);
+  usmp_port_mutex_unlock(ctx->tx_mutex);
+
+  if (rc != 0) {
     USMP_LOGE(TAG, "PING send failed");
     ctx->established = false;
     return USMP_ERR_TRANSPORT_FAILED;
@@ -501,11 +596,26 @@ usmp_err_t usmp_keepalive_tick(usmp_t* ctx) {
 }
 
 usmp_err_t usmp_rekey(usmp_t* ctx) {
-  if (!ctx || !ctx->established) return USMP_ERR_NOT_CONNECTED;
+  if (!ctx) return USMP_ERR_INVALID_ARG;
+
+  // Strict hierarchical locking: tx_mutex first, then rx_mutex
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
+  if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) {
+    usmp_port_mutex_unlock(ctx->tx_mutex);
+    return USMP_ERR_MUTEX_FAILED;
+  }
+
+  if (!ctx->established) {
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
+    return USMP_ERR_NOT_CONNECTED;
+  }
 
   uint8_t salt[32];
   if (usmp_port_random(salt, sizeof(salt)) != 0) {
     USMP_LOGE(TAG, "Failed to generate random salt for rekey");
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_CRYPTO_FAILED;
   }
 
@@ -513,6 +623,8 @@ usmp_err_t usmp_rekey(usmp_t* ctx) {
   if (rc != 0) {
     USMP_LOGE(TAG, "Failed to emit REKEY frame");
     mbedtls_platform_zeroize(salt, sizeof(salt));
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_TRANSPORT_FAILED;
   }
 
@@ -522,6 +634,8 @@ usmp_err_t usmp_rekey(usmp_t* ctx) {
       0) {
     USMP_LOGE(TAG, "Failed to derive new keys for rekey");
     mbedtls_platform_zeroize(salt, sizeof(salt));
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_CRYPTO_FAILED;
   }
 
@@ -540,5 +654,7 @@ usmp_err_t usmp_rekey(usmp_t* ctx) {
   mbedtls_platform_zeroize(new_rx, sizeof(new_rx));
 
   USMP_LOGI(TAG, "In-band session rekeying initiated successfully");
+  usmp_port_mutex_unlock(ctx->rx_mutex);
+  usmp_port_mutex_unlock(ctx->tx_mutex);
   return USMP_OK;
 }
