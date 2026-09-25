@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 #include "usmp_frame.h"
+#include "usmp_port.h"
 #include "usmp_transport.h"
 
 #ifdef __cplusplus
@@ -78,6 +79,11 @@ struct USMPArduinoUdpCtx {
   uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
   uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
   bool keys_set;
+
+  // RFC 7252 (CoAP) / Jacobson-Karn RTT estimation state
+  uint32_t srtt;    // Smoothed Round-Trip Time in milliseconds
+  uint32_t rttvar;  // RTT Variation in milliseconds
+  uint32_t rto;     // Retransmission Timeout in milliseconds
 };
 
 // UDP transport factory ─────────────────────────────────────────────────────

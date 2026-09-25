@@ -302,6 +302,7 @@ static int posix_udp_send(usmp_transport_t* t, const uint8_t* data, size_t len) 
 
     uint32_t start_ms = usmp_port_millis();
     while (usmp_port_millis() - start_ms < timeout_ms) {
+      usmp_port_wdt_feed();
       ssize_t n = recv(udp->sock, (char*)temp, sizeof(temp), 0);
       if (n < 0) {
 #ifdef _WIN32
