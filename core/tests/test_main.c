@@ -88,6 +88,10 @@ _Static_assert(offsetof(arduino_usmp_t, scratch) == offsetof(usmp_t, scratch),
                "scratch offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, scratch_len) == offsetof(usmp_t, scratch_len),
                "scratch_len offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, tx_mutex) == offsetof(usmp_t, tx_mutex),
+               "tx_mutex offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, rx_mutex) == offsetof(usmp_t, rx_mutex),
+               "rx_mutex offset mismatch!");
 
 // Forward declaration from test_golden.c
 void test_golden(void);
@@ -927,6 +931,10 @@ static void test_zero_heap_handshake(void) {
 extern uint32_t usmp_test_get_wdt_feed_count(void);
 extern void usmp_test_reset_wdt_feed_count(void);
 
+extern uint32_t usmp_test_get_mutex_lock_count(void);
+extern uint32_t usmp_test_get_mutex_unlock_count(void);
+extern void usmp_test_reset_mutex_counts(void);
+
 typedef struct {
   uint32_t srtt;
   uint32_t rttvar;
@@ -1043,6 +1051,182 @@ static void test_coap_rtt_estimation(void) {
   printf("  - CoAP RTT estimation and WDT guard tests passed!\n");
 }
 
+#ifdef _WIN32
+#include <windows.h>
+typedef HANDLE test_thread_t;
+typedef DWORD(WINAPI* test_thread_fn_t)(LPVOID);
+static inline int test_thread_create(test_thread_t* t, test_thread_fn_t fn, void* arg) {
+  *t = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)fn, arg, 0, NULL);
+  return (*t != NULL) ? 0 : -1;
+}
+static inline void test_thread_join(test_thread_t t) {
+  WaitForSingleObject(t, INFINITE);
+  CloseHandle(t);
+}
+#else
+#include <pthread.h>
+typedef pthread_t test_thread_t;
+typedef void* (*test_thread_fn_t)(void*);
+static inline int test_thread_create(test_thread_t* t, test_thread_fn_t fn, void* arg) {
+  return pthread_create(t, NULL, fn, arg);
+}
+static inline void test_thread_join(test_thread_t t) {
+  pthread_join(t, NULL);
+}
+#endif
+
+#define CONCURRENT_SENDS_PER_THREAD 25
+#define CONCURRENT_THREAD_COUNT 4
+#define TOTAL_CONCURRENT_SENDS (CONCURRENT_SENDS_PER_THREAD * CONCURRENT_THREAD_COUNT)
+
+typedef struct {
+  usmp_t* session;
+  int thread_id;
+} concurrent_worker_arg_t;
+
+static uint32_t g_concurrent_seen_seqs[TOTAL_CONCURRENT_SENDS];
+#ifdef _WIN32
+static volatile LONG g_concurrent_seen_count = 0;
+#else
+static volatile long g_concurrent_seen_count = 0;
+#endif
+
+static int concurrent_mock_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  (void)t;
+  usmp_packet_t pkt;
+  if (usmp_parse_packet((uint8_t*)data, (int)len, &pkt) == 0) {
+    if (pkt.type == USMP_TYPE_DATA || pkt.type == USMP_TYPE_DATA_FRAG) {
+#ifdef _WIN32
+      LONG idx = InterlockedIncrement(&g_concurrent_seen_count) - 1;
+#else
+      long idx = __sync_fetch_and_add(&g_concurrent_seen_count, 1);
+#endif
+      if (idx < TOTAL_CONCURRENT_SENDS) {
+        g_concurrent_seen_seqs[idx] = pkt.seq;
+      }
+    }
+  }
+  return 0;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI __attribute__((force_align_arg_pointer)) concurrent_send_worker(LPVOID param)
+#else
+static void* concurrent_send_worker(void* param)
+#endif
+{
+  concurrent_worker_arg_t* arg = (concurrent_worker_arg_t*)param;
+  for (int i = 0; i < CONCURRENT_SENDS_PER_THREAD; i++) {
+    char payload[32];
+    snprintf(payload, sizeof(payload), "Worker %d Msg %d", arg->thread_id, i);
+    usmp_err_t err = usmp_send(arg->session, (const uint8_t*)payload, (uint16_t)strlen(payload));
+    assert(err == USMP_OK);
+  }
+#ifdef _WIN32
+  return 0;
+#else
+  return NULL;
+#endif
+}
+
+static void test_split_mutex_concurrency(void) {
+  printf("Running split RTOS mutex architecture and concurrency tests...\n");
+
+  // 1. Mutex lifecycle & basic lock balance verification
+  usmp_test_reset_mutex_counts();
+  assert(usmp_test_get_mutex_lock_count() == 0);
+  assert(usmp_test_get_mutex_unlock_count() == 0);
+
+  usmp_t session = {0};
+  int ret_m = usmp_port_mutex_create(&session.tx_mutex);
+  assert(ret_m == 0 && session.tx_mutex != NULL);
+  ret_m = usmp_port_mutex_create(&session.rx_mutex);
+  assert(ret_m == 0 && session.rx_mutex != NULL);
+
+  session.established = true;
+  session.transport.send = concurrent_mock_send;
+  memset(session.session_id, 0x42, 16);
+  memset(session.tx_key, 0xAA, 32);
+  memset(session.rx_key, 0xBB, 32);
+
+  // Single send lock/unlock balance
+  const char* msg = "Single send test";
+  usmp_err_t send_err = usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg));
+  assert(send_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 1);
+  assert(usmp_test_get_mutex_unlock_count() == 1);
+
+  // Ping lock/unlock balance
+  usmp_err_t ping_err = usmp_ping(&session);
+  assert(ping_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 2);
+  assert(usmp_test_get_mutex_unlock_count() == 2);
+
+  // Rekey hierarchical locking: acquires tx_mutex then rx_mutex
+  usmp_err_t rekey_err = usmp_rekey(&session);
+  assert(rekey_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 4);
+  assert(usmp_test_get_mutex_unlock_count() == 4);
+
+  // 2. Full-duplex non-blocking send while rx_mutex is held
+  // In a split mutex design, an rx task holding rx_mutex must NOT block usmp_send()
+  assert(usmp_port_mutex_lock(session.rx_mutex) == 0);
+  // While rx_mutex is held by "rx task", usmp_send() should proceed freely
+  send_err = usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg));
+  assert(send_err == USMP_OK);
+  assert(usmp_port_mutex_unlock(session.rx_mutex) == 0);
+
+  // 3. Multi-threaded Concurrent Senders Serialization & Nonce Reuse Elimination
+  g_concurrent_seen_count = 0;
+  memset(g_concurrent_seen_seqs, 0xFF, sizeof(g_concurrent_seen_seqs));
+  session.tx_seq = 0;
+
+  test_thread_t threads[CONCURRENT_THREAD_COUNT];
+  concurrent_worker_arg_t args[CONCURRENT_THREAD_COUNT];
+
+  for (int i = 0; i < CONCURRENT_THREAD_COUNT; i++) {
+    args[i].session = &session;
+    args[i].thread_id = i;
+    int cr = test_thread_create(&threads[i], concurrent_send_worker, &args[i]);
+    assert(cr == 0);
+  }
+
+  for (int i = 0; i < CONCURRENT_THREAD_COUNT; i++) {
+    test_thread_join(threads[i]);
+  }
+
+  assert(g_concurrent_seen_count == TOTAL_CONCURRENT_SENDS);
+  assert(session.tx_seq == TOTAL_CONCURRENT_SENDS);
+
+  // Verify all sequence numbers [0 .. TOTAL_CONCURRENT_SENDS - 1] were emitted exactly once (no duplicates/collisions)
+  bool seq_present[TOTAL_CONCURRENT_SENDS] = {false};
+  for (int i = 0; i < TOTAL_CONCURRENT_SENDS; i++) {
+    uint32_t s = g_concurrent_seen_seqs[i];
+    assert(s < TOTAL_CONCURRENT_SENDS);
+    assert(seq_present[s] == false);  // Nonce reuse check: NO DUPLICATE SEQUENCE NUMBERS!
+    seq_present[s] = true;
+  }
+  for (int i = 0; i < TOTAL_CONCURRENT_SENDS; i++) {
+    assert(seq_present[i] == true);
+  }
+
+  // All locks were properly released
+  assert(usmp_test_get_mutex_lock_count() == usmp_test_get_mutex_unlock_count());
+
+  // 4. Session Teardown & Safe NULL De-referencing
+  usmp_close(&session);
+  assert(session.established == false);
+  assert(session.tx_mutex == NULL);
+  assert(session.rx_mutex == NULL);
+
+  // Calling usmp_send, usmp_ping, or usmp_close on closed session is safe
+  assert(usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg)) == USMP_ERR_NOT_CONNECTED);
+  assert(usmp_ping(&session) == USMP_ERR_NOT_CONNECTED);
+  usmp_close(&session);  // idempotent safe no-op
+
+  printf("  - Split RTOS mutex architecture and concurrency tests passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -1061,6 +1245,7 @@ int main(void) {
   test_chacha20_poly1305();
   test_zero_heap_handshake();
   test_coap_rtt_estimation();
+  test_split_mutex_concurrency();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;

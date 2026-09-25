@@ -39,6 +39,15 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   uint8_t* scratch = ctx->scratch;
   size_t scratch_len = ctx->scratch_len;
 
+  if (ctx->tx_mutex) {
+    usmp_port_mutex_destroy(ctx->tx_mutex);
+    ctx->tx_mutex = NULL;
+  }
+  if (ctx->rx_mutex) {
+    usmp_port_mutex_destroy(ctx->rx_mutex);
+    ctx->rx_mutex = NULL;
+  }
+
   memset(ctx, 0, sizeof(usmp_t));
 
   ctx->transport = *transport;
@@ -47,6 +56,20 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   ctx->keepalive_ms = keepalive_ms;
   ctx->scratch = scratch;
   ctx->scratch_len = scratch_len;
+
+  if (usmp_port_mutex_create(&ctx->tx_mutex) != 0 ||
+      usmp_port_mutex_create(&ctx->rx_mutex) != 0) {
+    USMP_LOGE(TAG, "Failed to create session mutexes");
+    if (ctx->tx_mutex) {
+      usmp_port_mutex_destroy(ctx->tx_mutex);
+      ctx->tx_mutex = NULL;
+    }
+    if (ctx->rx_mutex) {
+      usmp_port_mutex_destroy(ctx->rx_mutex);
+      ctx->rx_mutex = NULL;
+    }
+    return USMP_ERR_MUTEX_FAILED;
+  }
 
   usmp_t hs = {0};
   hs.psk = ctx->psk;
@@ -59,6 +82,14 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   if (hs_ret != USMP_OK) {
     USMP_LOGE(TAG, "Handshake failed");
     if (ctx->transport.close) ctx->transport.close(&ctx->transport);
+    if (ctx->tx_mutex) {
+      usmp_port_mutex_destroy(ctx->tx_mutex);
+      ctx->tx_mutex = NULL;
+    }
+    if (ctx->rx_mutex) {
+      usmp_port_mutex_destroy(ctx->rx_mutex);
+      ctx->rx_mutex = NULL;
+    }
     ret = hs_ret;
     goto cleanup;
   }
@@ -88,12 +119,21 @@ cleanup:
 usmp_err_t usmp_reconnect(usmp_t* ctx) {
   if (!ctx) return USMP_ERR_INVALID_ARG;
 
+  // Strict hierarchical locking: tx_mutex first, then rx_mutex
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
+  if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) {
+    usmp_port_mutex_unlock(ctx->tx_mutex);
+    return USMP_ERR_MUTEX_FAILED;
+  }
+
   /* Zeroise the old session key immediately on entering reconnect */
   mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
   mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
 
   if (!ctx->transport.reconnect) {
     USMP_LOGE(TAG, "Transport does not support reconnect");
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_TRANSPORT_FAILED;
   }
 
@@ -102,6 +142,8 @@ usmp_err_t usmp_reconnect(usmp_t* ctx) {
   //  Re-dial transport ─────────────────────────────────────────────────────
   if (ctx->transport.reconnect(&ctx->transport) != 0) {
     USMP_LOGE(TAG, "Transport reconnect failed");
+    usmp_port_mutex_unlock(ctx->rx_mutex);
+    usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_TRANSPORT_FAILED;
   }
   USMP_LOGI(TAG, "Transport reconnected — starting handshake");
@@ -141,22 +183,41 @@ usmp_err_t usmp_reconnect(usmp_t* ctx) {
 
 cleanup:
   mbedtls_platform_zeroize(&hs, sizeof(hs));
+  usmp_port_mutex_unlock(ctx->rx_mutex);
+  usmp_port_mutex_unlock(ctx->tx_mutex);
   return ret;
 }
 
 void usmp_close(usmp_t* ctx) {
   if (!ctx) return;
+
+  // Strict hierarchical locking: tx_mutex first, then rx_mutex
+  usmp_port_mutex_lock(ctx->tx_mutex);
+  usmp_port_mutex_lock(ctx->rx_mutex);
+
   /*
    * Courtesy BYE so the peer can release the session immediately instead of
    * holding it until its inactivity watchdog fires. Best-effort: the session is
    * over regardless, so an undelivered BYE is ignored. It must go out before we
    * tear down the transport or zeroise the tx_key it is encrypted under.
    */
-  if (ctx->established) usmp_send_bye(ctx);
+  if (ctx->established) usmp_send_bye_locked(ctx);
   ctx->established = false;
   if (ctx->transport.close) ctx->transport.close(&ctx->transport);
   mbedtls_platform_zeroize(ctx->tx_key, sizeof(ctx->tx_key));
   mbedtls_platform_zeroize(ctx->rx_key, sizeof(ctx->rx_key));
+
+  usmp_mutex_t tx_m = ctx->tx_mutex;
+  usmp_mutex_t rx_m = ctx->rx_mutex;
+  ctx->tx_mutex = NULL;
+  ctx->rx_mutex = NULL;
+
+  usmp_port_mutex_unlock(rx_m);
+  usmp_port_mutex_unlock(tx_m);
+
+  usmp_port_mutex_destroy(rx_m);
+  usmp_port_mutex_destroy(tx_m);
+
   USMP_LOGI(TAG, "Session closed");
 }
 

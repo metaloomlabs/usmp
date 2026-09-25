@@ -7,8 +7,32 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "usmp_port.h"
+
+int usmp_port_mutex_create(usmp_mutex_t* mutex) {
+  if (!mutex) return -1;
+  SemaphoreHandle_t sem = xSemaphoreCreateMutex();
+  if (!sem) return -1;
+  *mutex = (usmp_mutex_t)sem;
+  return 0;
+}
+
+int usmp_port_mutex_lock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  return (xSemaphoreTake((SemaphoreHandle_t)mutex, portMAX_DELAY) == pdTRUE) ? 0 : -1;
+}
+
+int usmp_port_mutex_unlock(usmp_mutex_t mutex) {
+  if (!mutex) return 0;
+  return (xSemaphoreGive((SemaphoreHandle_t)mutex) == pdTRUE) ? 0 : -1;
+}
+
+void usmp_port_mutex_destroy(usmp_mutex_t mutex) {
+  if (!mutex) return;
+  vSemaphoreDelete((SemaphoreHandle_t)mutex);
+}
 
 int usmp_port_get_device_id(uint8_t* out, size_t len) {
   if (!out || len < 6) return -1;

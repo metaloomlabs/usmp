@@ -68,6 +68,49 @@ uint32_t usmp_port_millis(void);
 void usmp_port_wdt_feed(void);
 
 /**
+ * Platform synchronization mutex handle.
+ * On FreeRTOS: SemaphoreHandle_t (mutex with priority inheritance).
+ * On POSIX: pthread_mutex_t*.
+ * On Windows: CRITICAL_SECTION* or HANDLE.
+ * On bare-metal / single-threaded: no-op stub handle.
+ */
+typedef void* usmp_mutex_t;
+
+/**
+ * Create and initialize a platform mutex.
+ *
+ * @param mutex  Pointer to mutex handle to initialize
+ * @return       0 on success, -1 on failure
+ */
+int usmp_port_mutex_create(usmp_mutex_t* mutex);
+
+/**
+ * Lock a mutex (blocking wait until acquired).
+ * If mutex is NULL, behaves as a safe no-op returning 0.
+ *
+ * @param mutex  Mutex handle to lock
+ * @return       0 on success, -1 on failure
+ */
+int usmp_port_mutex_lock(usmp_mutex_t mutex);
+
+/**
+ * Unlock a mutex.
+ * If mutex is NULL, behaves as a safe no-op returning 0.
+ *
+ * @param mutex  Mutex handle to unlock
+ * @return       0 on success, -1 on failure
+ */
+int usmp_port_mutex_unlock(usmp_mutex_t mutex);
+
+/**
+ * Destroy a mutex and release any system resources.
+ * If mutex is NULL, behaves as a safe no-op.
+ *
+ * @param mutex  Mutex handle to destroy
+ */
+void usmp_port_mutex_destroy(usmp_mutex_t mutex);
+
+/**
  * Log a message.
  * On ESP32: ESP_LOGI/LOGE
  * On STM32: UART printf
