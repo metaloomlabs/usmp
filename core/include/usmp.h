@@ -14,8 +14,8 @@ extern "C" {
 
 // Version ───────────────────────────────────────────────────────────────────
 #define USMP_VERSION_MAJOR 1
-#define USMP_VERSION_MINOR 2
-#define USMP_VERSION_PATCH 2
+#define USMP_VERSION_MINOR 3
+#define USMP_VERSION_PATCH 0
 
 /**
  * Get the library version string at runtime (e.g. "1.1.0").
