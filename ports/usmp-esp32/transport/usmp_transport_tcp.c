@@ -11,17 +11,6 @@
 #include "usmp_port.h"
 #include "usmp_transport.h"
 
-// ── TCP context
-// ─────────────────────────────────────────────────────────────── Allocated
-// once in usmp_transport_tcp_init, lives for the lifetime of the transport. Not
-// freed on close — allows reconnect without losing ip/port.
-typedef struct {
-  int sock;
-  char server_ip[64];
-  int port;
-  bool session_active;
-} usmp_tcp_ctx_t;
-
 // ── Internal helpers
 // ──────────────────────────────────────────────────────────
 
@@ -195,11 +184,24 @@ static void usmp_tcp_close(usmp_transport_t* t) {
   // ctx intentionally NOT freed — ip/port retained for reconnect
 }
 
+static void usmp_tcp_destroy_static(usmp_transport_t* t) {
+  if (t && t->ctx) {
+    usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)t->ctx;
+    if (tcp->sock >= 0) {
+      close(tcp->sock);
+      tcp->sock = -1;
+    }
+    // Do NOT free(tcp): caller owns static/BSS memory
+    t->ctx = NULL;
+  }
+}
+
 static void usmp_tcp_destroy(usmp_transport_t* t) {
   if (t && t->ctx) {
     usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)t->ctx;
     if (tcp->sock >= 0) {
       close(tcp->sock);
+      tcp->sock = -1;
     }
     free(tcp);
     t->ctx = NULL;
@@ -250,10 +252,11 @@ static void usmp_tcp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key
   }
 }
 
-int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port) {
-  usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)malloc(sizeof(usmp_tcp_ctx_t));
-  if (!tcp) return -1;
+int usmp_transport_tcp_init_static(usmp_transport_t* t, usmp_tcp_ctx_t* tcp,
+                                   const char* server_ip, int port) {
+  if (!t || !tcp || !server_ip) return -1;
 
+  memset(tcp, 0, sizeof(usmp_tcp_ctx_t));
   tcp->sock = -1;
   tcp->port = port;
   tcp->session_active = false;
@@ -261,7 +264,6 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   tcp->server_ip[sizeof(tcp->server_ip) - 1] = '\0';
 
   if (tcp_dial(tcp) != 0) {
-    free(tcp);
     return -1;
   }
 
@@ -270,10 +272,25 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->close = usmp_tcp_close;
   t->reconnect = usmp_tcp_reconnect;
   t->available = usmp_tcp_available;
-  t->destroy = usmp_tcp_destroy;
+  t->destroy = usmp_tcp_destroy_static;
   t->confirm_authenticated = NULL;
   t->set_session_keys = usmp_tcp_set_session_keys;
   t->ctx = tcp;
 
+  return 0;
+}
+
+int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port) {
+  if (!t || !server_ip) return -1;
+
+  usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)malloc(sizeof(usmp_tcp_ctx_t));
+  if (!tcp) return -1;
+
+  if (usmp_transport_tcp_init_static(t, tcp, server_ip, port) != 0) {
+    free(tcp);
+    return -1;
+  }
+
+  t->destroy = usmp_tcp_destroy;
   return 0;
 }

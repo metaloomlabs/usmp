@@ -135,6 +135,33 @@ void app_main(void) {
 }
 ```
 
+### Zero-Heap Static Transports
+
+For safety-critical or zero-heap embedded environments where dynamic memory (`malloc`) is forbidden, use the static transport initializers:
+
+```c
+// Statically allocated in .bss (zero heap fragmentation)
+static usmp_tcp_ctx_t s_tcp_ctx;
+usmp_transport_t transport = {0};
+
+if (usmp_transport_tcp_init_static(&transport, &s_tcp_ctx, "usmp.mycompany.com", 9000) != 0) {
+    ESP_LOGE("APP", "Failed to connect static TCP transport");
+    return;
+}
+```
+
+Or for UDP:
+
+```c
+static usmp_udp_ctx_t s_udp_ctx;
+usmp_transport_t transport = {0};
+
+if (usmp_transport_udp_init_static(&transport, &s_udp_ctx, "usmp.mycompany.com", 9000) != 0) {
+    ESP_LOGE("APP", "Failed to connect static UDP transport");
+    return;
+}
+```
+
 ### 4. Run the Python gateway
 
 ```bash

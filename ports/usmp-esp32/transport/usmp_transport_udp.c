@@ -21,20 +21,6 @@
 #define UTACK_HEADER_LEN 7
 #define UTACK_MAC_LEN 8
 
-typedef struct {
-  int sock;
-  char server_ip[64];
-  int port;
-  uint8_t rx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
-  int rx_len;
-  uint32_t last_rx_seq;
-  bool last_rx_seq_set;
-  uint8_t last_rx_type;
-  uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
-  uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
-  bool keys_set;
-} usmp_udp_ctx_t;
-
 // S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
 static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
   uint8_t full[32];
@@ -280,11 +266,24 @@ static void usmp_udp_close(usmp_transport_t* t) {
   }
 }
 
+static void usmp_udp_destroy_static(usmp_transport_t* t) {
+  if (t && t->ctx) {
+    usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
+    if (udp->sock >= 0) {
+      close(udp->sock);
+      udp->sock = -1;
+    }
+    // Do NOT free(udp): caller owns static/BSS memory
+    t->ctx = NULL;
+  }
+}
+
 static void usmp_udp_destroy(usmp_transport_t* t) {
   if (t && t->ctx) {
     usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)t->ctx;
     if (udp->sock >= 0) {
       close(udp->sock);
+      udp->sock = -1;
     }
     free(udp);
     t->ctx = NULL;
@@ -333,9 +332,9 @@ static void usmp_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
   }
 }
 
-int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port) {
-  usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)malloc(sizeof(usmp_udp_ctx_t));
-  if (!udp) return -1;
+int usmp_transport_udp_init_static(usmp_transport_t* t, usmp_udp_ctx_t* udp,
+                                   const char* server_ip, int port) {
+  if (!t || !udp || !server_ip) return -1;
 
   memset(udp, 0, sizeof(usmp_udp_ctx_t));
   udp->sock = -1;
@@ -344,7 +343,6 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   udp->server_ip[sizeof(udp->server_ip) - 1] = '\0';
 
   if (udp_dial(udp) != 0) {
-    free(udp);
     return -1;
   }
 
@@ -353,10 +351,25 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   t->close = usmp_udp_close;
   t->reconnect = usmp_udp_reconnect;
   t->available = usmp_udp_available;
-  t->destroy = usmp_udp_destroy;
+  t->destroy = usmp_udp_destroy_static;
   t->confirm_authenticated = usmp_udp_confirm_authenticated;
   t->set_session_keys = usmp_udp_set_session_keys;
   t->ctx = udp;
 
+  return 0;
+}
+
+int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port) {
+  if (!t || !server_ip) return -1;
+
+  usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)malloc(sizeof(usmp_udp_ctx_t));
+  if (!udp) return -1;
+
+  if (usmp_transport_udp_init_static(t, udp, server_ip, port) != 0) {
+    free(udp);
+    return -1;
+  }
+
+  t->destroy = usmp_udp_destroy;
   return 0;
 }

@@ -43,6 +43,7 @@ typedef usmp_t arduino_usmp_t;
 #include "usmp.h"
 #endif
 
+#include "usmp_transport.h"
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
 #include "usmp_handshake.h"
@@ -1390,6 +1391,42 @@ static void test_split_mutex_concurrency(void) {
   printf("  - Split RTOS mutex architecture and concurrency tests passed!\n");
 }
 
+static void test_static_transport_initialization(void) {
+  printf("Running zero-heap static transport initialization tests...\n");
+
+  usmp_transport_t t = {0};
+  usmp_tcp_ctx_t tcp_ctx;
+  usmp_udp_ctx_t udp_ctx;
+
+  // 1. Argument validation and NULL checks
+  assert(usmp_transport_tcp_init_static(NULL, &tcp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, &tcp_ctx, NULL, 9000) == -1);
+
+  assert(usmp_transport_udp_init_static(NULL, &udp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, &udp_ctx, NULL, 9000) == -1);
+
+  // 2. Struct layout and size verification
+  assert(sizeof(usmp_tcp_ctx_t) >= sizeof(int) + 64 + sizeof(int));
+  assert(sizeof(usmp_udp_ctx_t) >= sizeof(int) + 64 + sizeof(int) + USMP_HEADER_SIZE + USMP_MAX_PAYLOAD);
+
+  // 3. UDP static transport initialization to local unbound port (UDP dial always creates socket)
+  int rc = usmp_transport_udp_init_static(&t, &udp_ctx, "127.0.0.1", 19876);
+  assert(rc == 0);
+  assert(t.ctx == &udp_ctx);
+  assert(udp_ctx.sock >= 0);
+  assert(t.send != NULL);
+  assert(t.recv != NULL);
+  assert(t.destroy != NULL);
+
+  // 4. Teardown static transport (verifies safe teardown and t.ctx becomes NULL)
+  t.destroy(&t);
+  assert(t.ctx == NULL);
+
+  printf("  - Zero-heap static transport initialization tests passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -1411,6 +1448,7 @@ int main(void) {
   test_async_handshake_fsm();
   test_coap_rtt_estimation();
   test_split_mutex_concurrency();
+  test_static_transport_initialization();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;
