@@ -27,7 +27,7 @@ Search for **USMP** in the Arduino IDE Library Manager (**Sketch** ➔ **Include
 
 ### Via ZIP Archive
 
-Download the packaged release archive `usmp-<version>-arduino.zip` and import it in Arduino IDE via **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**.
+Download the packaged release archive `usmp-1.3.0-arduino.zip` (available on [GitHub Releases](https://github.com/metaloomlabs/usmp/releases)) and import it in Arduino IDE via **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**.
 
 ---
 

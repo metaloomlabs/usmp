@@ -52,7 +52,7 @@ Every single session is hardened:
 * **Registry-Based Distribution**:
   * **Python**: Fully async SDK available on **PyPI** (`pip install usmp`).
   * **ESP-IDF**: Native component on the **ESP Component Registry** (`metaloomlabs/usmp`).
-  * **Arduino**: Standard packaged offline ZIP library (`usmp-1.2.0-arduino.zip`).
+  * **Arduino**: Standard packaged offline ZIP library (`usmp-1.3.0-arduino.zip`).
 
 ---
 
@@ -61,7 +61,7 @@ Every single session is hardened:
 | Platform | Status | Getting Started |
 | :--- | :--- | :--- |
 | **ESP32 (ESP-IDF v5+)** | Production ready | [ESP-IDF Port Guide](ports/usmp-esp32/README.md) |
-| **ESP32 (Arduino)** | Production ready | [Arduino Reference](ports/usmp-arduino/) |
+| **ESP32 (Arduino)** | Production ready | [Arduino Reference](ports/usmp-arduino/README.md) |
 | **Python 3.11+** | Production ready | [Python SDK Reference](sdk/python/README.md) |
 | **STM32** | Planned | - |
 | **Linux** | Planned | - |
@@ -77,6 +77,9 @@ Every single session is hardened:
 pip install usmp
 # Launches instant server with colored ANSI logs, payload inspection, and auto-echo:
 python -m usmp.server --echo --port 9000 --psk "usmp-dev-psk-change-me-before-prod"
+
+# Or generate a cryptographically random 32-byte hex PSK:
+python -m usmp.server --generate-psk
 ```
 
 #### Option B: Embedded Async Python Server
