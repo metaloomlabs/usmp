@@ -132,12 +132,7 @@ async def run_server(args: argparse.Namespace, psk_bytes: bytes) -> None:
                     logger.warning("Session recv error from %s: %s", dev, e)
                     break
 
-                try:
-                    text = data.decode("utf-8")
-                    disp = f"'{text}'"
-                except UnicodeDecodeError:
-                    disp = f"hex:{data.hex()}"
-                logger.info("📩 [%s] Received (%d bytes): %s", dev, len(data), disp)
+                session.print(data)
 
                 if args.echo:
                     await session.send(data)

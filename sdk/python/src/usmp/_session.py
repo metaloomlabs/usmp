@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import struct
+import sys
 import time
 from typing import Any, overload
 
@@ -89,8 +90,18 @@ class USMPSession:
         """Return True if session is currently active and open."""
         return not self._closed
 
-    async def send(self, data: bytes) -> None:
-        """Encrypt and send data frames, dynamically fragmenting if necessary."""
+    async def send(self, data: bytes | str) -> None:
+        """Encrypt and send data frames, dynamically fragmenting if necessary.
+
+        Accepts raw bytes or a string (which is automatically encoded as UTF-8).
+        """
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        elif isinstance(data, (bytearray, memoryview)):
+            data = bytes(data)
+        elif not isinstance(data, bytes):
+            raise TypeError(f"send() data must be bytes or str, got {type(data).__name__}")
+
         if len(data) > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES:
             raise PayloadError(
                 f"Payload too large for fragmentation limits: {len(data)} bytes, "
@@ -292,6 +303,59 @@ class USMPSession:
                 raise USMPTimeoutError("Receive timed out") from e
         else:
             return await _recv_internal()
+
+    async def recv_str(
+        self,
+        timeout: float | None = None,
+        encoding: str = "utf-8",
+        errors: str = "strict",
+    ) -> str:
+        """Receive decrypted payload and decode directly to string."""
+        payload = await self.recv(timeout=timeout)
+        return payload.decode(encoding, errors=errors)
+
+    def print(self, data: Any, *, tag: str | None = None, stream: Any = None) -> None:
+        """Print payload data to the console with USMP formatting and metadata.
+
+        Auto-detects UTF-8 text vs binary data, displaying timestamp, device ID,
+        and byte count. If USMP logging handlers are active, routes through the
+        logger; otherwise writes formatted output directly to stdout or stream.
+        """
+        if isinstance(data, str):
+            disp = f"'{data}'"
+            length = len(data.encode("utf-8"))
+        elif isinstance(data, (bytes, bytearray, memoryview)):
+            raw_bytes = bytes(data)
+            length = len(raw_bytes)
+            try:
+                text = raw_bytes.decode("utf-8")
+                disp = f"'{text}'"
+            except UnicodeDecodeError:
+                disp = f"hex:{raw_bytes.hex()}"
+        else:
+            disp = repr(data)
+            length = len(disp)
+
+        tag_str = f" [{tag}]" if tag else ""
+        dev = self.device_id
+        msg = f"📩 [{dev}]{tag_str} ({length} bytes): {disp}"
+
+        target_stream = stream if stream is not None else sys.stdout
+        usmp_logger = logging.getLogger("usmp")
+        has_handler = any(
+            not isinstance(h, logging.NullHandler) for h in usmp_logger.handlers
+        ) or len(logging.root.handlers) > 0
+
+        if stream is None and has_handler and logger.isEnabledFor(logging.INFO):
+            logger.info("%s", msg)
+        else:
+            now_str = time.strftime("%H:%M:%S")
+            try:
+                target_stream.write(f"{now_str} [session] {msg}\n")
+            except UnicodeEncodeError:
+                safe_msg = f"[{dev}]{tag_str} ({length} bytes): {disp}"
+                target_stream.write(f"{now_str} [session] <IN> {safe_msg}\n")
+            target_stream.flush()
 
     async def ping(self) -> None:
         """Send a PING frame."""

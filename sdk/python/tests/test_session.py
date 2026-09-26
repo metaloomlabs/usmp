@@ -167,3 +167,63 @@ async def test_chacha20_poly1305_session():
     await client_session.send(b"hello via chacha20 poly1305")
     received = await server_session.recv()
     assert received == b"hello via chacha20 poly1305"
+
+
+async def test_send_str_and_recv_str():
+    server_session, client_session = await _connected_pair()
+
+    # Client sends string directly
+    await client_session.send("temperature=24.5C status=OK")
+    # Server receives decoded string
+    text = await server_session.recv_str()
+    assert text == "temperature=24.5C status=OK"
+
+
+async def test_send_invalid_type():
+    import pytest
+
+    _, client_session = await _connected_pair()
+    with pytest.raises(TypeError) as exc:
+        await client_session.send(12345)  # type: ignore[arg-type]
+    assert "send() data must be bytes or str" in str(exc.value)
+
+
+async def test_session_print_to_stream():
+    import io
+
+    _, client_session = await _connected_pair()
+    buf = io.StringIO()
+
+    # Test UTF-8 text print
+    client_session.print("hello esp32", stream=buf)
+    output = buf.getvalue()
+    assert "[session]" in output
+    assert f"[{client_session.device_id}]" in output
+    assert "'hello esp32'" in output
+    assert "(11 bytes)" in output
+
+
+async def test_session_print_binary_to_stream():
+    import io
+
+    _, client_session = await _connected_pair()
+    buf = io.StringIO()
+
+    # Test binary data hex dump
+    binary_data = b"\xde\xad\xbe\xef\x00\x01"
+    client_session.print(binary_data, tag="RAW", stream=buf)
+    output = buf.getvalue()
+    assert "[RAW]" in output
+    assert "hex:deadbeef0001" in output
+    assert "(6 bytes)" in output
+
+
+async def test_session_print_with_logger(caplog):
+    import logging
+
+    _, client_session = await _connected_pair()
+
+    with caplog.at_level(logging.INFO, logger="usmp.session"):
+        client_session.print("telemetry_data_123")
+    assert any("telemetry_data_123" in record.message for record in caplog.records)
+
