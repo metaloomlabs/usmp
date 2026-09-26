@@ -43,6 +43,8 @@ class USMPErrorCode(IntEnum):
     SEQ_EXHAUSTED = -7
     CRYPTO_FAILED = -8
     NOT_CONNECTED = -9
+    MUTEX_FAILED = -10
+    PEER_CLOSED = -11
 
 
 # Protocol constants
