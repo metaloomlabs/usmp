@@ -170,12 +170,14 @@ if (usmp_transport_udp_init_static(&transport, &s_udp_ctx, "192.168.1.100", 9000
 ### 4. Pair with Python Test Server
 
 #### Option A: Zero-Code CLI Dev Server
+
 ```bash
 pip install usmp
 python -m usmp.server --echo --port 9000 --psk "usmp-dev-psk-change-me-before-prod"
 ```
 
 #### Option B: Embedded Async Python Server
+
 ```python
 import asyncio
 from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
@@ -220,18 +222,18 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 
 ## Packet Types
 
-| Value | Name       | Direction       | Description |
-|-------|------------|-----------------|-------------|
-| 0x01  | HELLO      | Device → Server | Handshake initiation with client public key |
-| 0x02  | CHALLENGE  | Server → Device | Handshake challenge with server public key & nonce |
-| 0x03  | HELLO_ACK  | Device → Server | HMAC authentication response |
-| 0x04  | SESSION_OK | Server → Device | Mutual auth confirmed, session ID assigned |
-| 0x05  | DATA       | Both            | AEAD encrypted application payload |
-| 0x06  | PING       | Both            | Liveness heartbeat |
-| 0x07  | PONG       | Both            | Liveness acknowledgment |
-| 0x08  | BYE        | Both            | Clean session termination |
-| 0x09  | REKEY      | Both            | Transparent in-band session key rotation |
-| 0xFF  | ERROR      | Both            | Diagnostic error frame |
+| Value | Name       | Direction         | Description                                        |
+| :---- | :--------- | :---------------- | :------------------------------------------------- |
+| 0x01  | HELLO      | Device → Server   | Handshake initiation with client public key        |
+| 0x02  | CHALLENGE  | Server → Device   | Handshake challenge with server public key & nonce |
+| 0x03  | HELLO_ACK  | Device → Server   | HMAC authentication response                       |
+| 0x04  | SESSION_OK | Server → Device   | Mutual auth confirmed, session ID assigned         |
+| 0x05  | DATA       | Both              | AEAD encrypted application payload                 |
+| 0x06  | PING       | Both              | Liveness heartbeat                                 |
+| 0x07  | PONG       | Both              | Liveness acknowledgment                            |
+| 0x08  | BYE        | Both              | Clean session termination                          |
+| 0x09  | REKEY      | Both              | Transparent in-band session key rotation           |
+| 0xFF  | ERROR      | Both              | Diagnostic error frame                             |
 
 ## Transport Abstraction
 
@@ -239,17 +241,17 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 
 ## Roadmap
 
-| Version | Feature | Status |
-| --------- | --------- | -------- |
-| v0.2.0 | Core protocol, Keepalive mechanism, and Arduino Port | Released |
-| v0.3.0 | TCP transport support and initial Python SDK | Released |
-| v0.4.0 | Published on ESP Component Registry and PyPI, making it stable | Released |
-| v0.4.7 | Hardening (Deterministic Nonces, Rate Limiting, Dynamic Fragmentation) | Released |
-| v0.5.0 | UDP transport support fully complete and production-ready | Released |
-| v1.1.0 | Hardening & security fixes, CLI tools reference | Released |
-| v1.2.0 | ChaCha20-Poly1305 cipher suite, In-Band Rekeying, Adaptive UDP RTT estimation | Released |
-| v1.3.0 | Zero-heap static transports, non-blocking handshake FSM, split RTOS concurrency, Arduino Print interface, Python dev server | Released |
-| v1.4.0 | Secure OTA firmware updates with Ed25519 signatures | Planned |
+| Version | Feature                                                                                                              | Status   |
+| :------ | :------------------------------------------------------------------------------------------------------------------- | :------- |
+| v0.2.0  | Core protocol, Keepalive mechanism, and Arduino Port                                                                 | Released |
+| v0.3.0  | TCP transport support and initial Python SDK                                                                         | Released |
+| v0.4.0  | Published on ESP Component Registry and PyPI, making it stable                                                       | Released |
+| v0.4.7  | Hardening (Deterministic Nonces, Rate Limiting, Dynamic Fragmentation)                                               | Released |
+| v0.5.0  | UDP transport support fully complete and production-ready                                                            | Released |
+| v1.1.0  | Hardening & security fixes, CLI tools reference                                                                      | Released |
+| v1.2.0  | ChaCha20-Poly1305 cipher suite, In-Band Rekeying, Adaptive UDP RTT estimation                                        | Released |
+| v1.3.0  | Zero-heap static transports, non-blocking handshake FSM, split RTOS concurrency, Arduino Print interface, Python dev | Released |
+| v1.4.0  | Secure OTA firmware updates with Ed25519 signatures                                                                  | Planned  |
 
 ## License
 

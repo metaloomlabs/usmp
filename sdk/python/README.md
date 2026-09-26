@@ -166,11 +166,14 @@ raw = await session.recv()
 session.print(raw)
 ```
 
-* **UTF-8 Payloads**: Formats as a clean timestamped message with the device ID badge:
+- **UTF-8 Payloads**: Formats as a clean timestamped message with the device ID badge:
+
   ```text
   [14:23:05] [DE:AD:BE:EF:00:01] Telemetry: temp=24.5C status=OK
   ```
-* **Binary Payloads**: Automatically falls back to an organized hex dump with length header:
+
+- **Binary Payloads**: Automatically falls back to an organized hex dump with length header:
+
   ```text
   [14:23:05] [DE:AD:BE:EF:00:01] BINARY (8 bytes):
     0000: 01 02 a3 f4 00 00 ff 10
@@ -193,6 +196,7 @@ Device                               Server
 ```
 
 Session keys are derived via:
+
 ```text
 HKDF-SHA256(
     ikm  = X25519(priv_C, pub_S),
@@ -215,6 +219,6 @@ HKDF-SHA256(
 
 USMP is open-source software licensed under the [Apache 2.0 License](https://github.com/metaloomlabs/usmp/blob/main/LICENSE).
 
-<p align="center">
-  <strong>USMP™</strong> • Developed by <strong><a href="https://github.com/metaloomlabs">Metaloom</a></strong>
-</p>
+---
+
+**USMP™** • Developed by **[Metaloom](https://github.com/metaloomlabs)**

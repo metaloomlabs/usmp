@@ -2,7 +2,7 @@
 
 This guide walks you through setting up a public test server on an **AWS EC2** instance and connecting a local **ESP32** microcontroller (using either the **Arduino IDE** or the native **ESP-IDF** framework) to establish a secure, end-to-end encrypted USMP session over the Internet.
 
-```
+```text
 ┌──────────────────────┐             Public Internet             ┌──────────────────┐
 │ ESP32 Client         │ ──────────────────────────────────────> │  AWS EC2 Server  │
 │ (Arduino or ESP-IDF) │    TCP Port 9000 (AES-GCM-256 Secure)   │ (Python Gateway) │
