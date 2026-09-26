@@ -6,7 +6,7 @@ import subprocess
 
 import pytest
 
-from usmp import USMPProtocol, USMPServer, USMPSession
+from usmp import ConnectionClosedError, USMPProtocol, USMPServer, USMPSession
 
 # Resolve base paths
 REPO_DIR = os.path.dirname(
@@ -133,6 +133,12 @@ async def test_tcp_c_interop(c_client_path):
         assert proc.returncode == 0
         await asyncio.wait_for(test_completed_event.wait(), timeout=30.0)
     finally:
+        if "proc" in locals() and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         server_task.cancel()
         try:
             await server_task
@@ -171,6 +177,12 @@ async def test_udp_c_interop(c_client_path):
             await session.send(msg2)
 
             test_completed_event.set()
+
+            # Keep server session open until client tears down with BYE
+            try:
+                await session.recv()
+            except (ConnectionClosedError, Exception):
+                pass
         except Exception as e:
             print("Server session handler failed:", e)
             test_completed_event.set()
@@ -205,6 +217,12 @@ async def test_udp_c_interop(c_client_path):
         assert proc.returncode == 0
         await asyncio.wait_for(test_completed_event.wait(), timeout=30.0)
     finally:
+        if "proc" in locals() and proc.returncode is None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         server_task.cancel()
         try:
             await server_task

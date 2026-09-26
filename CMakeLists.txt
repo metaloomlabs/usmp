@@ -51,6 +51,7 @@ add_executable(usmp_tests
     core/tests/test_main.c
     core/tests/test_golden.c
     core/tests/usmp_port_posix.c
+    core/tests/usmp_transport_posix.c
 )
 
 target_include_directories(usmp_tests PRIVATE 
