@@ -30,13 +30,23 @@ bool USMPTransportBase::connectWiFi() const {
 #define UTACK_MAC_LEN 8
 
 /*
+ * Handshake-phase recv timeout (ms).
+ *
+ * Prevents indefinite blocking or watchdog panic during initial handshake /
+ * reconnect when the server or network is unresponsive.
+ */
+#ifndef USMP_HANDSHAKE_RECV_TIMEOUT_MS
+#define USMP_HANDSHAKE_RECV_TIMEOUT_MS 5000
+#endif
+
+/*
  * Session-phase UDP recv timeout (ms).
  *
- * Handshake reads are unbounded — they MUST block for the server's CHALLENGE /
- * SESSION_OK reply. Session reads (after keys are installed) are bounded so a
- * stray/duplicate UTACK or idle socket can't wedge maintain() in an infinite
- * parsePacket() spin. On timeout the recv returns 0 ("no data"), which the core
- * treats as a non-fatal empty read.
+ * Handshake reads use USMP_HANDSHAKE_RECV_TIMEOUT_MS to wait for the server's
+ * CHALLENGE / SESSION_OK reply without deadlocking. Session reads (after keys
+ * are installed) are bounded so a stray/duplicate UTACK or idle socket can't
+ * wedge maintain() in an infinite parsePacket() spin. On timeout the session recv
+ * returns 0 ("no data"), which the core treats as a non-fatal empty read.
  *
  * The core's usmp_recv() retries the transport up to ~10x per call, so the
  * effective budget for an in-flight fragment to arrive is ~10x this value
@@ -50,13 +60,13 @@ bool USMPTransportBase::connectWiFi() const {
 /*
  * Session-phase TCP no-progress stall timeout (ms).
  *
- * Like the UDP timeout, handshake reads are unbounded (they must wait for the
- * server reply). Once the session is established, a peer that sends a partial
- * frame and then stalls must not wedge maintain() forever. This is a *no-
- * progress* timeout: it only fires when zero bytes arrive for this long, so a
- * large-but-progressing frame is never cut off. A stall before any byte is a
- * non-fatal empty read (0); a stall mid-frame tears down (partial bytes are
- * already consumed from the stream and cannot be un-read, so we must resync).
+ * During handshake, reads are bounded by USMP_HANDSHAKE_RECV_TIMEOUT_MS. Once
+ * the session is established, a peer that sends a partial frame and then stalls
+ * must not wedge maintain() forever. This is a *no-progress* timeout: it only
+ * fires when zero bytes arrive for this long, so a large-but-progressing frame
+ * is never cut off. A stall before any byte in session phase is a non-fatal
+ * empty read (0); a stall mid-frame tears down (partial bytes are already
+ * consumed from the stream and cannot be un-read, so we must resync).
  */
 #ifndef USMP_TCP_RECV_TIMEOUT_MS
 #define USMP_TCP_RECV_TIMEOUT_MS 2000
@@ -87,9 +97,11 @@ static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
 
   // Session reads use a no-progress stall timeout (see USMP_TCP_RECV_TIMEOUT_MS);
-  // handshake reads stay unbounded. last_progress advances on every byte read, so
-  // a large-but-flowing frame never times out. millis() subtraction is wrap-safe.
-  const bool bounded = ctx->session_active;
+  // Handshake reads use a bounded timeout (see USMP_HANDSHAKE_RECV_TIMEOUT_MS) to guard against
+  // deadlocks or watchdog panics if the server does not reply. last_progress advances on every
+  // byte read, so a large-but-flowing frame never times out. millis() subtraction is wrap-safe.
+  const uint32_t timeout_ms =
+      ctx->session_active ? USMP_TCP_RECV_TIMEOUT_MS : USMP_HANDSHAKE_RECV_TIMEOUT_MS;
   uint32_t last_progress = millis();
 
   // Step 1: read header exactly
@@ -104,11 +116,12 @@ static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
         last_progress = millis();
       }
     }
-    if (bounded && (millis() - last_progress) >= USMP_TCP_RECV_TIMEOUT_MS) {
-      // Stall before any byte is a non-fatal empty read; stall after partial
-      // bytes were consumed forces a resync (we can't un-read a TCP stream).
-      return received == 0 ? 0 : -1;
+    if ((millis() - last_progress) >= timeout_ms) {
+      // Stall before any byte in session phase is a non-fatal empty read (0);
+      // Handshake timeout or stall after partial bytes were consumed returns -1.
+      return (ctx->session_active && received == 0) ? 0 : -1;
     }
+    usmp_port_wdt_feed();
     delay(1);
   }
 
@@ -127,9 +140,10 @@ static int arduino_tcp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
         last_progress = millis();
       }
     }
-    if (bounded && (millis() - last_progress) >= USMP_TCP_RECV_TIMEOUT_MS) {
+    if ((millis() - last_progress) >= timeout_ms) {
       return -1;  // stalled mid-frame — header already consumed, must resync
     }
+    usmp_port_wdt_feed();
     delay(1);
   }
 
@@ -164,7 +178,7 @@ static int arduino_tcp_reconnect(usmp_transport_t* t) {
   USMPArduinoTcpCtx* ctx = (USMPArduinoTcpCtx*)t->ctx;
   if (!ctx) return -1;
   ctx->client.stop();
-  // Back to handshake phase: recv must block unbounded for the server reply
+  // Back to handshake phase: recv uses handshake timeout
   // until set_session_keys() re-marks the session active on success.
   ctx->session_active = false;
   return ctx->client.connect(ctx->host, ctx->port) ? 0 : -1;
@@ -178,7 +192,7 @@ static int arduino_tcp_available(usmp_transport_t* t) {
 
 // TCP does not authenticate UTACKs, so the derived keys are unused here. We wire
 // this core callback (fired once the handshake completes) only to mark the
-// session active, which switches recv() from the unbounded handshake path to the
+// session active, which switches recv() from the handshake timeout path to the
 // bounded stall-timeout path.
 static void arduino_tcp_set_session_keys(usmp_transport_t* t, const uint8_t* tx_key,
                                          const uint8_t* rx_key) {
@@ -196,7 +210,7 @@ bool USMPTCPTransport::init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx) 
   strncpy(ctx->host, _host, sizeof(ctx->host) - 1);
   ctx->host[sizeof(ctx->host) - 1] = '\0';
   ctx->port = _port;
-  ctx->session_active = false;  // handshake runs first with unbounded recv
+  ctx->session_active = false;  // handshake runs first with handshake timeout
 
   if (!ctx->client.connect(_host, _port)) {
     return false;
@@ -337,9 +351,11 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   int n = 0;
 
   // Bound the wait once session keys are installed so maintain() can't spin
-  // forever on a stray UTACK / idle socket; the handshake keeps the original
-  // unbounded wait for the server reply. millis() subtraction is wrap-safe.
-  const bool bounded = ctx->keys_set;
+  // forever on a stray UTACK / idle socket; the handshake uses USMP_HANDSHAKE_RECV_TIMEOUT_MS
+  // to avoid infinite blocking or watchdog timeouts when the server is unresponsive.
+  // millis() subtraction is wrap-safe.
+  const uint32_t timeout_ms =
+      ctx->keys_set ? USMP_UDP_RECV_TIMEOUT_MS : USMP_HANDSHAKE_RECV_TIMEOUT_MS;
   const uint32_t start = millis();
 
   while (1) {
@@ -350,8 +366,10 @@ static int arduino_udp_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
     } else {
       int packetSize = ctx->udp.parsePacket();
       if (packetSize <= 0) {
-        if (bounded && (millis() - start) >= USMP_UDP_RECV_TIMEOUT_MS) {
-          return 0;  // no data within budget — non-fatal empty read
+        if ((millis() - start) >= timeout_ms) {
+          // Session phase: return 0 (non-fatal empty read).
+          // Handshake phase: return -1 (handshake packet receive timed out).
+          return ctx->keys_set ? 0 : -1;
         }
         usmp_port_wdt_feed();
         delay(1);

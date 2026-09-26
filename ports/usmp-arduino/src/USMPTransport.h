@@ -47,7 +47,7 @@ struct USMPArduinoTcpCtx {
   WiFiClient client;
   char host[64];
   uint16_t port;
-  bool session_active;  // false during handshake (recv unbounded), true once established
+  bool session_active;  // false during handshake (uses USMP_HANDSHAKE_RECV_TIMEOUT_MS), true once established
 };
 
 // TCP transport factory ─────────────────────────────────────────────────────
