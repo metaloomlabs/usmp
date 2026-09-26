@@ -90,7 +90,7 @@ int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len) {
 
   memcpy(out + USMP_HEADER_SIZE, pkt->payload, pkt->length);
 
-  uint16_t total = USMP_HEADER_SIZE + pkt->length;
+  uint16_t total = (uint16_t)(USMP_HEADER_SIZE + pkt->length);
   if (out_len) *out_len = total;
   return total;
 }
@@ -98,13 +98,13 @@ int usmp_build_packet(usmp_packet_t* pkt, uint8_t* out, uint16_t* out_len) {
 int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
   if (len < 0 || (size_t)len < USMP_HEADER_SIZE) return -1;
 
-  pkt->magic = data[0] | (data[1] << 8);
+  pkt->magic = (uint16_t)(data[0] | (data[1] << 8));
   pkt->version = data[2];
   pkt->type = data[3];
   pkt->seq =
       data[4] | ((uint32_t)data[5] << 8) | ((uint32_t)data[6] << 16) | ((uint32_t)data[7] << 24);
-  pkt->length = data[8] | (data[9] << 8);
-  pkt->crc = data[10] | (data[11] << 8);
+  pkt->length = (uint16_t)(data[8] | (data[9] << 8));
+  pkt->crc = (uint16_t)(data[10] | (data[11] << 8));
 
   if (pkt->magic != USMP_MAGIC) return -1;
 
@@ -114,11 +114,15 @@ int usmp_parse_packet(uint8_t* data, int len, usmp_packet_t* pkt) {
 
   if ((size_t)len < (size_t)USMP_HEADER_SIZE + pkt->length) return -1;
 
-  memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
+  // Early CRC verification: check data integrity directly over wire buffer (data[0..9]
+  // header + data + USMP_HEADER_SIZE payload) BEFORE copying into pkt->payload.
+  // This discards corrupted or malicious packets in zero copy cycles without polluting
+  // caller payload buffers.
+  uint16_t expected = usmp_crc16_step(0xFFFF, data, 10);
+  expected = usmp_crc16_step(expected, data + USMP_HEADER_SIZE, pkt->length);
+  if (pkt->crc != expected) return -1;
 
-  // Verify CRC (non-secret integrity check — no need for constant-time comparison)
-  uint16_t expected = compute_crc(pkt);
-  if (memcmp(&pkt->crc, &expected, sizeof(uint16_t)) != 0) return -1;
+  memcpy(pkt->payload, data + USMP_HEADER_SIZE, pkt->length);
 
   return 0;
 }

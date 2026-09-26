@@ -305,6 +305,41 @@ void test_malformed_frames(void) {
     printf("  - Short payload rejected\n");
   }
 
+  // 6. Early rejection: corrupted payload does not overwrite destination payload buffer
+  {
+    usmp_packet_t corrupt_frame;
+    memset(&corrupt_frame, 0, sizeof(corrupt_frame));
+    corrupt_frame.magic = USMP_MAGIC;
+    corrupt_frame.version = USMP_VERSION;
+    corrupt_frame.type = USMP_TYPE_DATA;
+    corrupt_frame.seq = 1;
+    corrupt_frame.length = 4;
+    corrupt_frame.payload[0] = 0xDE;
+    corrupt_frame.payload[1] = 0xAD;
+    corrupt_frame.payload[2] = 0xBE;
+    corrupt_frame.payload[3] = 0xEF;
+
+    uint8_t frame[USMP_HEADER_SIZE + 4];
+    uint16_t frame_len = 0;
+    usmp_build_packet(&corrupt_frame, frame, &frame_len);
+
+    // Corrupt payload byte on the wire
+    frame[USMP_HEADER_SIZE] ^= 0xFF;
+
+    // Pre-populate target packet payload with sentinel pattern
+    usmp_packet_t target_pkt;
+    memset(target_pkt.payload, 0x5A, sizeof(target_pkt.payload));
+
+    int ret = usmp_parse_packet(frame, (int)frame_len, &target_pkt);
+    assert(ret != 0);
+    // Ensure target_pkt.payload was NOT touched/polluted by memcpy
+    assert(target_pkt.payload[0] == 0x5A);
+    assert(target_pkt.payload[1] == 0x5A);
+    assert(target_pkt.payload[2] == 0x5A);
+    assert(target_pkt.payload[3] == 0x5A);
+    printf("  - Corrupted packet rejected without polluting destination payload\n");
+  }
+
   printf("[TEST] Malformed frame rejection tests passed!\n");
 }
 
