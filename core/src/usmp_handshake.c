@@ -119,116 +119,183 @@ static int usmp_mbedtls_entropy_callback(void* data, unsigned char* output, size
   return -1;
 }
 
-usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
-  usmp_err_t ret = USMP_ERR_AUTH_FAILED;
-  char _msg[128];
-  uint8_t k_c2s[USMP_SESSION_KEY_LEN] = {0};
-  uint8_t k_s2c[USMP_SESSION_KEY_LEN] = {0};
-
-  /*
-   * Require an explicitly configured PSK of sufficient strength (>= 16 bytes).
-   * Callers must set session->psk and session->psk_len before handshake.
-   */
-  if (!session || !session->psk || session->psk_len < 16) {
-    USMP_LOGE(TAG, "PSK must be configured and at least 16 bytes long");
-    return USMP_ERR_INVALID_ARG;
-  }
-  const uint8_t* psk = session->psk;
-  size_t psk_len = session->psk_len;
-
+typedef struct usmp_handshake_ctx {
   mbedtls_ecdh_context ecdh;
   mbedtls_entropy_context entropy;
   mbedtls_ctr_drbg_context ctr_drbg;
+  uint8_t pub_c[PUB_KEY_LEN];
+  uint8_t pub_s[PUB_KEY_LEN];
+  uint8_t nonce[USMP_NONCE_LEN];
+  uint8_t k_c2s[USMP_SESSION_KEY_LEN];
+  uint8_t k_s2c[USMP_SESSION_KEY_LEN];
+  uint8_t* tx_buf;
+  uint8_t* rx_buf;
+  bool allocated_buffers;
+  bool allocated_ctx;
+  uint32_t state_start_ms;
+  uint32_t timeout_ms;
+  bool cookie_retried;
+} usmp_handshake_ctx_t;
 
-  mbedtls_ecdh_init(&ecdh);
-  mbedtls_entropy_init(&entropy);
-  mbedtls_ctr_drbg_init(&ctr_drbg);
+void usmp_handshake_abort(usmp_transport_t* transport, usmp_t* session) {
+  (void)transport;
+  if (!session || !session->hs_ctx) return;
+  usmp_handshake_ctx_t* hs = (usmp_handshake_ctx_t*)session->hs_ctx;
+  mbedtls_ecdh_free(&hs->ecdh);
+  mbedtls_entropy_free(&hs->entropy);
+  mbedtls_ctr_drbg_free(&hs->ctr_drbg);
+  if (hs->tx_buf) {
+    mbedtls_platform_zeroize(hs->tx_buf, 512);
+    if (hs->allocated_buffers) free(hs->tx_buf);
+  }
+  if (hs->rx_buf) {
+    mbedtls_platform_zeroize(hs->rx_buf, 512);
+    if (hs->allocated_buffers) free(hs->rx_buf);
+  }
+  bool alloc_ctx = hs->allocated_ctx;
+  mbedtls_platform_zeroize(hs, sizeof(usmp_handshake_ctx_t));
+  if (alloc_ctx) {
+    free(hs);
+  }
+  session->hs_ctx = NULL;
+}
 
-  mbedtls_entropy_add_source(&entropy, usmp_mbedtls_entropy_callback, NULL, 32, MBEDTLS_ENTROPY_SOURCE_STRONG);
+usmp_err_t usmp_handshake_start(usmp_transport_t* transport, usmp_t* session) {
+  if (!session || !transport) return USMP_ERR_INVALID_ARG;
+  if (!session->psk || session->psk_len < 16) {
+    USMP_LOGE(TAG, "PSK must be configured and at least 16 bytes long");
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_INVALID_ARG;
+  }
+  if (!transport->send || !transport->recv) {
+    USMP_LOGE(TAG, "Transport missing send or recv");
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_INVALID_ARG;
+  }
 
-  /*
-   * Handshake TX/RX buffers:
-   * Slices caller-managed scratch buffer if provided (>= 1024 bytes), achieving
-   * 0 heap allocations. Otherwise falls back to malloc(512) if permitted.
-   */
-  bool allocated_buffers = false;
+  if (session->hs_ctx) {
+    usmp_handshake_abort(transport, session);
+  }
+
+  usmp_handshake_ctx_t* hs = NULL;
+  bool alloc_ctx = false;
+  bool alloc_buffers = false;
   uint8_t* tx_buf = NULL;
   uint8_t* rx_buf = NULL;
 
-  if (session && session->scratch && session->scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN) {
+  /* Check if caller provided sufficient scratch buffer */
+  if (session->scratch && session->scratch_len >= (sizeof(usmp_handshake_ctx_t) + 1024)) {
+    hs = (usmp_handshake_ctx_t*)session->scratch;
+    memset(hs, 0, sizeof(usmp_handshake_ctx_t));
+    tx_buf = session->scratch + sizeof(usmp_handshake_ctx_t);
+    rx_buf = session->scratch + sizeof(usmp_handshake_ctx_t) + 512;
+    alloc_ctx = false;
+    alloc_buffers = false;
+  } else if (session->scratch && session->scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN) {
+#ifdef USMP_ZERO_HEAP
+    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes",
+              sizeof(usmp_handshake_ctx_t) + 1024);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_BUFFER_OVERFLOW;
+#else
+    hs = (usmp_handshake_ctx_t*)calloc(1, sizeof(usmp_handshake_ctx_t));
+    if (!hs) {
+      session->state = USMP_STATE_ERROR;
+      return USMP_ERR_BUFFER_OVERFLOW;
+    }
     tx_buf = session->scratch;
     rx_buf = session->scratch + 512;
+    alloc_ctx = true;
+    alloc_buffers = false;
+#endif
   } else {
 #ifdef USMP_ZERO_HEAP
-    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %d bytes", USMP_HANDSHAKE_SCRATCH_LEN);
-    ret = USMP_ERR_BUFFER_OVERFLOW;
-    goto cleanup;
+    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes",
+              sizeof(usmp_handshake_ctx_t) + 1024);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_BUFFER_OVERFLOW;
 #else
+    hs = (usmp_handshake_ctx_t*)calloc(1, sizeof(usmp_handshake_ctx_t));
+    if (!hs) {
+      session->state = USMP_STATE_ERROR;
+      return USMP_ERR_BUFFER_OVERFLOW;
+    }
     tx_buf = (uint8_t*)malloc(512);
     rx_buf = (uint8_t*)malloc(512);
     if (!tx_buf || !rx_buf) {
-      USMP_LOGE(TAG, "Out of memory for handshake buffers");
       free(tx_buf);
       free(rx_buf);
+      free(hs);
+      session->state = USMP_STATE_ERROR;
       return USMP_ERR_BUFFER_OVERFLOW;
     }
-    allocated_buffers = true;
+    alloc_ctx = true;
+    alloc_buffers = true;
 #endif
   }
 
-  usmp_packet_t pkt;
-  int len;
+  hs->tx_buf = tx_buf;
+  hs->rx_buf = rx_buf;
+  hs->allocated_ctx = alloc_ctx;
+  hs->allocated_buffers = alloc_buffers;
+  hs->timeout_ms = 5000;  // 5 seconds default per state
 
-  /*
-   * Seed RNG with a device-specific personalization string.
-   * Using the device ID + a version tag gives ~48 bits of personalization
-   * diversity across devices, reducing correlation between RNG streams.
-   */
+  mbedtls_ecdh_init(&hs->ecdh);
+  mbedtls_entropy_init(&hs->entropy);
+  mbedtls_ctr_drbg_init(&hs->ctr_drbg);
+
+  mbedtls_entropy_add_source(&hs->entropy, usmp_mbedtls_entropy_callback, NULL, 32,
+                             MBEDTLS_ENTROPY_SOURCE_STRONG);
+
   uint8_t pers[USMP_DEVICE_ID_LEN + 8];
   if (usmp_port_get_device_id(pers, USMP_DEVICE_ID_LEN) != 0) {
     USMP_LOGE(TAG, "Failed to get device ID for RNG personalization");
-    ret = USMP_ERR_INVALID_ARG;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_INVALID_ARG;
   }
   memcpy(pers + USMP_DEVICE_ID_LEN, "usmp-v1\x00", 8);
 
-  if (mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, pers, sizeof(pers)) != 0) {
+  if (mbedtls_ctr_drbg_seed(&hs->ctr_drbg, mbedtls_entropy_func, &hs->entropy, pers,
+                            sizeof(pers)) != 0) {
     USMP_LOGE(TAG, "RNG seed failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_CRYPTO_FAILED;
   }
 
-  // Setup Curve25519 ──────────────────────────────────────────────────────
-  if (mbedtls_ecdh_setup(&ecdh, MBEDTLS_ECP_DP_CURVE25519) != 0) {
+  if (mbedtls_ecdh_setup(&hs->ecdh, MBEDTLS_ECP_DP_CURVE25519) != 0) {
     USMP_LOGE(TAG, "ECDH setup failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_CRYPTO_FAILED;
   }
 
-  // Generate keypair + export public key ──────────────────────────────────
   uint8_t pub_buf[65];
   size_t pub_buf_len = 0;
-  if (mbedtls_ecdh_make_public(&ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf),
-                               mbedtls_ctr_drbg_random, &ctr_drbg) != 0) {
+  if (mbedtls_ecdh_make_public(&hs->ecdh, &pub_buf_len, pub_buf, sizeof(pub_buf),
+                               mbedtls_ctr_drbg_random, &hs->ctr_drbg) != 0 ||
+      pub_buf_len < PUB_KEY_LEN) {
     USMP_LOGE(TAG, "ECDH make_public failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_CRYPTO_FAILED;
   }
+  memcpy(hs->pub_c, pub_buf + (pub_buf_len - PUB_KEY_LEN), PUB_KEY_LEN);
 
-  if (pub_buf_len < PUB_KEY_LEN) {
-    USMP_LOGE(TAG, "Generated public key length is too short");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
-  }
-  uint8_t* pub_c = pub_buf + (pub_buf_len - PUB_KEY_LEN);
-
-  // Step 1: Send HELLO [device_id(6) || pub_C(32)] ───────────────────────
   if (usmp_port_get_device_id(session->device_id, USMP_DEVICE_ID_LEN) != 0) {
     USMP_LOGE(TAG, "Failed to get device ID");
-    ret = USMP_ERR_INVALID_ARG;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_INVALID_ARG;
   }
 
+  usmp_packet_t pkt;
   memset(&pkt, 0, sizeof(pkt));
   pkt.magic = USMP_MAGIC;
   pkt.version = USMP_VERSION;
@@ -236,230 +303,286 @@ usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
   pkt.seq = 0;
   pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN;
   memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
-  memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
+  memcpy(pkt.payload + USMP_DEVICE_ID_LEN, hs->pub_c, PUB_KEY_LEN);
 
-  len = usmp_build_packet(&pkt, tx_buf, NULL);
-  if (transport->send(transport, tx_buf, (size_t)len) < 0) {
+  int len = usmp_build_packet(&pkt, hs->tx_buf, NULL);
+  if (transport->send(transport, hs->tx_buf, (size_t)len) < 0) {
     USMP_LOGE(TAG, "Failed to send HELLO");
-    ret = USMP_ERR_TRANSPORT_FAILED;
-    goto cleanup;
+    session->hs_ctx = hs;
+    usmp_handshake_abort(transport, session);
+    session->state = USMP_STATE_ERROR;
+    return USMP_ERR_TRANSPORT_FAILED;
   }
-  /* Debug-only: avoid logging device_id at INFO level (information leakage) */
   USMP_LOGD(TAG, "HELLO sent");
 
-  // Step 2: Receive CHALLENGE [nonce(32) || pub_S(32)] or HELLO_RETRY ────
-  len = transport->recv(transport, rx_buf, 512);
-  if (len < 0) {
-    USMP_LOGE(TAG, "Failed to receive CHALLENGE");
-    ret = USMP_ERR_TRANSPORT_FAILED;
-    goto cleanup;
-  }
+  hs->state_start_ms = usmp_port_millis();
+  session->hs_ctx = hs;
+  session->state = USMP_STATE_AWAITING_CHALLENGE;
+  return USMP_OK;
+}
 
-  if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
-    USMP_LOGE(TAG, "Failed to parse packet at step 2");
-    ret = USMP_ERR_AUTH_FAILED;
-    goto cleanup;
-  }
+usmp_err_t usmp_handshake_step(usmp_transport_t* transport, usmp_t* session) {
+  if (!session || !transport) return USMP_ERR_INVALID_ARG;
+  if (session->state == USMP_STATE_ESTABLISHED) return USMP_OK;
+  if (session->state == USMP_STATE_IDLE) return USMP_ERR_NOT_CONNECTED;
+  if (session->state == USMP_STATE_ERROR || !session->hs_ctx) return USMP_ERR_AUTH_FAILED;
 
-  if (pkt.type == USMP_TYPE_HELLO_RETRY) {
-    if (pkt.length != USMP_COOKIE_LEN) {
-      USMP_LOGE(TAG, "Bad HELLO_RETRY length");
-      ret = USMP_ERR_AUTH_FAILED;
-      goto cleanup;
-    }
-    // Append cookie (which is in pkt.payload) to HELLO payload and send again
-    memset(&pkt, 0, sizeof(pkt));
-    pkt.magic = USMP_MAGIC;
-    pkt.version = USMP_VERSION;
-    pkt.type = USMP_TYPE_HELLO;
-    pkt.seq = 1;
-    pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + USMP_COOKIE_LEN;
-    memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
-    memcpy(pkt.payload + USMP_DEVICE_ID_LEN, pub_c, PUB_KEY_LEN);
-    memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, rx_buf + USMP_HEADER_SIZE,
-           USMP_COOKIE_LEN);
+  usmp_handshake_ctx_t* hs = (usmp_handshake_ctx_t*)session->hs_ctx;
+  uint32_t now = usmp_port_millis();
+  char _msg[128];
 
-    len = usmp_build_packet(&pkt, tx_buf, NULL);
-    if (transport->send(transport, tx_buf, (size_t)len) < 0) {
-      USMP_LOGE(TAG, "Failed to resend HELLO with cookie");
-      ret = USMP_ERR_TRANSPORT_FAILED;
-      goto cleanup;
+  if (session->state == USMP_STATE_AWAITING_CHALLENGE) {
+    if ((now - hs->state_start_ms) >= hs->timeout_ms) {
+      USMP_LOGE(TAG, "Timeout waiting for CHALLENGE");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_TIMEOUT;
     }
 
-    // Read the actual CHALLENGE packet now
-    len = transport->recv(transport, rx_buf, 512);
+    if (transport->available && transport->available(transport) <= 0) {
+      return USMP_OK;  // No frame ready yet; return non-blockingly
+    }
+
+    int len = transport->recv(transport, hs->rx_buf, 512);
+    if (len == 0) {
+      return USMP_OK;  // Non-blocking empty read
+    }
     if (len < 0) {
-      USMP_LOGE(TAG, "Failed to receive CHALLENGE after cookie retry");
-      ret = USMP_ERR_TRANSPORT_FAILED;
-      goto cleanup;
+      USMP_LOGE(TAG, "Failed to receive CHALLENGE");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_TRANSPORT_FAILED;
     }
 
-    if (usmp_parse_packet(rx_buf, len, &pkt) != 0) {
-      USMP_LOGE(TAG, "Failed to parse CHALLENGE after cookie retry");
-      ret = USMP_ERR_AUTH_FAILED;
-      goto cleanup;
+    usmp_packet_t pkt;
+    if (usmp_parse_packet(hs->rx_buf, len, &pkt) != 0) {
+      USMP_LOGE(TAG, "Failed to parse packet at step 2");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_AUTH_FAILED;
     }
+
+    if (pkt.type == USMP_TYPE_HELLO_RETRY) {
+      if (pkt.length != USMP_COOKIE_LEN || hs->cookie_retried) {
+        USMP_LOGE(TAG, "Bad HELLO_RETRY length or repeated retry");
+        session->state = USMP_STATE_ERROR;
+        usmp_handshake_abort(transport, session);
+        return USMP_ERR_AUTH_FAILED;
+      }
+      hs->cookie_retried = true;
+      memset(&pkt, 0, sizeof(pkt));
+      pkt.magic = USMP_MAGIC;
+      pkt.version = USMP_VERSION;
+      pkt.type = USMP_TYPE_HELLO;
+      pkt.seq = 1;
+      pkt.length = USMP_DEVICE_ID_LEN + PUB_KEY_LEN + USMP_COOKIE_LEN;
+      memcpy(pkt.payload, session->device_id, USMP_DEVICE_ID_LEN);
+      memcpy(pkt.payload + USMP_DEVICE_ID_LEN, hs->pub_c, PUB_KEY_LEN);
+      memcpy(pkt.payload + USMP_DEVICE_ID_LEN + PUB_KEY_LEN, hs->rx_buf + USMP_HEADER_SIZE,
+             USMP_COOKIE_LEN);
+
+      int slen = usmp_build_packet(&pkt, hs->tx_buf, NULL);
+      if (transport->send(transport, hs->tx_buf, (size_t)slen) < 0) {
+        USMP_LOGE(TAG, "Failed to resend HELLO with cookie");
+        session->state = USMP_STATE_ERROR;
+        usmp_handshake_abort(transport, session);
+        return USMP_ERR_TRANSPORT_FAILED;
+      }
+      hs->state_start_ms = usmp_port_millis();
+      return USMP_OK;
+    }
+
+    if (pkt.type != USMP_TYPE_CHALLENGE || pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN) {
+      snprintf(_msg, sizeof(_msg), "Bad CHALLENGE frame (type=0x%02x len=%u)", pkt.type, pkt.length);
+      USMP_LOGE(TAG, _msg);
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_AUTH_FAILED;
+    }
+
+    memcpy(hs->nonce, pkt.payload, USMP_NONCE_LEN);
+    memcpy(hs->pub_s, pkt.payload + USMP_NONCE_LEN, PUB_KEY_LEN);
+    USMP_LOGI(TAG, "CHALLENGE received");
+
+    session->state = USMP_STATE_CALCULATING_ECDH;
+    hs->state_start_ms = usmp_port_millis();
+    /* Fall through immediately to compute ECDH without waiting for next loop tick */
   }
 
-  if (pkt.type != USMP_TYPE_CHALLENGE || pkt.length != USMP_NONCE_LEN + PUB_KEY_LEN) {
-    snprintf(_msg, sizeof(_msg), "Bad CHALLENGE frame (type=0x%02x len=%u)", pkt.type, pkt.length);
-    USMP_LOGE(TAG, _msg);
-    ret = USMP_ERR_AUTH_FAILED;
-    goto cleanup;
-  }
+  if (session->state == USMP_STATE_CALCULATING_ECDH) {
+    uint8_t peer_buf[1 + PUB_KEY_LEN];
+    peer_buf[0] = PUB_KEY_LEN;
+    memcpy(peer_buf + 1, hs->pub_s, PUB_KEY_LEN);
 
-  uint8_t nonce[USMP_NONCE_LEN];
-  uint8_t pub_s[PUB_KEY_LEN];
-  memcpy(nonce, pkt.payload, USMP_NONCE_LEN);
-  memcpy(pub_s, pkt.payload + USMP_NONCE_LEN, PUB_KEY_LEN);
-  USMP_LOGI(TAG, "CHALLENGE received");
+    if (mbedtls_ecdh_read_public(&hs->ecdh, peer_buf, sizeof(peer_buf)) != 0) {
+      USMP_LOGE(TAG, "Failed to load server public key");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
 
-  // Compute X25519 shared secret ──────────────────────────────────────────
-  /* peer_buf: 1-byte length prefix + 32-byte key (mbedtls X25519 format) */
-  uint8_t peer_buf[1 + PUB_KEY_LEN];
-  peer_buf[0] = PUB_KEY_LEN;
-  memcpy(peer_buf + 1, pub_s, PUB_KEY_LEN);
+    uint8_t shared_secret[PUB_KEY_LEN];
+    size_t shared_len = 0;
+    if (mbedtls_ecdh_calc_secret(&hs->ecdh, &shared_len, shared_secret, sizeof(shared_secret),
+                                 mbedtls_ctr_drbg_random, &hs->ctr_drbg) != 0) {
+      USMP_LOGE(TAG, "X25519 shared secret failed");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
+    USMP_LOGI(TAG, "X25519 shared secret computed");
 
-  if (mbedtls_ecdh_read_public(&ecdh, peer_buf, sizeof(peer_buf)) != 0) {
-    USMP_LOGE(TAG, "Failed to load server public key");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
-  }
-
-  uint8_t shared_secret[PUB_KEY_LEN];
-  size_t shared_len = 0;
-  if (mbedtls_ecdh_calc_secret(&ecdh, &shared_len, shared_secret, sizeof(shared_secret),
-                               mbedtls_ctr_drbg_random, &ctr_drbg) != 0) {
-    USMP_LOGE(TAG, "X25519 shared secret failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
-  }
-  USMP_LOGI(TAG, "X25519 shared secret computed");
-
-  // L1 fix: reject all-zero shared secret (low-order point)
-  {
     uint8_t zero_buf[PUB_KEY_LEN] = {0};
     if (mbedtls_ct_memcmp(shared_secret, zero_buf, shared_len) == 0) {
       USMP_LOGE(TAG, "X25519 produced all-zero shared secret (low-order point)");
-      ret = USMP_ERR_CRYPTO_FAILED;
-      goto cleanup;
+      mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
+
+    if (derive_session_keys(shared_secret, shared_len, hs->nonce, USMP_NONCE_LEN, hs->pub_c,
+                            hs->pub_s, hs->k_c2s, hs->k_s2c) != 0) {
+      USMP_LOGE(TAG, "HKDF failed");
+      mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
+    mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+
+    memcpy(session->tx_key, hs->k_c2s, USMP_SESSION_KEY_LEN);
+    memcpy(session->rx_key, hs->k_s2c, USMP_SESSION_KEY_LEN);
+    USMP_LOGI(TAG, "Directional session keys derived");
+
+    uint8_t hmac_client[USMP_HMAC_LEN];
+    if (compute_transcript_hmac(session->psk, session->psk_len, USMP_TYPE_HELLO_ACK, hs->nonce,
+                                session->device_id, USMP_DEVICE_ID_LEN, hs->pub_c, hs->pub_s,
+                                hmac_client) != 0) {
+      USMP_LOGE(TAG, "Client HMAC computation failed");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
+
+    usmp_packet_t pkt;
+    memset(&pkt, 0, sizeof(pkt));
+    pkt.magic = USMP_MAGIC;
+    pkt.version = USMP_VERSION;
+    pkt.type = USMP_TYPE_HELLO_ACK;
+    pkt.seq = 2;
+    pkt.length = USMP_HMAC_LEN;
+    memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
+    mbedtls_platform_zeroize(hmac_client, sizeof(hmac_client));
+
+    int len = usmp_build_packet(&pkt, hs->tx_buf, NULL);
+    if (transport->send(transport, hs->tx_buf, (size_t)len) < 0) {
+      USMP_LOGE(TAG, "Failed to send HELLO_ACK");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_TRANSPORT_FAILED;
+    }
+    USMP_LOGI(TAG, "HELLO_ACK sent");
+
+    session->state = USMP_STATE_AWAITING_SESSION_OK;
+    hs->state_start_ms = usmp_port_millis();
+    return USMP_OK;
+  }
+
+  if (session->state == USMP_STATE_AWAITING_SESSION_OK) {
+    if ((now - hs->state_start_ms) >= hs->timeout_ms) {
+      USMP_LOGE(TAG, "Timeout waiting for SESSION_OK");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_TIMEOUT;
+    }
+
+    if (transport->available && transport->available(transport) <= 0) {
+      return USMP_OK;  // No frame ready yet; return non-blockingly
+    }
+
+    int len = transport->recv(transport, hs->rx_buf, 512);
+    if (len == 0) {
+      return USMP_OK;  // Non-blocking empty read
+    }
+    if (len < 0) {
+      USMP_LOGE(TAG, "Failed to receive SESSION_OK");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_TRANSPORT_FAILED;
+    }
+
+    usmp_packet_t pkt;
+    if (usmp_parse_packet(hs->rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_SESSION_OK ||
+        pkt.length != USMP_SESSION_ID_LEN + USMP_HMAC_LEN) {
+      snprintf(_msg, sizeof(_msg), "Bad SESSION_OK frame (type=0x%02x len=%u)", pkt.type, pkt.length);
+      USMP_LOGE(TAG, _msg);
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_AUTH_FAILED;
+    }
+
+    uint8_t hmac_server_received[USMP_HMAC_LEN];
+    memcpy(session->session_id, pkt.payload, USMP_SESSION_ID_LEN);
+    memcpy(hmac_server_received, pkt.payload + USMP_SESSION_ID_LEN, USMP_HMAC_LEN);
+
+    uint8_t hmac_server_expected[USMP_HMAC_LEN];
+    if (compute_transcript_hmac(session->psk, session->psk_len, USMP_TYPE_SESSION_OK, hs->nonce,
+                                session->session_id, USMP_SESSION_ID_LEN, hs->pub_c, hs->pub_s,
+                                hmac_server_expected) != 0) {
+      USMP_LOGE(TAG, "Server HMAC computation failed");
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_CRYPTO_FAILED;
+    }
+
+    if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, USMP_HMAC_LEN) != 0) {
+      USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
+      mbedtls_platform_zeroize(hmac_server_expected, sizeof(hmac_server_expected));
+      mbedtls_platform_zeroize(hmac_server_received, sizeof(hmac_server_received));
+      session->state = USMP_STATE_ERROR;
+      usmp_handshake_abort(transport, session);
+      return USMP_ERR_AUTH_FAILED;
+    }
+    mbedtls_platform_zeroize(hmac_server_expected, sizeof(hmac_server_expected));
+    mbedtls_platform_zeroize(hmac_server_received, sizeof(hmac_server_received));
+
+    USMP_LOGI(TAG, "Server authenticated OK");
+    if (transport->set_session_keys) {
+      transport->set_session_keys(transport, session->tx_key, session->rx_key);
+    }
+    session->established = true;
+    session->tx_seq = 0;
+    session->rx_seq = 0;
+    session->rx_window_bitmap = 0;
+    session->last_tx_ms = usmp_port_millis();
+    session->state = USMP_STATE_ESTABLISHED;
+
+    usmp_handshake_abort(transport, session);
+    USMP_LOGI(TAG, "SESSION_OK — session established");
+    return USMP_OK;
+  }
+
+  return USMP_OK;
+}
+
+usmp_err_t usmp_handshake(usmp_transport_t* transport, usmp_t* session) {
+  usmp_err_t ret = usmp_handshake_start(transport, session);
+  if (ret != USMP_OK) return ret;
+
+  while (session->state != USMP_STATE_ESTABLISHED && session->state != USMP_STATE_ERROR) {
+    usmp_port_wdt_feed();
+    ret = usmp_handshake_step(transport, session);
+    if (ret != USMP_OK) {
+      return ret;
+    }
+    if (session->state != USMP_STATE_ESTABLISHED) {
+      usmp_port_delay_ms(2);
     }
   }
 
-  // Derive directional session keys ────────────────────────────────────────
-  if (derive_session_keys(shared_secret, shared_len, nonce, USMP_NONCE_LEN, pub_c, pub_s, k_c2s,
-                          k_s2c) != 0) {
-    USMP_LOGE(TAG, "HKDF failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
+  if (session->state == USMP_STATE_ESTABLISHED) {
+    return USMP_OK;
   }
-  /* Client: encrypts with k_c2s, decrypts with k_s2c */
-  memcpy(session->tx_key, k_c2s, USMP_SESSION_KEY_LEN);
-  memcpy(session->rx_key, k_s2c, USMP_SESSION_KEY_LEN);
-  USMP_LOGI(TAG, "Directional session keys derived");
-
-  // Step 3: Send HELLO_ACK [hmac_client(32)] ─────────────────────────────
-  uint8_t hmac_client[USMP_HMAC_LEN];
-  if (compute_transcript_hmac(psk, psk_len, USMP_TYPE_HELLO_ACK, nonce, session->device_id,
-                              USMP_DEVICE_ID_LEN, pub_c, pub_s, hmac_client) != 0) {
-    USMP_LOGE(TAG, "Client HMAC computation failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
-  }
-
-  memset(&pkt, 0, sizeof(pkt));
-  pkt.magic = USMP_MAGIC;
-  pkt.version = USMP_VERSION;
-  pkt.type = USMP_TYPE_HELLO_ACK;
-  pkt.seq = 2;
-  pkt.length = USMP_HMAC_LEN;
-  memcpy(pkt.payload, hmac_client, USMP_HMAC_LEN);
-
-  len = usmp_build_packet(&pkt, tx_buf, NULL);
-  if (transport->send(transport, tx_buf, (size_t)len) < 0) {
-    USMP_LOGE(TAG, "Failed to send HELLO_ACK");
-    ret = USMP_ERR_TRANSPORT_FAILED;
-    goto cleanup;
-  }
-  USMP_LOGI(TAG, "HELLO_ACK sent");
-
-  // Step 4: Receive SESSION_OK [session_id(16) || hmac_server(32)] ────────
-  len = transport->recv(transport, rx_buf, 512);
-  if (len < 0) {
-    USMP_LOGE(TAG, "Failed to receive SESSION_OK");
-    ret = USMP_ERR_TRANSPORT_FAILED;
-    goto cleanup;
-  }
-
-  if (usmp_parse_packet(rx_buf, len, &pkt) != 0 || pkt.type != USMP_TYPE_SESSION_OK ||
-      pkt.length != USMP_SESSION_ID_LEN + USMP_HMAC_LEN) {
-    snprintf(_msg, sizeof(_msg), "Bad SESSION_OK frame (type=0x%02x len=%u)", pkt.type, pkt.length);
-    USMP_LOGE(TAG, _msg);
-    ret = USMP_ERR_AUTH_FAILED;
-    goto cleanup;
-  }
-
-  uint8_t hmac_server_received[USMP_HMAC_LEN];
-  memcpy(session->session_id, pkt.payload, USMP_SESSION_ID_LEN);
-  memcpy(hmac_server_received, pkt.payload + USMP_SESSION_ID_LEN, USMP_HMAC_LEN);
-
-  // Verify server HMAC ────────────────────────────────────────────────────
-  uint8_t hmac_server_expected[USMP_HMAC_LEN];
-  if (compute_transcript_hmac(psk, psk_len, USMP_TYPE_SESSION_OK, nonce, session->session_id,
-                              USMP_SESSION_ID_LEN, pub_c, pub_s, hmac_server_expected) != 0) {
-    USMP_LOGE(TAG, "Server HMAC computation failed");
-    ret = USMP_ERR_CRYPTO_FAILED;
-    goto cleanup;
-  }
-
-  if (mbedtls_ct_memcmp(hmac_server_received, hmac_server_expected, USMP_HMAC_LEN) != 0) {
-    USMP_LOGE(TAG, "Server HMAC verification FAILED — possible rogue server");
-    ret = USMP_ERR_AUTH_FAILED;
-    goto cleanup;
-  }
-
-  USMP_LOGI(TAG, "Server authenticated OK");
-  session->established = true;
-  ret = USMP_OK;
-  USMP_LOGI(TAG, "SESSION_OK — session established");
-
-cleanup:
-  /*
-   * Securely wipe all sensitive material from memory.
-   * mbedtls_platform_zeroize() is compiler-barrier-safe — unlike plain
-   * memset(), it will not be optimized away even when the buffer goes
-   * out of scope immediately after.
-   */
-  mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
-  mbedtls_platform_zeroize(hmac_client, sizeof(hmac_client));
-  mbedtls_platform_zeroize(hmac_server_expected, sizeof(hmac_server_expected));
-  mbedtls_platform_zeroize(hmac_server_received, sizeof(hmac_server_received));
-  mbedtls_platform_zeroize(nonce, sizeof(nonce));
-  mbedtls_platform_zeroize(pers, sizeof(pers));
-  mbedtls_platform_zeroize(k_c2s, sizeof(k_c2s));
-  mbedtls_platform_zeroize(k_s2c, sizeof(k_s2c));
-  if (ret != USMP_OK) {
-    /* Only wipe derived keys on failure — on success they're needed */
-    mbedtls_platform_zeroize(session->tx_key, sizeof(session->tx_key));
-    mbedtls_platform_zeroize(session->rx_key, sizeof(session->rx_key));
-  }
-
-  mbedtls_ecdh_free(&ecdh);
-  mbedtls_entropy_free(&entropy);
-  mbedtls_ctr_drbg_free(&ctr_drbg);
-
-  if (tx_buf) {
-    mbedtls_platform_zeroize(tx_buf, 512);
-    if (allocated_buffers) {
-      free(tx_buf);
-    }
-  }
-  if (rx_buf) {
-    mbedtls_platform_zeroize(rx_buf, 512);
-    if (allocated_buffers) {
-      free(rx_buf);
-    }
-  }
-
-  return ret;
+  return USMP_ERR_AUTH_FAILED;
 }

@@ -92,6 +92,10 @@ _Static_assert(offsetof(arduino_usmp_t, tx_mutex) == offsetof(usmp_t, tx_mutex),
                "tx_mutex offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, rx_mutex) == offsetof(usmp_t, rx_mutex),
                "rx_mutex offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, state) == offsetof(usmp_t, state),
+               "state offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, hs_ctx) == offsetof(usmp_t, hs_ctx),
+               "hs_ctx offset mismatch!");
 
 // Forward declaration from test_golden.c
 void test_golden(void);
@@ -866,6 +870,17 @@ static int mock_hs_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
   return (int)avail;
 }
 
+static int mock_hs_available(usmp_transport_t* t) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  if (!srv || srv->rx_queue_len == 0 || srv->rx_queue_pos >= srv->rx_queue_len) return 0;
+  return (int)(srv->rx_queue_len - srv->rx_queue_pos);
+}
+
+static int mock_hs_reconnect(usmp_transport_t* t) {
+  (void)t;
+  return 0;
+}
+
 static void test_zero_heap_handshake(void) {
   printf("Running zero-heap handshake test...\n");
   const uint8_t psk[16] = "usmp-test-psk-16";
@@ -926,6 +941,100 @@ static void test_zero_heap_handshake(void) {
   mbedtls_ctr_drbg_free(&srv.ctr_drbg);
 
   printf("  - Zero-heap handshake test passed!\n");
+}
+
+static void test_async_handshake_fsm(void) {
+  printf("Running async non-blocking handshake FSM tests...\n");
+  const uint8_t psk[16] = "usmp-test-psk-16";
+
+  mock_hs_server_t srv = {0};
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  usmp_transport_t transport = {0};
+  transport.send = mock_hs_send;
+  transport.recv = mock_hs_recv;
+  transport.available = mock_hs_available;
+  transport.reconnect = mock_hs_reconnect;
+  transport.ctx = &srv;
+
+  usmp_t session = {0};
+  session.psk = psk;
+  session.psk_len = sizeof(psk);
+
+  // 1. Initial connect async
+  usmp_err_t err = usmp_connect_async(&session, &transport);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+  assert(session.established == false);
+  assert(session.hs_ctx != NULL);
+  assert(usmp_get_state(&session) == USMP_STATE_AWAITING_CHALLENGE);
+
+  // At this point, HELLO was sent to mock server, and mock server generated CHALLENGE in rx_queue
+  // Test non-blocking tick: if we simulate no data available yet
+  size_t saved_len = srv.rx_queue_len;
+  srv.rx_queue_len = 0;  // temporarily hide incoming packet
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+
+  // Restore incoming packet (CHALLENGE)
+  srv.rx_queue_len = saved_len;
+
+  // 2. Next step consumes CHALLENGE, computes ECDH, and sends HELLO_ACK
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_SESSION_OK);
+  assert(usmp_get_state(&session) == USMP_STATE_AWAITING_SESSION_OK);
+
+  // 3. Next step consumes SESSION_OK, verifies server HMAC, and finishes handshake
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_ESTABLISHED);
+  assert(session.established == true);
+  assert(session.hs_ctx == NULL);
+  assert(memcmp(session.tx_key, srv.srv_rx_key, 32) == 0);
+  assert(memcmp(session.rx_key, srv.srv_tx_key, 32) == 0);
+
+  // 4. Stepping an established session is healthy and non-blocking
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+
+  // 5. Reconnect async resets session and restarts handshake FSM
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+  memset(&srv, 0, sizeof(srv));
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  err = usmp_reconnect_async(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+  assert(session.established == false);
+  assert(session.hs_ctx != NULL);
+
+  // Complete reconnected handshake step-by-step
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_SESSION_OK);
+
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_ESTABLISHED);
+  assert(session.established == true);
+  assert(session.hs_ctx == NULL);
+
+  // 6. Close session transitions state to IDLE
+  usmp_close(&session);
+  assert(session.state == USMP_STATE_IDLE);
+  assert(session.established == false);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  printf("  - Async non-blocking handshake FSM tests passed!\n");
 }
 
 extern uint32_t usmp_test_get_wdt_feed_count(void);
@@ -1244,6 +1353,7 @@ int main(void) {
   test_rekey();
   test_chacha20_poly1305();
   test_zero_heap_handshake();
+  test_async_handshake_fsm();
   test_coap_rtt_estimation();
   test_split_mutex_concurrency();
 

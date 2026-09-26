@@ -105,6 +105,16 @@ typedef enum {
   USMP_CIPHER_CHACHA20_POLY1305 = 2,
 } usmp_cipher_suite_t;
 
+typedef enum {
+  USMP_STATE_IDLE                = 0,
+  USMP_STATE_CONNECTING_SOCKET   = 1,
+  USMP_STATE_AWAITING_CHALLENGE  = 2,
+  USMP_STATE_CALCULATING_ECDH    = 3,
+  USMP_STATE_AWAITING_SESSION_OK = 4,
+  USMP_STATE_ESTABLISHED         = 5,
+  USMP_STATE_ERROR               = 6,
+} usmp_state_t;
+
 // Session context ───────────────────────────────────────────────────────────
 typedef struct {
   uint8_t device_id[USMP_DEVICE_ID_LEN];
@@ -145,6 +155,15 @@ typedef struct {
    */
   usmp_mutex_t tx_mutex;
   usmp_mutex_t rx_mutex;
+
+  /*
+   * Non-Blocking Handshake State Machine:
+   * state: Current connection/handshake state.
+   * hs_ctx: Internal handshake driver context pointer during connection bring-up;
+   *         NULL when idle, established, or closed.
+   */
+  usmp_state_t state;
+  void* hs_ctx;
 } usmp_t;
 
 // Threading ─────────────────────────────────────────────────────────────────
@@ -159,18 +178,49 @@ typedef struct {
 // Connection API ────────────────────────────────────────────────────────────
 
 /**
- * Connect using a transport and perform USMP handshake.
+ * Connect using a transport and perform USMP handshake (synchronous).
+ * Drives the state machine internally with watchdog servicing.
  * ctx->psk and ctx->psk_len must be set before calling.
  * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
 usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport);
 
 /**
- * Explicit reconnect — re-dials transport and performs a full new handshake.
+ * Begin asynchronous non-blocking connection.
+ * Sets up session mutexes and initiates handshake state machine.
+ * Returns USMP_OK on successful start, or negative usmp_err_t code on error.
+ */
+usmp_err_t usmp_connect_async(usmp_t* ctx, usmp_transport_t* transport);
+
+/**
+ * Explicit reconnect — re-dials transport and performs a full new handshake (synchronous).
  * Resets tx_seq and rx_seq. Caller must handle session change.
  * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
 usmp_err_t usmp_reconnect(usmp_t* ctx);
+
+/**
+ * Begin asynchronous non-blocking reconnection.
+ * Zeros out old session keys, redials transport, and restarts handshake state machine.
+ * Returns USMP_OK on successful start, or negative usmp_err_t code on error.
+ */
+usmp_err_t usmp_reconnect_async(usmp_t* ctx);
+
+/**
+ * Advance connection or established session state machine by one non-blocking tick.
+ * Automatically feeds platform hardware watchdog (usmp_port_wdt_feed()).
+ * In connecting/handshaking states, processes inbound frames, advances FSM, and establishes keys.
+ * In established state, services keepalive timers (PING/PONG).
+ * Returns USMP_OK while in-progress or healthy, or negative usmp_err_t code on failure.
+ */
+usmp_err_t usmp_step(usmp_t* ctx);
+
+/**
+ * Query current session state.
+ */
+static inline usmp_state_t usmp_get_state(const usmp_t* ctx) {
+  return ctx ? ctx->state : USMP_STATE_IDLE;
+}
 
 /**
  * Close the USMP session gracefully.

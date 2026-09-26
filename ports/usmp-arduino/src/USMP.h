@@ -14,6 +14,13 @@ class USMPClient {
   virtual ~USMPClient();
   bool begin(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx = nullptr);
   bool begin(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx = nullptr);
+  bool beginAsync(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx = nullptr);
+  bool beginAsync(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx = nullptr);
+  usmp_state_t state() const { return usmp_get_state(&_ctx); }
+  bool isConnecting() const {
+    usmp_state_t s = state();
+    return s > USMP_STATE_IDLE && s < USMP_STATE_ESTABLISHED;
+  }
   bool send(const char* str);
   bool send(const String& str);
   bool send(const uint8_t* data, size_t len);
@@ -53,6 +60,7 @@ class USMPClient {
   usmp_t _ctx;
   usmp_transport_t _transport;
   bool _initialized;
+  bool _reconnecting;
   uint32_t _backoff_ms;
   uint32_t _last_attempt_ms;
   void (*_on_connect)();
@@ -70,11 +78,11 @@ class USMPClient {
   // Level-gated Serial log helper — single place the log threshold is checked.
   void _logf(usmp_log_level_t level, const char* fmt, ...);
 
-  // Shared body of the two begin() overloads. `Transport` is USMPTCPTransport or
+  // Shared body of the begin() and beginAsync() overloads. `Transport` is USMPTCPTransport or
   // USMPUDPTransport; they differ only in connectWiFi()/init() and the proto tag.
   // Defined in USMP.cpp (both instantiations live in that TU).
   template <typename Transport, typename CtxType>
-  bool _beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx);
+  bool _beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx, bool async_mode = false);
 };
 
 /**
