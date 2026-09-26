@@ -35,6 +35,9 @@ Repository = "https://github.com/metaloomlabs/usmp"
 Documentation = "https://usmp.metaloom.in/docs"
 "Bug Tracker" = "https://github.com/metaloomlabs/usmp/issues"
 
+[project.scripts]
+usmp-server = "usmp.server:main"
+
 
 [build-system]
 requires = ["uv_build>=0.11.6,<0.12.0"]

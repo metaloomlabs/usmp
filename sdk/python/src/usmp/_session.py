@@ -79,6 +79,16 @@ class USMPSession:
     def session_id(self) -> str:
         return self._info.session_id_str
 
+    @property
+    def info(self) -> SessionInfo:
+        """Access underlying SessionInfo metadata."""
+        return self._info
+
+    @property
+    def is_connected(self) -> bool:
+        """Return True if session is currently active and open."""
+        return not self._closed
+
     async def send(self, data: bytes) -> None:
         """Encrypt and send data frames, dynamically fragmenting if necessary."""
         if len(data) > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES:
