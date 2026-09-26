@@ -19,3 +19,6 @@ TCP	KEYWORD2
 wifi	KEYWORD2
 lastError	KEYWORD2
 lastErrorString	KEYWORD2
+print	KEYWORD2
+println	KEYWORD2
+flush	KEYWORD2
