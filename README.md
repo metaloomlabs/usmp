@@ -72,28 +72,35 @@ Every single session is hardened:
 
 ### 1. Python Gateway Server
 
-Run `pip install usmp` and launch this async gateway server:
+#### Option A: Instant CLI Dev / Echo Server (Zero Code)
+```bash
+pip install usmp
+# Launches instant server with colored ANSI logs, payload inspection, and auto-echo:
+python -m usmp.server --echo --port 9000 --psk "usmp-dev-psk-change-me-before-prod"
+```
 
+#### Option B: Embedded Async Python Server
 ```python
 import asyncio
 from usmp import USMPServer, USMPSession, USMPProtocol, ConnectionClosedError
 
 PSK = b"usmp-dev-psk-change-me-before-prod"
 
-# Initialize TCP or UDP server
 server = USMPServer(host="0.0.0.0", port=9000, psk=PSK, protocol=USMPProtocol.TCP)
 
 @server.on_session
 async def handle_device(session: USMPSession):
     print(f"Device connected: {session.device_id}")
     try:
-        while True:
-            # Receive decrypted data
-            data = await session.recv()
-            print(f"Received: {data.decode('utf-8')}")
+        while session.is_connected:
+            # Direct string or raw binary reception
+            text = await session.recv_str()
             
-            # Send an encrypted reply
-            await session.send(b"Got your message loud and clear!")
+            # Built-in terminal payload inspector with ANSI colored badges
+            session.print(text)
+            
+            # Send an encrypted reply (accepts str or bytes natively)
+            await session.send("Got your message loud and clear!")
     except ConnectionClosedError:
         print(f"Device disconnected: {session.device_id}")
 
@@ -123,7 +130,7 @@ void app_main(void) {
     ctx.psk = s_psk;
     ctx.psk_len = sizeof(s_psk) - 1;
 
-    // Use usmp_transport_tcp_init or usmp_transport_udp_init
+    // Use dynamic (malloc) or zero-heap static initializer (usmp_transport_tcp_init_static)
     if (usmp_transport_tcp_init(&transport, "192.168.1.100", 9000) == 0) {
         if (usmp_connect(&ctx, &transport) == 0) {
             printf("Secure session established!\n");
@@ -134,11 +141,11 @@ void app_main(void) {
     usmp_send(&ctx, (const uint8_t *)"Hello, USMP!", 12);
 
     while (true) {
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(100));
         
-        // Maintain the watchdog & auto-reconnect on drops
-        if (usmp_keepalive_tick(&ctx) < 0) {
-            printf("Connection lost, reconnecting...\n");
+        // Drive non-blocking handshake FSM & background keepalives
+        if (usmp_step(&ctx) < 0) {
+            printf("Connection dropped: %s, reconnecting...\n", usmp_strerror(ctx.last_err));
             usmp_reconnect(&ctx);
         }
     }
@@ -152,24 +159,31 @@ Add the offline ZIP library and upload:
 ```cpp
 #include <USMP.h>
 
-#define PSK       "usmp-dev-psk-change-me-before-prod"
 #define SERVER_IP "192.168.1.100"
 #define WIFI_SSID "YourNetwork"
 #define WIFI_PASS "YourPassword"
 
-USMPClient usmp(PSK);
+// Binary or string pre-shared key (min 16 bytes)
+static const uint8_t PSK[] = "usmp-dev-psk-change-me-before-prod";
+USMPClient usmp(PSK, sizeof(PSK) - 1);
 
 void setup() {
     Serial.begin(115200);
 
     // Swap to USMP::UDP(SERVER_IP) to run over UDP!
-    if (!usmp.begin(USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS))) {
-        Serial.println("Connection failed!");
+    auto transport = USMP::TCP(SERVER_IP).wifi(WIFI_SSID, WIFI_PASS);
+    if (!usmp.begin(transport)) {
+        Serial.printf("Connection failed: %s (error %d)\n",
+                      usmp.lastErrorString(), usmp.lastError());
         return;
     }
 
     usmp.keepalive(15000); // Configure keepalive interval
-    usmp.send("Hello from Arduino ESP32!");
+
+    // Idiomatic Arduino Print interface (zero-heap line buffering!)
+    usmp.print("Sensor reading: ");
+    usmp.print(42.5);
+    usmp.println(" status=OK");
 }
 
 void loop() {
@@ -220,6 +234,7 @@ See [SECURITY.md](SECURITY.md) for the full disclosure and mitigation guidance. 
 * [x] **v0.5.0**: UDP transport support fully complete and production-ready.
 * [x] **v1.1.0**: Hardening & security fixes, CLI tools reference.
 * [x] **v1.2.0**: ChaCha20-Poly1305 cipher suite, In-Band Session Rekeying (`PKT_REKEY`), Adaptive UDP RTT estimation, and Arduino control frame decoupling.
+* [x] **v1.3.0**: Embedded reliability, zero-heap memory architecture, split RTOS concurrency, CoAP RTT estimation with watchdog protection, non-blocking handshake FSM, Arduino Print interface, Python dev echo server, and zero-heap static transport initializers.
 
 ---
 

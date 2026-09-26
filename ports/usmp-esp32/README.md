@@ -125,7 +125,8 @@ void app_main(void) {
     while (true) {
         vTaskDelay(pdMS_TO_TICKS(1000));
         
-        if (usmp_keepalive_tick(&ctx) != 0) {
+        // Drive non-blocking state machine & background keepalives
+        if (usmp_step(&ctx) != 0) {
             ESP_LOGW("APP", "Connection lost! Reconnecting...");
             while (usmp_reconnect(&ctx) != 0) {
                 vTaskDelay(pdMS_TO_TICKS(2000));
@@ -230,14 +231,14 @@ Session key derivation: `HKDF-SHA256(X25519(priv_C, pub_S), salt=nonce, info="us
 ## Roadmap
 
 | Version | Feature | Status |
-|---------|---------|--------|
-| v0.2.0  | Core protocol, Keepalive mechanism, and Arduino Port | Released |
-| v0.3.0  | TCP transport support and initial Python SDK | Released |
-| v0.4.0  | Published on ESP Component Registry and PyPI, making it stable | Released |
-| v0.4.7  | Hardening (Deterministic Nonces, Rate Limiting, Fragmentation) | Released |
-| v0.5.0  | UDP transport support fully complete and production-ready | Released |
-| v1.1.0  | CLI tools and auto-discovery (mDNS / UDP) | Planned |
-| v1.2.0  | Secure OTA firmware updates with Ed25519 signatures | Planned |
+| --------- | --------- | -------- |
+| v0.2.0 | Core protocol, Keepalive mechanism, and Arduino Port | Released |
+| v0.3.0 | TCP transport support and initial Python SDK | Released |
+| v0.4.0 | Published on ESP Component Registry and PyPI, making it stable | Released |
+| v0.4.7 | Hardening (Deterministic Nonces, Rate Limiting, Fragmentation) | Released |
+| v0.5.0 | UDP transport support fully complete and production-ready | Released |
+| v1.1.0 | CLI tools and auto-discovery (mDNS / UDP) | Planned |
+| v1.2.0 | Secure OTA firmware updates with Ed25519 signatures | Planned |
 
 ## License
 
