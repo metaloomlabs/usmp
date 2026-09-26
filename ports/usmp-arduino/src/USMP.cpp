@@ -7,6 +7,7 @@
 USMPClient::USMPClient(const char* psk)
     : _psk(psk),
       _initialized(false),
+      _reconnecting(false),
       _backoff_ms(2000),
       _last_attempt_ms(0),
       _on_connect(nullptr),
@@ -28,6 +29,7 @@ USMPClient::USMPClient(const char* psk)
 USMPClient::USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size)
     : _psk(psk),
       _initialized(false),
+      _reconnecting(false),
       _backoff_ms(2000),
       _last_attempt_ms(0),
       _on_connect(nullptr),
@@ -100,7 +102,7 @@ void USMPClient::_drain_rx() {
 // begin ─────────────────────────────────────────────────────────────────────
 
 template <typename Transport, typename CtxType>
-bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx) {
+bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxType* static_ctx, bool async_mode) {
   // WiFi — only if USMP is managing it (SSID was supplied via .wifi()).
   if (transport._ssid) {
     _logf(USMP_LOG_LEVEL_INFO, "[USMP] Connecting to WiFi: %s", transport._ssid);
@@ -135,26 +137,42 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxTy
   _ctx.scratch = scratch;
   _ctx.scratch_len = scratch_len;
 
-  if (usmp_connect(&_ctx, &_transport) != USMP_OK) {
-    _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
-    return false;
+  if (async_mode) {
+    if (usmp_connect_async(&_ctx, &_transport) != USMP_OK) {
+      _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Async connect init failed");
+      return false;
+    }
+  } else {
+    if (usmp_connect(&_ctx, &_transport) != USMP_OK) {
+      _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
+      return false;
+    }
   }
 
   _initialized = true;
+  _reconnecting = false;
   _backoff_ms = 2000;
   _last_attempt_ms = 0;
   _rx_len = 0;
 
-  if (_on_connect) _on_connect();
+  if (!async_mode && _on_connect) _on_connect();
   return true;
 }
 
 bool USMPClient::begin(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx) {
-  return _beginImpl(transport, "TCP", static_ctx);
+  return _beginImpl(transport, "TCP", static_ctx, false);
 }
 
 bool USMPClient::begin(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx) {
-  return _beginImpl(transport, "UDP", static_ctx);
+  return _beginImpl(transport, "UDP", static_ctx, false);
+}
+
+bool USMPClient::beginAsync(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx) {
+  return _beginImpl(transport, "TCP", static_ctx, true);
+}
+
+bool USMPClient::beginAsync(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx) {
+  return _beginImpl(transport, "UDP", static_ctx, true);
 }
 
 // send ──────────────────────────────────────────────────────────────────────
@@ -229,24 +247,38 @@ void USMPClient::setLogLevel(usmp_log_level_t level) { usmp_set_log_level(level)
 void USMPClient::maintain() {
   if (!_initialized) return;
 
-  // Dead — attempt reconnect with exponential backoff
+  // Non-blocking handshake in progress (e.g. from beginAsync or async reconnect)
+  if (isConnecting()) {
+    usmp_err_t err = usmp_step(&_ctx);
+    if (err == USMP_OK && _ctx.established) {
+      _backoff_ms = 2000;
+      if (_reconnecting && _on_reconnect) _on_reconnect();
+      _reconnecting = false;
+      if (_on_connect) _on_connect();
+    } else if (err != USMP_OK) {
+      _reconnecting = false;
+      if (_backoff_ms < 30000) _backoff_ms *= 2;
+    }
+    return;
+  }
+
+  // Dead — attempt reconnect with exponential backoff asynchronously
   if (!_ctx.established) {
     uint32_t now = millis();
     if (now - _last_attempt_ms < _backoff_ms) return;
     _last_attempt_ms = now;
 
-    if (_do_reconnect()) {
-      _backoff_ms = 2000;
-      if (_on_reconnect) _on_reconnect();
-      if (_on_connect) _on_connect();
-    } else {
+    _reconnecting = true;
+    _apply_psk();
+    if (usmp_reconnect_async(&_ctx) != USMP_OK) {
+      _reconnecting = false;
       if (_backoff_ms < 30000) _backoff_ms *= 2;
     }
     return;
   }
 
   // Alive — send keepalive PING if idle
-  if (usmp_keepalive_tick(&_ctx) != USMP_OK) {
+  if (usmp_step(&_ctx) != USMP_OK) {
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();
     return;
@@ -288,4 +320,5 @@ void USMPClient::close() {
   }
   _rx_len = 0;
   _initialized = false;
+  _reconnecting = false;
 }
