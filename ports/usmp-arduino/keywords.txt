@@ -17,3 +17,5 @@ onReconnect	KEYWORD2
 onMessage	KEYWORD2
 TCP	KEYWORD2
 wifi	KEYWORD2
+lastError	KEYWORD2
+lastErrorString	KEYWORD2

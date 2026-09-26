@@ -11,6 +11,8 @@ class USMPClient {
  public:
   explicit USMPClient(const char* psk);
   USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size);
+  USMPClient(const uint8_t* psk, size_t psk_len);
+  USMPClient(const uint8_t* psk, size_t psk_len, uint8_t* rx_buffer, size_t rx_buffer_size);
   virtual ~USMPClient();
   bool begin(USMPTCPTransport transport, USMPArduinoTcpCtx* static_ctx = nullptr);
   bool begin(USMPUDPTransport transport, USMPArduinoUdpCtx* static_ctx = nullptr);
@@ -21,6 +23,8 @@ class USMPClient {
     usmp_state_t s = state();
     return s > USMP_STATE_IDLE && s < USMP_STATE_ESTABLISHED;
   }
+  usmp_err_t lastError() const { return _last_err; }
+  const char* lastErrorString() const { return usmp_strerror(_last_err); }
   bool send(const char* str);
   bool send(const String& str);
   bool send(const uint8_t* data, size_t len);
@@ -57,6 +61,9 @@ class USMPClient {
 
  private:
   const char* _psk;
+  const uint8_t* _psk_bytes;
+  size_t _psk_len;
+  usmp_err_t _last_err;
   usmp_t _ctx;
   usmp_transport_t _transport;
   bool _initialized;
@@ -95,6 +102,11 @@ class USMPClientStatic : public USMPClient {
  public:
   explicit USMPClientStatic(const char* psk)
       : USMPClient(psk, _embedded_rx_buf, RxBufferSize) {
+    setHandshakeScratch(_embedded_scratch, ScratchBufferSize);
+  }
+
+  USMPClientStatic(const uint8_t* psk, size_t psk_len)
+      : USMPClient(psk, psk_len, _embedded_rx_buf, RxBufferSize) {
     setHandshakeScratch(_embedded_scratch, ScratchBufferSize);
   }
 
