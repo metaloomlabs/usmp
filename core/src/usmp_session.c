@@ -470,7 +470,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       USMP_LOGI(TAG, "BYE received — session closed by peer");
       ctx->established = false;
       usmp_port_mutex_unlock(ctx->rx_mutex);
-      return -1;
+      return USMP_ERR_PEER_CLOSED;
     } else if (pkt.type == USMP_TYPE_REKEY) {
       USMP_LOGI(TAG, "REKEY frame received — rotating session keys");
       if (out_len != 32) {
@@ -658,3 +658,35 @@ usmp_err_t usmp_rekey(usmp_t* ctx) {
   usmp_port_mutex_unlock(ctx->tx_mutex);
   return USMP_OK;
 }
+
+const char* usmp_strerror(usmp_err_t err) {
+  switch (err) {
+    case USMP_OK:
+      return "Success";
+    case USMP_ERR_INVALID_ARG:
+      return "Invalid argument";
+    case USMP_ERR_TRANSPORT_FAILED:
+      return "Transport I/O failed";
+    case USMP_ERR_AUTH_FAILED:
+      return "Authentication failed (bad PSK or corrupted handshake)";
+    case USMP_ERR_TIMEOUT:
+      return "Operation timed out";
+    case USMP_ERR_REPLAY_DETECTED:
+      return "Replay attack detected or duplicate sequence";
+    case USMP_ERR_BUFFER_OVERFLOW:
+      return "Buffer overflow or payload exceeds capacity";
+    case USMP_ERR_SEQ_EXHAUSTED:
+      return "Sequence numbers exhausted (rekey required)";
+    case USMP_ERR_CRYPTO_FAILED:
+      return "Cryptographic operation failed (tag mismatch or corrupted ciphertext)";
+    case USMP_ERR_NOT_CONNECTED:
+      return "Session is not connected or established";
+    case USMP_ERR_MUTEX_FAILED:
+      return "RTOS mutex lock or acquisition failed";
+    case USMP_ERR_PEER_CLOSED:
+      return "Session closed gracefully by remote peer";
+    default:
+      return "Unknown USMP error";
+  }
+}
+
