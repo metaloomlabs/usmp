@@ -6,6 +6,9 @@
 
 USMPClient::USMPClient(const char* psk)
     : _psk(psk),
+      _psk_bytes((const uint8_t*)psk),
+      _psk_len(psk ? strlen(psk) : 0),
+      _last_err(USMP_OK),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -28,6 +31,58 @@ USMPClient::USMPClient(const char* psk)
 
 USMPClient::USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size)
     : _psk(psk),
+      _psk_bytes((const uint8_t*)psk),
+      _psk_len(psk ? strlen(psk) : 0),
+      _last_err(USMP_OK),
+      _initialized(false),
+      _reconnecting(false),
+      _backoff_ms(2000),
+      _last_attempt_ms(0),
+      _on_connect(nullptr),
+      _on_disconnect(nullptr),
+      _on_reconnect(nullptr),
+      _on_message(nullptr),
+      _rx_buf(rx_buffer),
+      _rx_buf_capacity(rx_buffer_size),
+      _owns_rx_buf(false),
+      _rx_len(0) {
+  if (_rx_buf && _rx_buf_capacity > 0) {
+    memset(_rx_buf, 0, _rx_buf_capacity);
+  }
+  memset(&_ctx, 0, sizeof(_ctx));
+  memset(&_transport, 0, sizeof(_transport));
+}
+
+USMPClient::USMPClient(const uint8_t* psk, size_t psk_len)
+    : _psk(nullptr),
+      _psk_bytes(psk),
+      _psk_len(psk_len),
+      _last_err(USMP_OK),
+      _initialized(false),
+      _reconnecting(false),
+      _backoff_ms(2000),
+      _last_attempt_ms(0),
+      _on_connect(nullptr),
+      _on_disconnect(nullptr),
+      _on_reconnect(nullptr),
+      _on_message(nullptr),
+      _rx_buf(nullptr),
+      _rx_buf_capacity(USMP_MAX_DATA_LEN * USMP_MAX_FRAMES),
+      _owns_rx_buf(true),
+      _rx_len(0) {
+  _rx_buf = new uint8_t[_rx_buf_capacity];
+  if (_rx_buf) {
+    memset(_rx_buf, 0, _rx_buf_capacity);
+  }
+  memset(&_ctx, 0, sizeof(_ctx));
+  memset(&_transport, 0, sizeof(_transport));
+}
+
+USMPClient::USMPClient(const uint8_t* psk, size_t psk_len, uint8_t* rx_buffer, size_t rx_buffer_size)
+    : _psk(nullptr),
+      _psk_bytes(psk),
+      _psk_len(psk_len),
+      _last_err(USMP_OK),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -63,8 +118,8 @@ void USMPClient::setHandshakeScratch(uint8_t* scratch, size_t len) {
 }
 
 void USMPClient::_apply_psk() {
-  _ctx.psk = (const uint8_t*)_psk;
-  _ctx.psk_len = strlen(_psk);
+  _ctx.psk = _psk_bytes;
+  _ctx.psk_len = _psk_len;
 }
 
 void USMPClient::_logf(usmp_log_level_t level, const char* fmt, ...) {
@@ -79,7 +134,8 @@ void USMPClient::_logf(usmp_log_level_t level, const char* fmt, ...) {
 
 bool USMPClient::_do_reconnect() {
   _apply_psk();
-  return usmp_reconnect(&_ctx) == 0;
+  _last_err = usmp_reconnect(&_ctx);
+  return _last_err == USMP_OK;
 }
 
 void USMPClient::_drain_rx() {
@@ -90,8 +146,10 @@ void USMPClient::_drain_rx() {
     int n = usmp_recv(&_ctx, _rx_buf, (uint16_t)_rx_buf_capacity);
     if (n > 0) {
       _rx_len = (size_t)n;
+      _last_err = USMP_OK;
       break;
     } else if (n < 0) {
+      _last_err = (usmp_err_t)n;
       _ctx.established = false;
       if (_on_disconnect) _on_disconnect();
       break;
@@ -107,6 +165,7 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxTy
   if (transport._ssid) {
     _logf(USMP_LOG_LEVEL_INFO, "[USMP] Connecting to WiFi: %s", transport._ssid);
     if (!transport.connectWiFi()) {
+      _last_err = USMP_ERR_TRANSPORT_FAILED;
       _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: WiFi connect failed");
       return false;
     }
@@ -124,6 +183,7 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxTy
   }
 
   if (!init_ok) {
+    _last_err = USMP_ERR_TRANSPORT_FAILED;
     _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: %s connect failed", proto);
     return false;
   }
@@ -138,17 +198,20 @@ bool USMPClient::_beginImpl(const Transport& transport, const char* proto, CtxTy
   _ctx.scratch_len = scratch_len;
 
   if (async_mode) {
-    if (usmp_connect_async(&_ctx, &_transport) != USMP_OK) {
+    _last_err = usmp_connect_async(&_ctx, &_transport);
+    if (_last_err != USMP_OK) {
       _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Async connect init failed");
       return false;
     }
   } else {
-    if (usmp_connect(&_ctx, &_transport) != USMP_OK) {
+    _last_err = usmp_connect(&_ctx, &_transport);
+    if (_last_err != USMP_OK) {
       _logf(USMP_LOG_LEVEL_ERROR, "[usmp]: Handshake failed");
       return false;
     }
   }
 
+  _last_err = USMP_OK;
   _initialized = true;
   _reconnecting = false;
   _backoff_ms = 2000;
@@ -182,8 +245,12 @@ bool USMPClient::send(const char* str) { return send((const uint8_t*)str, strlen
 bool USMPClient::send(const String& str) { return send((const uint8_t*)str.c_str(), str.length()); }
 
 bool USMPClient::send(const uint8_t* data, size_t len) {
-  if (!_ctx.established) return false;
-  if (usmp_send(&_ctx, data, (uint16_t)len) != USMP_OK) {
+  if (!_ctx.established) {
+    _last_err = USMP_ERR_NOT_CONNECTED;
+    return false;
+  }
+  _last_err = usmp_send(&_ctx, data, (uint16_t)len);
+  if (_last_err != USMP_OK) {
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();
     return false;
@@ -226,7 +293,7 @@ bool USMPClient::alive() { return usmp_is_connected(&_ctx); }
 String USMPClient::deviceId() {
   char buf[18];
   snprintf(buf, sizeof(buf), "%02x:%02x:%02x:%02x:%02x:%02x", _ctx.device_id[0], _ctx.device_id[1],
-           _ctx.device_id[2], _ctx.device_id[3], _ctx.device_id[4], _ctx.device_id[5]);
+            _ctx.device_id[2], _ctx.device_id[3], _ctx.device_id[4], _ctx.device_id[5]);
   return String(buf);
 }
 
@@ -250,6 +317,7 @@ void USMPClient::maintain() {
   // Non-blocking handshake in progress (e.g. from beginAsync or async reconnect)
   if (isConnecting()) {
     usmp_err_t err = usmp_step(&_ctx);
+    _last_err = err;
     if (err == USMP_OK && _ctx.established) {
       _backoff_ms = 2000;
       if (_reconnecting && _on_reconnect) _on_reconnect();
@@ -270,7 +338,8 @@ void USMPClient::maintain() {
 
     _reconnecting = true;
     _apply_psk();
-    if (usmp_reconnect_async(&_ctx) != USMP_OK) {
+    _last_err = usmp_reconnect_async(&_ctx);
+    if (_last_err != USMP_OK) {
       _reconnecting = false;
       if (_backoff_ms < 30000) _backoff_ms *= 2;
     }
@@ -278,7 +347,9 @@ void USMPClient::maintain() {
   }
 
   // Alive — send keepalive PING if idle
-  if (usmp_step(&_ctx) != USMP_OK) {
+  usmp_err_t step_err = usmp_step(&_ctx);
+  if (step_err != USMP_OK) {
+    _last_err = step_err;
     _ctx.established = false;
     if (_on_disconnect) _on_disconnect();
     return;
@@ -321,4 +392,5 @@ void USMPClient::close() {
   _rx_len = 0;
   _initialized = false;
   _reconnecting = false;
+  _last_err = USMP_OK;
 }

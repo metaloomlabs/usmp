@@ -98,6 +98,7 @@ typedef enum {
   USMP_ERR_CRYPTO_FAILED       = -8,
   USMP_ERR_NOT_CONNECTED       = -9,
   USMP_ERR_MUTEX_FAILED        = -10,
+  USMP_ERR_PEER_CLOSED         = -11,
 } usmp_err_t;
 
 typedef enum {
@@ -268,6 +269,12 @@ usmp_err_t usmp_keepalive_tick(usmp_t* ctx);
  * Returns USMP_OK (0) on success, or a negative usmp_err_t code on failure.
  */
 usmp_err_t usmp_rekey(usmp_t* ctx);
+
+/**
+ * Convert a usmp_err_t error code to a human-readable string.
+ * Always returns a non-null static string literal.
+ */
+const char* usmp_strerror(usmp_err_t err);
 
 #ifdef __cplusplus
 }

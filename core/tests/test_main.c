@@ -609,14 +609,33 @@ void test_bye_on_close(void) {
   assert(loopback.buffer[before + 3] == USMP_TYPE_BYE);
   assert(client.established == false);
 
-  // The peer decodes it as a peer-initiated session close (usmp_recv → -1).
+  // The peer decodes it as a peer-initiated session close (usmp_recv → USMP_ERR_PEER_CLOSED).
   uint8_t recv_buf[64];
   int r = usmp_recv(&server, recv_buf, sizeof(recv_buf));
-  assert(r == -1);
+  assert(r == USMP_ERR_PEER_CLOSED);
   assert(server.established == false);
 
   printf("  - usmp_close emits a BYE the peer decodes as session close\n");
   printf("[TEST] BYE-on-close test passed!\n");
+}
+
+void test_usmp_strerror(void) {
+  printf("[TEST] Running usmp_strerror tests...\n");
+  assert(strcmp(usmp_strerror(USMP_OK), "Success") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_INVALID_ARG), "Invalid argument") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_TRANSPORT_FAILED), "Transport I/O failed") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_AUTH_FAILED), "Authentication failed (bad PSK or corrupted handshake)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_TIMEOUT), "Operation timed out") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_REPLAY_DETECTED), "Replay attack detected or duplicate sequence") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_BUFFER_OVERFLOW), "Buffer overflow or payload exceeds capacity") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_SEQ_EXHAUSTED), "Sequence numbers exhausted (rekey required)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_CRYPTO_FAILED), "Cryptographic operation failed (tag mismatch or corrupted ciphertext)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_NOT_CONNECTED), "Session is not connected or established") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_MUTEX_FAILED), "RTOS mutex lock or acquisition failed") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_PEER_CLOSED), "Session closed gracefully by remote peer") == 0);
+  assert(strcmp(usmp_strerror((usmp_err_t)-999), "Unknown USMP error") == 0);
+  printf("  - All error strings validated\n");
+  printf("[TEST] usmp_strerror tests passed!\n");
 }
 
 extern char g_last_log_level;
@@ -1384,6 +1403,7 @@ int main(void) {
   test_send_failure_no_nonce_reuse();
   test_control_seq_overflow();
   test_bye_on_close();
+  test_usmp_strerror();
   test_logging();
   test_rekey();
   test_chacha20_poly1305();
