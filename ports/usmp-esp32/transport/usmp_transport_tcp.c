@@ -36,6 +36,10 @@ static int tcp_dial(usmp_tcp_ctx_t* tcp) {
   int flag = 1;
   setsockopt(sock, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
 
+  // Set connect timeout to 5s to prevent blocking FreeRTOS tasks or tripping the TWDT
+  struct timeval conn_tv = {.tv_sec = 5, .tv_usec = 0};
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &conn_tv, sizeof(conn_tv));
+
   if (connect(sock, res->ai_addr, res->ai_addrlen) != 0) {
     freeaddrinfo(res);
     close(sock);

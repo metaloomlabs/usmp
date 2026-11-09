@@ -273,6 +273,10 @@ static void usmp_udp_destroy_static(usmp_transport_t* t) {
       close(udp->sock);
       udp->sock = -1;
     }
+    // Zeroize sensitive session keys from memory
+    memset(udp->tx_key, 0, sizeof(udp->tx_key));
+    memset(udp->rx_key, 0, sizeof(udp->rx_key));
+    udp->keys_set = false;
     // Do NOT free(udp): caller owns static/BSS memory
     t->ctx = NULL;
   }
@@ -285,6 +289,10 @@ static void usmp_udp_destroy(usmp_transport_t* t) {
       close(udp->sock);
       udp->sock = -1;
     }
+    // Zeroize sensitive session keys before freeing heap memory
+    memset(udp->tx_key, 0, sizeof(udp->tx_key));
+    memset(udp->rx_key, 0, sizeof(udp->rx_key));
+    udp->keys_set = false;
     free(udp);
     t->ctx = NULL;
   }
