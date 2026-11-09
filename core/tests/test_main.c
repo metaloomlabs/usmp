@@ -947,7 +947,7 @@ static int mock_hs_reconnect(usmp_transport_t* t) {
 
 static void test_zero_heap_handshake(void) {
   printf("Running zero-heap handshake test...\n");
-  const uint8_t psk[16] = "usmp-test-psk-16";
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
 
   mock_hs_server_t srv = {0};
   srv.psk = psk;
@@ -1009,7 +1009,7 @@ static void test_zero_heap_handshake(void) {
 
 static void test_async_handshake_fsm(void) {
   printf("Running async non-blocking handshake FSM tests...\n");
-  const uint8_t psk[16] = "usmp-test-psk-16";
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
 
   mock_hs_server_t srv = {0};
   srv.psk = psk;
