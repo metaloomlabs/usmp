@@ -201,7 +201,7 @@ Session keys are derived via:
 HKDF-SHA256(
     ikm  = X25519(priv_C, pub_S),
     salt = nonce,
-    info = "usmp-v1" || pub_C || pub_S
+    info = "usmp-v2" || pub_C || pub_S
 )
 ```
 

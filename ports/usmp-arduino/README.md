@@ -107,7 +107,7 @@ Inspect failed connections or sends without guessing:
 ```cpp
 if (!usmp.begin(transport)) {
   Serial.printf("Failed: %s (%d)\n", usmp.lastErrorString(), usmp.lastError());
-  // Prints: "Failed: Authentication failed / invalid PSK (-6)"
+  // Prints: "Failed: Handshake or auth failed (-3)"
 }
 ```
 
