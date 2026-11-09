@@ -20,12 +20,43 @@ static const char* TAG = "WIFI";
 static EventGroupHandle_t s_wifi_event_group;
 static const int WIFI_CONNECTED_BIT = BIT0;
 
+static const char* wifi_disconn_reason_str(uint8_t reason) {
+  switch (reason) {
+    case 201: return "NO_AP_FOUND (ESP32 supports 2.4GHz only; check SSID)";
+    case 202: return "AUTH_FAIL (password incorrect)";
+    case 204: return "HANDSHAKE_TIMEOUT";
+    case 205: return "CONNECTION_FAIL";
+    case 15:  return "4WAY_HANDSHAKE_TIMEOUT (password/auth mismatch)";
+    default:  return "DISCONNECTED";
+  }
+}
+
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id,
                                void* event_data) {
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-    ESP_LOGW(TAG, "disconnected, reconnecting...");
+    wifi_event_sta_disconnected_t* dis = (wifi_event_sta_disconnected_t*)event_data;
+    uint8_t reason = dis ? dis->reason : 0;
+    ESP_LOGW(TAG, "Wi-Fi disconnected: %s (reason=%d), reconnecting...",
+             wifi_disconn_reason_str(reason), reason);
+
+    // Run a quick scan to list nearby 2.4GHz APs on first failure
+    wifi_scan_config_t scan_cfg = {0};
+    esp_wifi_scan_start(&scan_cfg, true);
+    uint16_t ap_num = 0;
+    esp_wifi_scan_get_ap_num(&ap_num);
+    if (ap_num > 0) {
+      wifi_ap_record_t* aps = (wifi_ap_record_t*)malloc(ap_num * sizeof(wifi_ap_record_t));
+      if (aps) {
+        esp_wifi_scan_get_ap_records(&ap_num, aps);
+        ESP_LOGI(TAG, "--- Scanned %d 2.4GHz Wi-Fi APs ---", ap_num);
+        for (int i = 0; i < ap_num && i < 15; i++) {
+          ESP_LOGI(TAG, "  [%d] SSID: '%s', RSSI: %d, Auth: %d", i, (char*)aps[i].ssid, aps[i].rssi, aps[i].authmode);
+        }
+        free(aps);
+      }
+    }
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
     ESP_LOGI(TAG, "connected to AP, obtaining IP via DHCP...");
