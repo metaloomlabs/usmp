@@ -49,7 +49,11 @@ void usmp_port_delay_ms(uint32_t ms) { vTaskDelay(pdMS_TO_TICKS(ms)); }
 
 uint32_t usmp_port_millis(void) { return (uint32_t)((uint64_t)esp_timer_get_time() / 1000ULL); }
 
-void usmp_port_wdt_feed(void) { esp_task_wdt_reset(); }
+void usmp_port_wdt_feed(void) {
+  if (esp_task_wdt_status(NULL) == ESP_OK) {
+    esp_task_wdt_reset();
+  }
+}
 
 void usmp_port_log(char level, const char* tag, const char* msg) {
   switch (level) {

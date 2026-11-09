@@ -33,6 +33,7 @@ static const char* wifi_disconn_reason_str(uint8_t reason) {
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id,
                                void* event_data) {
+  static bool s_scanned = false;
   if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
@@ -41,24 +42,28 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
     ESP_LOGW(TAG, "Wi-Fi disconnected: %s (reason=%d), reconnecting...",
              wifi_disconn_reason_str(reason), reason);
 
-    // Run a quick scan to list nearby 2.4GHz APs on first failure
-    wifi_scan_config_t scan_cfg = {0};
-    esp_wifi_scan_start(&scan_cfg, true);
-    uint16_t ap_num = 0;
-    esp_wifi_scan_get_ap_num(&ap_num);
-    if (ap_num > 0) {
-      wifi_ap_record_t* aps = (wifi_ap_record_t*)malloc(ap_num * sizeof(wifi_ap_record_t));
-      if (aps) {
-        esp_wifi_scan_get_ap_records(&ap_num, aps);
-        ESP_LOGI(TAG, "--- Scanned %d 2.4GHz Wi-Fi APs ---", ap_num);
-        for (int i = 0; i < ap_num && i < 15; i++) {
-          ESP_LOGI(TAG, "  [%d] SSID: '%s', RSSI: %d, Auth: %d", i, (char*)aps[i].ssid, aps[i].rssi, aps[i].authmode);
+    // Run a quick scan to list nearby 2.4GHz APs on first failure only
+    if (!s_scanned) {
+      s_scanned = true;
+      wifi_scan_config_t scan_cfg = {0};
+      esp_wifi_scan_start(&scan_cfg, true);
+      uint16_t ap_num = 0;
+      esp_wifi_scan_get_ap_num(&ap_num);
+      if (ap_num > 0) {
+        wifi_ap_record_t* aps = (wifi_ap_record_t*)malloc(ap_num * sizeof(wifi_ap_record_t));
+        if (aps) {
+          esp_wifi_scan_get_ap_records(&ap_num, aps);
+          ESP_LOGI(TAG, "--- Scanned %d 2.4GHz Wi-Fi APs ---", ap_num);
+          for (int i = 0; i < ap_num && i < 15; i++) {
+            ESP_LOGI(TAG, "  [%d] SSID: '%s', RSSI: %d, Auth: %d", i, (char*)aps[i].ssid, aps[i].rssi, aps[i].authmode);
+          }
+          free(aps);
         }
-        free(aps);
       }
     }
     esp_wifi_connect();
   } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_CONNECTED) {
+    s_scanned = false;
     ESP_LOGI(TAG, "connected to AP, obtaining IP via DHCP...");
   } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
     ip_event_got_ip_t* event = (ip_event_got_ip_t*)event_data;
