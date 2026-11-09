@@ -181,13 +181,18 @@ usmp_err_t usmp_step(usmp_t* ctx) {
 }
 
 usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
+  if (!ctx) return USMP_ERR_INVALID_ARG;
   usmp_err_t ret = usmp_connect_async(ctx, transport);
-  if (ret != USMP_OK) return ret;
+  if (ret != USMP_OK) {
+    ctx->last_err = ret;
+    return ret;
+  }
 
   while (ctx->state != USMP_STATE_ESTABLISHED && ctx->state != USMP_STATE_ERROR) {
     usmp_port_wdt_feed();
     ret = usmp_step(ctx);
     if (ret != USMP_OK) {
+      ctx->last_err = ret;
       if (ctx->tx_mutex) {
         usmp_port_mutex_destroy(ctx->tx_mutex);
         ctx->tx_mutex = NULL;
@@ -204,27 +209,38 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
   }
 
   if (ctx->state == USMP_STATE_ESTABLISHED) {
+    ctx->last_err = USMP_OK;
     return USMP_OK;
   }
+  ctx->last_err = USMP_ERR_AUTH_FAILED;
   return USMP_ERR_AUTH_FAILED;
 }
 
 usmp_err_t usmp_reconnect(usmp_t* ctx) {
+  if (!ctx) return USMP_ERR_INVALID_ARG;
   usmp_err_t ret = usmp_reconnect_async(ctx);
-  if (ret != USMP_OK) return ret;
+  if (ret != USMP_OK) {
+    ctx->last_err = ret;
+    return ret;
+  }
 
   while (ctx->state != USMP_STATE_ESTABLISHED && ctx->state != USMP_STATE_ERROR) {
     usmp_port_wdt_feed();
     ret = usmp_step(ctx);
-    if (ret != USMP_OK) return ret;
+    if (ret != USMP_OK) {
+      ctx->last_err = ret;
+      return ret;
+    }
     if (ctx->state != USMP_STATE_ESTABLISHED) {
       usmp_port_delay_ms(2);
     }
   }
 
   if (ctx->state == USMP_STATE_ESTABLISHED) {
+    ctx->last_err = USMP_OK;
     return USMP_OK;
   }
+  ctx->last_err = USMP_ERR_AUTH_FAILED;
   return USMP_ERR_AUTH_FAILED;
 }
 

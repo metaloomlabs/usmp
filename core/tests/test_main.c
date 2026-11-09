@@ -636,6 +636,15 @@ void test_usmp_strerror(void) {
   assert(strcmp(usmp_strerror(USMP_ERR_PEER_CLOSED), "Session closed gracefully by remote peer") == 0);
   assert(strcmp(usmp_strerror((usmp_err_t)-999), "Unknown USMP error") == 0);
   printf("  - All error strings validated\n");
+
+  // Validate context-bound error tracking
+  usmp_t ctx = {0};
+  ctx.last_err = USMP_ERR_TRANSPORT_FAILED;
+  assert(usmp_last_error(&ctx) == USMP_ERR_TRANSPORT_FAILED);
+  assert(strcmp(usmp_strerror(ctx.last_err), "Transport I/O failed") == 0);
+  assert(usmp_last_error(NULL) == USMP_ERR_INVALID_ARG);
+  printf("  - Context error fields validated\n");
+
   printf("[TEST] usmp_strerror tests passed!\n");
 }
 

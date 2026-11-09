@@ -165,7 +165,24 @@ typedef struct {
    */
   usmp_state_t state;
   void* hs_ctx;
+
+  /*
+   * Error tracking:
+   * last_tx_err: Last error encountered on transmission path (guarded by tx_mutex).
+   * last_rx_err: Last error encountered on receive path (guarded by rx_mutex).
+   * last_err:    Most recent session error code across all operations.
+   */
+  usmp_err_t last_tx_err;
+  usmp_err_t last_rx_err;
+  usmp_err_t last_err;
 } usmp_t;
+
+/**
+ * Retrieve the last recorded error code from the session.
+ */
+static inline usmp_err_t usmp_last_error(const usmp_t* ctx) {
+  return ctx ? ctx->last_err : USMP_ERR_INVALID_ARG;
+}
 
 // Threading ─────────────────────────────────────────────────────────────────
 //
