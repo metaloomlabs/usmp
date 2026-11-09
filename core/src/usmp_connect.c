@@ -98,6 +98,16 @@ usmp_err_t usmp_connect_async(usmp_t* ctx, usmp_transport_t* transport) {
 usmp_err_t usmp_reconnect_async(usmp_t* ctx) {
   if (!ctx) return USMP_ERR_INVALID_ARG;
 
+  /* Ensure session mutexes are initialized if missing */
+  if (!ctx->tx_mutex && usmp_port_mutex_create(&ctx->tx_mutex) != 0) {
+    ctx->last_err = USMP_ERR_MUTEX_FAILED;
+    return USMP_ERR_MUTEX_FAILED;
+  }
+  if (!ctx->rx_mutex && usmp_port_mutex_create(&ctx->rx_mutex) != 0) {
+    ctx->last_err = USMP_ERR_MUTEX_FAILED;
+    return USMP_ERR_MUTEX_FAILED;
+  }
+
   // Strict hierarchical locking: tx_mutex first, then rx_mutex
   if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
   if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) {
@@ -162,6 +172,7 @@ usmp_err_t usmp_step(usmp_t* ctx) {
       usmp_err_t ret = usmp_handshake_step(&ctx->transport, ctx);
       if (ret != USMP_OK) {
         ctx->state = USMP_STATE_ERROR;
+        ctx->last_err = ret;
         if (ctx->transport.close) ctx->transport.close(&ctx->transport);
         return ret;
       }
@@ -175,6 +186,7 @@ usmp_err_t usmp_step(usmp_t* ctx) {
       return usmp_keepalive_tick(ctx);
 
     case USMP_STATE_ERROR:
+      return (ctx->last_err != USMP_OK) ? ctx->last_err : USMP_ERR_AUTH_FAILED;
     default:
       return USMP_ERR_AUTH_FAILED;
   }
@@ -193,14 +205,6 @@ usmp_err_t usmp_connect(usmp_t* ctx, usmp_transport_t* transport) {
     ret = usmp_step(ctx);
     if (ret != USMP_OK) {
       ctx->last_err = ret;
-      if (ctx->tx_mutex) {
-        usmp_port_mutex_destroy(ctx->tx_mutex);
-        ctx->tx_mutex = NULL;
-      }
-      if (ctx->rx_mutex) {
-        usmp_port_mutex_destroy(ctx->rx_mutex);
-        ctx->rx_mutex = NULL;
-      }
       return ret;
     }
     if (ctx->state != USMP_STATE_ESTABLISHED) {

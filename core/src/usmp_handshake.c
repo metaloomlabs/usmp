@@ -157,6 +157,9 @@ void usmp_handshake_abort(usmp_transport_t* transport, usmp_t* session) {
   if (alloc_ctx) {
     free(hs);
   }
+  if (session->scratch && session->scratch_len > 0) {
+    mbedtls_platform_zeroize(session->scratch, session->scratch_len);
+  }
   session->hs_ctx = NULL;
 }
 
@@ -183,18 +186,21 @@ usmp_err_t usmp_handshake_start(usmp_transport_t* transport, usmp_t* session) {
   uint8_t* tx_buf = NULL;
   uint8_t* rx_buf = NULL;
 
-  /* Check if caller provided sufficient scratch buffer */
-  if (session->scratch && session->scratch_len >= (sizeof(usmp_handshake_ctx_t) + 1024)) {
-    hs = (usmp_handshake_ctx_t*)session->scratch;
+  /* Check if caller provided sufficient scratch buffer for zero-heap operation */
+  uintptr_t p = (uintptr_t)session->scratch;
+  size_t align_pad = (p % sizeof(void*) == 0) ? 0 : (sizeof(void*) - (p % sizeof(void*)));
+  size_t required_len = sizeof(usmp_handshake_ctx_t) + 1024 + align_pad;
+
+  if (session->scratch && session->scratch_len >= required_len) {
+    hs = (usmp_handshake_ctx_t*)(session->scratch + align_pad);
     memset(hs, 0, sizeof(usmp_handshake_ctx_t));
-    tx_buf = session->scratch + sizeof(usmp_handshake_ctx_t);
-    rx_buf = session->scratch + sizeof(usmp_handshake_ctx_t) + 512;
+    tx_buf = session->scratch + align_pad + sizeof(usmp_handshake_ctx_t);
+    rx_buf = tx_buf + 512;
     alloc_ctx = false;
     alloc_buffers = false;
-  } else if (session->scratch && session->scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN) {
+  } else if (session->scratch && session->scratch_len >= 1024) {
 #ifdef USMP_ZERO_HEAP
-    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes",
-              sizeof(usmp_handshake_ctx_t) + 1024);
+    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes", required_len);
     session->state = USMP_STATE_ERROR;
     return USMP_ERR_BUFFER_OVERFLOW;
 #else
@@ -210,8 +216,7 @@ usmp_err_t usmp_handshake_start(usmp_transport_t* transport, usmp_t* session) {
 #endif
   } else {
 #ifdef USMP_ZERO_HEAP
-    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes",
-              sizeof(usmp_handshake_ctx_t) + 1024);
+    USMP_LOGE(TAG, "Zero-heap mode requires scratch buffer >= %zu bytes", required_len);
     session->state = USMP_STATE_ERROR;
     return USMP_ERR_BUFFER_OVERFLOW;
 #else
