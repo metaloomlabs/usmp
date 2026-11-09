@@ -43,6 +43,7 @@ typedef usmp_t arduino_usmp_t;
 #include "usmp.h"
 #endif
 
+#include "usmp_transport.h"
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
 #include "usmp_handshake.h"
@@ -635,6 +636,15 @@ void test_usmp_strerror(void) {
   assert(strcmp(usmp_strerror(USMP_ERR_PEER_CLOSED), "Session closed gracefully by remote peer") == 0);
   assert(strcmp(usmp_strerror((usmp_err_t)-999), "Unknown USMP error") == 0);
   printf("  - All error strings validated\n");
+
+  // Validate context-bound error tracking
+  usmp_t ctx = {0};
+  ctx.last_err = USMP_ERR_TRANSPORT_FAILED;
+  assert(usmp_last_error(&ctx) == USMP_ERR_TRANSPORT_FAILED);
+  assert(strcmp(usmp_strerror(ctx.last_err), "Transport I/O failed") == 0);
+  assert(usmp_last_error(NULL) == USMP_ERR_INVALID_ARG);
+  printf("  - Context error fields validated\n");
+
   printf("[TEST] usmp_strerror tests passed!\n");
 }
 
@@ -937,7 +947,7 @@ static int mock_hs_reconnect(usmp_transport_t* t) {
 
 static void test_zero_heap_handshake(void) {
   printf("Running zero-heap handshake test...\n");
-  const uint8_t psk[16] = "usmp-test-psk-16";
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
 
   mock_hs_server_t srv = {0};
   srv.psk = psk;
@@ -999,7 +1009,7 @@ static void test_zero_heap_handshake(void) {
 
 static void test_async_handshake_fsm(void) {
   printf("Running async non-blocking handshake FSM tests...\n");
-  const uint8_t psk[16] = "usmp-test-psk-16";
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
 
   mock_hs_server_t srv = {0};
   srv.psk = psk;
@@ -1390,6 +1400,42 @@ static void test_split_mutex_concurrency(void) {
   printf("  - Split RTOS mutex architecture and concurrency tests passed!\n");
 }
 
+static void test_static_transport_initialization(void) {
+  printf("Running zero-heap static transport initialization tests...\n");
+
+  usmp_transport_t t = {0};
+  usmp_tcp_ctx_t tcp_ctx;
+  usmp_udp_ctx_t udp_ctx;
+
+  // 1. Argument validation and NULL checks
+  assert(usmp_transport_tcp_init_static(NULL, &tcp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, &tcp_ctx, NULL, 9000) == -1);
+
+  assert(usmp_transport_udp_init_static(NULL, &udp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, &udp_ctx, NULL, 9000) == -1);
+
+  // 2. Struct layout and size verification
+  assert(sizeof(usmp_tcp_ctx_t) >= sizeof(int) + 64 + sizeof(int));
+  assert(sizeof(usmp_udp_ctx_t) >= sizeof(int) + 64 + sizeof(int) + USMP_HEADER_SIZE + USMP_MAX_PAYLOAD);
+
+  // 3. UDP static transport initialization to local unbound port (UDP dial always creates socket)
+  int rc = usmp_transport_udp_init_static(&t, &udp_ctx, "127.0.0.1", 19876);
+  assert(rc == 0);
+  assert(t.ctx == &udp_ctx);
+  assert(udp_ctx.sock >= 0);
+  assert(t.send != NULL);
+  assert(t.recv != NULL);
+  assert(t.destroy != NULL);
+
+  // 4. Teardown static transport (verifies safe teardown and t.ctx becomes NULL)
+  t.destroy(&t);
+  assert(t.ctx == NULL);
+
+  printf("  - Zero-heap static transport initialization tests passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -1411,6 +1457,7 @@ int main(void) {
   test_async_handshake_fsm();
   test_coap_rtt_estimation();
   test_split_mutex_concurrency();
+  test_static_transport_initialization();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;

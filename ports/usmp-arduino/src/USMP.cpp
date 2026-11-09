@@ -9,6 +9,7 @@ USMPClient::USMPClient(const char* psk)
       _psk_bytes((const uint8_t*)psk),
       _psk_len(psk ? strlen(psk) : 0),
       _last_err(USMP_OK),
+      _tx_len(0),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -21,6 +22,7 @@ USMPClient::USMPClient(const char* psk)
       _rx_buf_capacity(USMP_MAX_DATA_LEN * USMP_MAX_FRAMES),
       _owns_rx_buf(true),
       _rx_len(0) {
+  memset(_tx_buf, 0, sizeof(_tx_buf));
   _rx_buf = new uint8_t[_rx_buf_capacity];
   if (_rx_buf) {
     memset(_rx_buf, 0, _rx_buf_capacity);
@@ -34,6 +36,7 @@ USMPClient::USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_siz
       _psk_bytes((const uint8_t*)psk),
       _psk_len(psk ? strlen(psk) : 0),
       _last_err(USMP_OK),
+      _tx_len(0),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -46,6 +49,7 @@ USMPClient::USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_siz
       _rx_buf_capacity(rx_buffer_size),
       _owns_rx_buf(false),
       _rx_len(0) {
+  memset(_tx_buf, 0, sizeof(_tx_buf));
   if (_rx_buf && _rx_buf_capacity > 0) {
     memset(_rx_buf, 0, _rx_buf_capacity);
   }
@@ -58,6 +62,7 @@ USMPClient::USMPClient(const uint8_t* psk, size_t psk_len)
       _psk_bytes(psk),
       _psk_len(psk_len),
       _last_err(USMP_OK),
+      _tx_len(0),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -70,6 +75,7 @@ USMPClient::USMPClient(const uint8_t* psk, size_t psk_len)
       _rx_buf_capacity(USMP_MAX_DATA_LEN * USMP_MAX_FRAMES),
       _owns_rx_buf(true),
       _rx_len(0) {
+  memset(_tx_buf, 0, sizeof(_tx_buf));
   _rx_buf = new uint8_t[_rx_buf_capacity];
   if (_rx_buf) {
     memset(_rx_buf, 0, _rx_buf_capacity);
@@ -83,6 +89,7 @@ USMPClient::USMPClient(const uint8_t* psk, size_t psk_len, uint8_t* rx_buffer, s
       _psk_bytes(psk),
       _psk_len(psk_len),
       _last_err(USMP_OK),
+      _tx_len(0),
       _initialized(false),
       _reconnecting(false),
       _backoff_ms(2000),
@@ -95,6 +102,7 @@ USMPClient::USMPClient(const uint8_t* psk, size_t psk_len, uint8_t* rx_buffer, s
       _rx_buf_capacity(rx_buffer_size),
       _owns_rx_buf(false),
       _rx_len(0) {
+  memset(_tx_buf, 0, sizeof(_tx_buf));
   if (_rx_buf && _rx_buf_capacity > 0) {
     memset(_rx_buf, 0, _rx_buf_capacity);
   }
@@ -245,6 +253,9 @@ bool USMPClient::send(const char* str) { return send((const uint8_t*)str, strlen
 bool USMPClient::send(const String& str) { return send((const uint8_t*)str.c_str(), str.length()); }
 
 bool USMPClient::send(const uint8_t* data, size_t len) {
+  if (_tx_len > 0) {
+    flush();
+  }
   if (!_ctx.established) {
     _last_err = USMP_ERR_NOT_CONNECTED;
     return false;
@@ -256,6 +267,71 @@ bool USMPClient::send(const uint8_t* data, size_t len) {
     return false;
   }
   return true;
+}
+
+// Print interface ───────────────────────────────────────────────────────────
+
+size_t USMPClient::write(uint8_t c) {
+  if (!_ctx.established) {
+    _last_err = USMP_ERR_NOT_CONNECTED;
+    return 0;
+  }
+  if (_tx_len >= USMP_MAX_DATA_LEN) {
+    flush();
+  }
+  _tx_buf[_tx_len++] = c;
+  if (c == '\n') {
+    flush();
+  }
+  return 1;
+}
+
+size_t USMPClient::write(const uint8_t* buffer, size_t size) {
+  if (!buffer || size == 0) return 0;
+  if (!_ctx.established) {
+    _last_err = USMP_ERR_NOT_CONNECTED;
+    return 0;
+  }
+
+  size_t written = 0;
+  while (written < size) {
+    if (_tx_len >= USMP_MAX_DATA_LEN) {
+      flush();
+    }
+    size_t space = USMP_MAX_DATA_LEN - _tx_len;
+    size_t to_copy = (size - written < space) ? (size - written) : space;
+
+    const uint8_t* nl = (const uint8_t*)memchr(buffer + written, '\n', to_copy);
+    if (nl) {
+      size_t chunk = (size_t)(nl - (buffer + written)) + 1;
+      memcpy(_tx_buf + _tx_len, buffer + written, chunk);
+      _tx_len += chunk;
+      written += chunk;
+      flush();
+    } else {
+      memcpy(_tx_buf + _tx_len, buffer + written, to_copy);
+      _tx_len += to_copy;
+      written += to_copy;
+      if (_tx_len >= USMP_MAX_DATA_LEN) {
+        flush();
+      }
+    }
+  }
+  return written;
+}
+
+void USMPClient::flush() {
+  if (_tx_len > 0 && _ctx.established) {
+    size_t len = _tx_len;
+    _tx_len = 0;
+    _last_err = usmp_send(&_ctx, _tx_buf, (uint16_t)len);
+    if (_last_err != USMP_OK) {
+      _ctx.established = false;
+      if (_on_disconnect) _on_disconnect();
+    }
+  } else {
+    _tx_len = 0;
+  }
 }
 
 // receive ───────────────────────────────────────────────────────────────────
@@ -385,6 +461,7 @@ bool USMPClient::reconnect() {
 }
 
 void USMPClient::close() {
+  _tx_len = 0;
   usmp_close(&_ctx);
   if (_transport.destroy) {
     _transport.destroy(&_transport);

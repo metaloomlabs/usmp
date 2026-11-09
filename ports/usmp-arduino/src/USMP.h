@@ -7,7 +7,7 @@ extern "C" {
 #include "usmp_api.h"
 }
 
-class USMPClient {
+class USMPClient : public Print {
  public:
   explicit USMPClient(const char* psk);
   USMPClient(const char* psk, uint8_t* rx_buffer, size_t rx_buffer_size);
@@ -28,6 +28,13 @@ class USMPClient {
   bool send(const char* str);
   bool send(const String& str);
   bool send(const uint8_t* data, size_t len);
+
+  // Print interface implementation (enables usmp.print() and usmp.println())
+  virtual size_t write(uint8_t c) override;
+  virtual size_t write(const uint8_t* buffer, size_t size) override;
+  virtual void flush() override;
+  virtual int availableForWrite() override { return (int)(USMP_MAX_DATA_LEN - _tx_len); }
+
   bool available();
   String read();
   int read(uint8_t* buf, size_t max_len);
@@ -64,6 +71,8 @@ class USMPClient {
   const uint8_t* _psk_bytes;
   size_t _psk_len;
   usmp_err_t _last_err;
+  uint8_t _tx_buf[USMP_MAX_DATA_LEN];
+  size_t _tx_len;
   usmp_t _ctx;
   usmp_transport_t _transport;
   bool _initialized;

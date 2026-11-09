@@ -55,11 +55,7 @@ static void socket_init(void) {}
 // TCP Transport
 // ─────────────────────────────────────────────────────────────────────────────
 
-typedef struct {
-  int sock;
-  char server_ip[64];
-  int port;
-} posix_tcp_ctx_t;
+typedef usmp_tcp_ctx_t posix_tcp_ctx_t;
 
 static int tcp_dial(posix_tcp_ctx_t* tcp) {
   int sock = (int)socket(AF_INET, SOCK_STREAM, 0);
@@ -154,24 +150,30 @@ static int posix_tcp_available(usmp_transport_t* t) {
   return (ret > 0) ? 1 : 0;
 }
 
+static void posix_tcp_destroy_static(usmp_transport_t* t) {
+  posix_tcp_close(t);
+  t->ctx = NULL;
+}
+
 static void posix_tcp_destroy(usmp_transport_t* t) {
   posix_tcp_close(t);
   free(t->ctx);
   t->ctx = NULL;
 }
 
-int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port) {
+int usmp_transport_tcp_init_static(usmp_transport_t* t, usmp_tcp_ctx_t* tcp,
+                                   const char* server_ip, int port) {
+  if (!t || !tcp || !server_ip) return -1;
   socket_init();
-  posix_tcp_ctx_t* tcp = (posix_tcp_ctx_t*)malloc(sizeof(posix_tcp_ctx_t));
-  if (!tcp) return -1;
 
+  memset(tcp, 0, sizeof(usmp_tcp_ctx_t));
   tcp->sock = -1;
   tcp->port = port;
+  tcp->session_active = false;
   strncpy(tcp->server_ip, server_ip, sizeof(tcp->server_ip) - 1);
   tcp->server_ip[sizeof(tcp->server_ip) - 1] = '\0';
 
   if (tcp_dial(tcp) != 0) {
-    free(tcp);
     return -1;
   }
 
@@ -180,11 +182,25 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
   t->close = posix_tcp_close;
   t->reconnect = posix_tcp_reconnect;
   t->available = posix_tcp_available;
-  t->destroy = posix_tcp_destroy;
+  t->destroy = posix_tcp_destroy_static;
   t->confirm_authenticated = NULL;
   t->set_session_keys = NULL;  // TCP needs no UTACK authentication
   t->ctx = tcp;
 
+  return 0;
+}
+
+int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port) {
+  if (!t || !server_ip) return -1;
+  usmp_tcp_ctx_t* tcp = (usmp_tcp_ctx_t*)malloc(sizeof(usmp_tcp_ctx_t));
+  if (!tcp) return -1;
+
+  if (usmp_transport_tcp_init_static(t, tcp, server_ip, port) != 0) {
+    free(tcp);
+    return -1;
+  }
+
+  t->destroy = posix_tcp_destroy;
   return 0;
 }
 
@@ -200,22 +216,7 @@ int usmp_transport_tcp_init(usmp_transport_t* t, const char* server_ip, int port
 #define UTACK_HEADER_LEN 7
 #define UTACK_MAC_LEN 8
 
-typedef struct {
-  int sock;
-  char server_ip[64];
-  int port;
-  uint8_t rx_buf[USMP_HEADER_SIZE + USMP_MAX_PAYLOAD];
-  int rx_len;
-  uint32_t last_rx_seq;
-  bool last_rx_seq_set;
-  uint8_t last_rx_type;
-  uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
-  uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
-  bool keys_set;
-  uint32_t srtt;
-  uint32_t rttvar;
-  uint32_t rto;
-} posix_udp_ctx_t;
+typedef usmp_udp_ctx_t posix_udp_ctx_t;
 
 // S3: 8-byte truncated HMAC-SHA256 over the 7-byte UTACK header.
 static void utack_mac(const uint8_t* key, const uint8_t* header, uint8_t out[UTACK_MAC_LEN]) {
@@ -484,18 +485,23 @@ static void posix_udp_confirm_authenticated(usmp_transport_t* t, uint32_t seq) {
   udp->last_rx_seq_set = false;
 }
 
+static void posix_udp_destroy_static(usmp_transport_t* t) {
+  posix_udp_close(t);
+  t->ctx = NULL;
+}
+
 static void posix_udp_destroy(usmp_transport_t* t) {
   posix_udp_close(t);
   free(t->ctx);
   t->ctx = NULL;
 }
 
-int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port) {
+int usmp_transport_udp_init_static(usmp_transport_t* t, usmp_udp_ctx_t* udp,
+                                   const char* server_ip, int port) {
+  if (!t || !udp || !server_ip) return -1;
   socket_init();
-  posix_udp_ctx_t* udp = (posix_udp_ctx_t*)malloc(sizeof(posix_udp_ctx_t));
-  if (!udp) return -1;
 
-  memset(udp, 0, sizeof(posix_udp_ctx_t));
+  memset(udp, 0, sizeof(usmp_udp_ctx_t));
   udp->sock = -1;
   udp->port = port;
   udp->srtt = 200;
@@ -505,7 +511,6 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   udp->server_ip[sizeof(udp->server_ip) - 1] = '\0';
 
   if (udp_dial(udp) != 0) {
-    free(udp);
     return -1;
   }
 
@@ -516,8 +521,22 @@ int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port
   t->available = posix_udp_available;
   t->confirm_authenticated = posix_udp_confirm_authenticated;
   t->set_session_keys = posix_udp_set_session_keys;
-  t->destroy = posix_udp_destroy;
+  t->destroy = posix_udp_destroy_static;
   t->ctx = udp;
 
+  return 0;
+}
+
+int usmp_transport_udp_init(usmp_transport_t* t, const char* server_ip, int port) {
+  if (!t || !server_ip) return -1;
+  usmp_udp_ctx_t* udp = (usmp_udp_ctx_t*)malloc(sizeof(usmp_udp_ctx_t));
+  if (!udp) return -1;
+
+  if (usmp_transport_udp_init_static(t, udp, server_ip, port) != 0) {
+    free(udp);
+    return -1;
+  }
+
+  t->destroy = posix_udp_destroy;
   return 0;
 }

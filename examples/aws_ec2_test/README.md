@@ -2,7 +2,7 @@
 
 This guide walks you through setting up a public test server on an **AWS EC2** instance and connecting a local **ESP32** microcontroller (using either the **Arduino IDE** or the native **ESP-IDF** framework) to establish a secure, end-to-end encrypted USMP session over the Internet.
 
-```
+```text
 ┌──────────────────────┐             Public Internet             ┌──────────────────┐
 │ ESP32 Client         │ ──────────────────────────────────────> │  AWS EC2 Server  │
 │ (Arduino or ESP-IDF) │    TCP Port 9000 (AES-GCM-256 Secure)   │ (Python Gateway) │
@@ -39,7 +39,7 @@ Before starting, make sure you have:
 1. An active **AWS Account**.
 2. An **ESP32 development board** connected to your local machine.
 3. Depending on your preferred framework:
-   - **Arduino IDE**: Install the IDE and locate the prepackaged Arduino library zip `usmp-1.0.1-arduino.zip` in the root of this project.
+   - **Arduino IDE**: Install the IDE and locate the prepackaged Arduino library zip `usmp-1.3.0-arduino.zip` in the root of this project.
    - **ESP-IDF**: Install the ESP-IDF toolchain (v5.0+) and make sure `idf.py` is available in your terminal path.
 
 ---
@@ -160,10 +160,10 @@ Choose **one** of the client options below to flash onto your ESP32.
 
 1. Run the local build script to ensure you have the latest offline ZIP library:
    - On Windows: Run `.\scripts\build-arduino-zip.ps1` in PowerShell.
-   - Alternatively, locate the pre-built `usmp-1.0.1-arduino.zip` in the root folder.
+   - Alternatively, locate the pre-built `usmp-1.3.0-arduino.zip` in the root folder.
 2. In the **Arduino IDE**, import the ZIP library:
    - Go to **Sketch** ➔ **Include Library** ➔ **Add .ZIP Library...**
-   - Select the `usmp-1.0.1-arduino.zip` file.
+   - Select the `usmp-1.3.0-arduino.zip` file.
 3. Open the file [arduino.ino](file:///c:/Users/main/codinways/MetaLoom/products/usmp/examples/aws_ec2_test/arduino/arduino.ino) in your Arduino IDE.
 4. Modify the config parameters in the sketch:
    - **`EC2_PUBLIC_IP`**: Put the **Public IPv4 address** of your running EC2 instance.

@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "usmp_frame.h"
 #include "usmp_port.h"
@@ -82,9 +83,12 @@ const char* usmp_get_version(void);
 
 /*
  * Minimum size in bytes required for caller-managed scratchpad memory to execute
- * the handshake with zero heap allocations (512-byte TX frame + 512-byte RX frame).
+ * the handshake with zero heap allocations. Accommodates the handshake FSM context
+ * (mbedTLS ECDH/entropy/DRBG state), alignment padding, and the 1024-byte TX/RX buffers.
+ * Note: mbedTLS ECDH/MPI operations may still allocate from heap internally unless
+ * compiled with MBEDTLS_MEMORY_BUFFER_ALLOC_C.
  */
-#define USMP_HANDSHAKE_SCRATCH_LEN 1024
+#define USMP_HANDSHAKE_SCRATCH_LEN 2048
 
 typedef enum {
   USMP_OK                      =  0,
@@ -141,9 +145,9 @@ typedef struct {
 
   /*
    * Optional caller-provided scratch buffer for zero-heap handshake.
-   * If scratch is non-NULL and scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN (1024),
-   * usmp_handshake() slices it into tx_buf (512) and rx_buf (512) without
-   * calling malloc() or free().
+   * If scratch is non-NULL and scratch_len >= USMP_HANDSHAKE_SCRATCH_LEN (2048),
+   * usmp_handshake() slices it into handshake context and tx/rx buffers without
+   * calling malloc() or calloc().
    */
   uint8_t* scratch;
   size_t scratch_len;
@@ -165,16 +169,44 @@ typedef struct {
    */
   usmp_state_t state;
   void* hs_ctx;
+
+  /*
+   * Error tracking:
+   * last_tx_err: Last error encountered on transmission path (guarded by tx_mutex).
+   * last_rx_err: Last error encountered on receive path (guarded by rx_mutex).
+   * last_err:    Most recent session error code across all operations.
+   */
+  usmp_err_t last_tx_err;
+  usmp_err_t last_rx_err;
+  usmp_err_t last_err;
 } usmp_t;
+
+/**
+ * Initialize a USMP session context to zero.
+ * Must be called (or context must be zero-initialized: usmp_t ctx = {0})
+ * before configuring PSK and calling usmp_connect() / usmp_connect_async().
+ */
+static inline void usmp_init(usmp_t* ctx) {
+  if (ctx) memset(ctx, 0, sizeof(usmp_t));
+}
+
+/**
+ * Retrieve the last recorded error code from the session.
+ */
+static inline usmp_err_t usmp_last_error(const usmp_t* ctx) {
+  return ctx ? ctx->last_err : USMP_ERR_INVALID_ARG;
+}
 
 // Threading ─────────────────────────────────────────────────────────────────
 //
 // A usmp_t session embeds split RTOS mutexes (tx_mutex and rx_mutex). Full-duplex
 // concurrent operations (e.g. one task calling usmp_send while another task calls
-// usmp_recv) are completely non-blocking and thread-safe. Multiple concurrent senders
-// are safely serialized by tx_mutex, preventing tx_seq race conditions and nonce reuse.
-// Rekeying automatically acquires both mutexes in strict hierarchical order (tx_mutex
-// followed by rx_mutex) to prevent deadlocks.
+// usmp_recv) are completely non-blocking and thread-safe for TCP transports.
+// For UDP transports using stop-and-wait ARQ, socket reads and rx buffer state
+// must be serialized by callers or an underlying transport-level lock.
+// Multiple concurrent senders are safely serialized by tx_mutex, preventing tx_seq
+// race conditions and nonce reuse. Rekeying automatically acquires both mutexes
+// in strict hierarchical order (tx_mutex followed by rx_mutex) to prevent deadlocks.
 
 // Connection API ────────────────────────────────────────────────────────────
 

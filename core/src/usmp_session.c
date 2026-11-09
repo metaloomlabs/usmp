@@ -175,10 +175,14 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (!ctx) return USMP_ERR_INVALID_ARG;
 
   if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) {
+    ctx->last_tx_err = USMP_ERR_MUTEX_FAILED;
+    ctx->last_err = USMP_ERR_MUTEX_FAILED;
     return USMP_ERR_MUTEX_FAILED;
   }
 
   if (!ctx->established) {
+    ctx->last_tx_err = USMP_ERR_NOT_CONNECTED;
+    ctx->last_err = USMP_ERR_NOT_CONNECTED;
     usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_NOT_CONNECTED;
   }
@@ -188,12 +192,16 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
   if (num_fragments > (0xFFFFFFFF - ctx->tx_seq)) {
     USMP_LOGE(TAG, "TX sequence overflowed");
     ctx->established = false;
+    ctx->last_tx_err = USMP_ERR_SEQ_EXHAUSTED;
+    ctx->last_err = USMP_ERR_SEQ_EXHAUSTED;
     usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_SEQ_EXHAUSTED;
   }
 
   if (len > USMP_MAX_DATA_LEN * USMP_MAX_FRAMES) {
     USMP_LOGE(TAG, "Payload too large for fragmentation limits");
+    ctx->last_tx_err = USMP_ERR_BUFFER_OVERFLOW;
+    ctx->last_err = USMP_ERR_BUFFER_OVERFLOW;
     usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_BUFFER_OVERFLOW;
   }
@@ -229,6 +237,10 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
     }
   }
 
+  ctx->last_tx_err = ret;
+  if (ret != USMP_OK) {
+    ctx->last_err = ret;
+  }
   usmp_port_mutex_unlock(ctx->tx_mutex);
   return ret;
 }
@@ -236,9 +248,15 @@ usmp_err_t usmp_send(usmp_t* ctx, const uint8_t* data, uint16_t len) {
 int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
   if (!ctx) return -1;
 
-  if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) return -1;
+  if (usmp_port_mutex_lock(ctx->rx_mutex) != 0) {
+    ctx->last_rx_err = USMP_ERR_MUTEX_FAILED;
+    ctx->last_err = USMP_ERR_MUTEX_FAILED;
+    return -1;
+  }
 
   if (!ctx->established) {
+    ctx->last_rx_err = USMP_ERR_NOT_CONNECTED;
+    ctx->last_err = USMP_ERR_NOT_CONNECTED;
     usmp_port_mutex_unlock(ctx->rx_mutex);
     return -1;
   }
@@ -469,6 +487,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
     } else if (pkt.type == USMP_TYPE_BYE) {
       USMP_LOGI(TAG, "BYE received — session closed by peer");
       ctx->established = false;
+      ctx->last_rx_err = USMP_ERR_PEER_CLOSED;
+      ctx->last_err = USMP_ERR_PEER_CLOSED;
       usmp_port_mutex_unlock(ctx->rx_mutex);
       return USMP_ERR_PEER_CLOSED;
     } else if (pkt.type == USMP_TYPE_REKEY) {
@@ -546,6 +566,7 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
       /* Reassembly complete */
       snprintf(_msg, sizeof(_msg), "RX total len=%u frames=%u", bytes_written, frame_count);
       USMP_LOGI(TAG, _msg);
+      ctx->last_rx_err = USMP_OK;
       usmp_port_mutex_unlock(ctx->rx_mutex);
       return bytes_written;
     }
@@ -564,9 +585,15 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len) {
 usmp_err_t usmp_ping(usmp_t* ctx) {
   if (!ctx) return USMP_ERR_INVALID_ARG;
 
-  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) return USMP_ERR_MUTEX_FAILED;
+  if (usmp_port_mutex_lock(ctx->tx_mutex) != 0) {
+    ctx->last_tx_err = USMP_ERR_MUTEX_FAILED;
+    ctx->last_err = USMP_ERR_MUTEX_FAILED;
+    return USMP_ERR_MUTEX_FAILED;
+  }
 
   if (!ctx->established) {
+    ctx->last_tx_err = USMP_ERR_NOT_CONNECTED;
+    ctx->last_err = USMP_ERR_NOT_CONNECTED;
     usmp_port_mutex_unlock(ctx->tx_mutex);
     return USMP_ERR_NOT_CONNECTED;
   }
@@ -577,10 +604,13 @@ usmp_err_t usmp_ping(usmp_t* ctx) {
   if (rc != 0) {
     USMP_LOGE(TAG, "PING send failed");
     ctx->established = false;
+    ctx->last_tx_err = USMP_ERR_TRANSPORT_FAILED;
+    ctx->last_err = USMP_ERR_TRANSPORT_FAILED;
     return USMP_ERR_TRANSPORT_FAILED;
   }
 
   USMP_LOGI(TAG, "PING sent");
+  ctx->last_tx_err = USMP_OK;
   return USMP_OK;
 }
 
