@@ -63,6 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--host",
+        "--bind",
+        "-b",
         default="0.0.0.0",  # noqa: S104
         help="Host interface to bind to (default: 0.0.0.0)",
     )
@@ -179,7 +181,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         asyncio.run(run_server(args, psk_bytes))
     except KeyboardInterrupt:
-        pass
+        sys.stdout.write("\n🛑 Server stopped by user.\n")
+        sys.stdout.flush()
     return 0
 
 

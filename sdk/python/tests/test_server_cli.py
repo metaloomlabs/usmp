@@ -58,6 +58,15 @@ def test_cli_invalid_hex_psk(capsys):
     assert "Invalid hex PSK string" in captured.err
 
 
+def test_cli_bind_flag():
+    parser = build_parser()
+    args1 = parser.parse_args(["--psk", "0123456789abcdef", "-b", "127.0.0.1"])
+    assert args1.host == "127.0.0.1"
+
+    args2 = parser.parse_args(["--psk", "0123456789abcdef", "--bind", "192.168.1.10"])
+    assert args2.host == "192.168.1.10"
+
+
 @pytest.mark.asyncio
 async def test_cli_echo_server_roundtrip():
     psk = b"echo_server_integration_test_psk_32b!"
