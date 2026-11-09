@@ -24,6 +24,9 @@ def test_parse_psk():
     hex_64 = "0" * 64
     assert parse_psk(hex_64) == bytes.fromhex(hex_64)
 
+    # Explicit raw prefix (treats 64-char string as raw ASCII)
+    assert parse_psk(f"raw:{hex_64}") == hex_64.encode("utf-8")
+
     # Invalid hex
     with pytest.raises(ValueError, match="Invalid hex PSK string"):
         parse_psk("hex:not_hex")

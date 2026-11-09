@@ -23,9 +23,11 @@ logger = logging.getLogger("usmp.cli")
 
 
 def parse_psk(psk_arg: str) -> bytes:
-    """Parse PSK from command-line argument (plain string or hex:<bytes>)."""
+    """Parse PSK from command-line argument (plain string, 'raw:<string>', or 'hex:<bytes>')."""
     if not psk_arg:
         return b""
+    if psk_arg.startswith("raw:"):
+        return psk_arg[4:].encode("utf-8")
     if psk_arg.startswith("hex:"):
         try:
             return bytes.fromhex(psk_arg[4:])
@@ -80,7 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
         "-k",
         type=str,
         default="",
-        help="Pre-shared key (raw string or 'hex:<hexbytes>'). Minimum 16 bytes.",
+        help="Pre-shared key (plain string, 'raw:<string>', or 'hex:<hexbytes>'). Minimum 16 bytes.",
     )
     parser.add_argument(
         "--protocol",
