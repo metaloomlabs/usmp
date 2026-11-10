@@ -3,6 +3,7 @@
 
 Set-StrictMode -Off
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 $REPO = (Resolve-Path "$PSScriptRoot\..").Path
 
