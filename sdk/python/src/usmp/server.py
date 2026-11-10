@@ -124,13 +124,13 @@ async def run_server(args: argparse.Namespace, psk_bytes: bytes) -> None:
     @server.on_session
     async def handle_session(session: USMPSession) -> None:
         dev = session.device_id
-        logger.info("🤝 Device connected: %s (session %s)", dev, session.session_id)
+        logger.info("Device connected: %s (session %s)", dev, session.session_id)
         try:
             while session.is_connected:
                 try:
                     data = await session.recv()
                 except ConnectionClosedError:
-                    logger.info("👋 Device %s sent BYE (graceful close)", dev)
+                    logger.info("Device %s sent BYE (graceful close)", dev)
                     break
                 except (USMPError, OSError) as e:
                     logger.warning("Session recv error from %s: %s", dev, e)
@@ -140,9 +140,9 @@ async def run_server(args: argparse.Namespace, psk_bytes: bytes) -> None:
 
                 if args.echo:
                     await session.send(data)
-                    logger.info("📤 [%s] Echoed (%d bytes)", dev, len(data))
+                    logger.info("[%s] Echoed (%d bytes)", dev, len(data))
         finally:
-            logger.info("🔌 Device disconnected: %s", dev)
+            logger.info("Device disconnected: %s", dev)
 
     print_banner(args.host, args.port, args.protocol, args.echo, len(psk_bytes))
     await server.serve()
@@ -183,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         asyncio.run(run_server(args, psk_bytes))
     except KeyboardInterrupt:
-        sys.stdout.write("\n🛑 Server stopped by user.\n")
+        sys.stdout.write("\nServer stopped by user.\n")
         sys.stdout.flush()
     return 0
 
