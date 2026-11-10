@@ -338,7 +338,7 @@ class USMPSession:
 
         tag_str = f" [{tag}]" if tag else ""
         dev = self.device_id
-        msg = f"📩 [{dev}]{tag_str} ({length} bytes): {disp}"
+        msg = f"[{dev}]{tag_str} ({length} bytes): {disp}"
 
         target_stream = stream if stream is not None else sys.stdout
         usmp_logger = logging.getLogger("usmp")

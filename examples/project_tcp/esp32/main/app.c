@@ -77,9 +77,9 @@ void app_main(void) {
       int n = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
       if (n > 0) {
         rx_buf[n] = '\0';
-        ESP_LOGI(TAG, "📩 RX Echoed: %s", (char*)rx_buf);
+        ESP_LOGI(TAG, "RX Echoed: %s", (char*)rx_buf);
       } else if (n == USMP_ERR_PEER_CLOSED) {
-        ESP_LOGW(TAG, "🔌 Peer closed gracefully: %s (%d)", usmp_strerror(n), n);
+        ESP_LOGW(TAG, "Peer closed gracefully: %s (%d)", usmp_strerror(n), n);
       } else if (n < 0) {
         ESP_LOGE(TAG, "Recv error: %s (%d)", usmp_strerror(n), n);
       }
@@ -93,7 +93,7 @@ void app_main(void) {
                (unsigned int)esp_get_free_heap_size());
       err = usmp_send(&ctx, (const uint8_t*)telemetry, strlen(telemetry));
       if (err == 0) {
-        ESP_LOGI(TAG, "📤 TX: %s", telemetry);
+        ESP_LOGI(TAG, "TX: %s", telemetry);
       } else {
         ESP_LOGE(TAG, "TX failed: %s (%d)", usmp_strerror(err), err);
       }

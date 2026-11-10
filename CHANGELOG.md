@@ -32,8 +32,12 @@ Embedded reliability, zero-heap memory architecture, split RTOS concurrency, CoA
 - **Python SDK — Built-in CLI Dev / Echo Server (`python -m usmp.server`, `usmp-server`)**: Added command-line development and test server with ANSI colored logging, interactive startup banner, `--echo` mode for loopback verification, `--generate-psk` 256-bit key generation, and hex-encoded PSK parsing (`hex:<bytes>`). Added `is_connected` and `info` properties to `USMPSession`.
 - **Python SDK — String Transmission, Direct Text Receiving & Payload Inspector (`session.send(str)`, `session.recv_str()`, `session.print()`)**: Enhanced `USMPSession.send()` to natively accept `bytes | str` (automatically encoding `str` as UTF-8). Added `session.recv_str()` for direct string reception. Added `session.print(data, tag=...)` providing rich console payload inspection with timestamps, device ID badges, payload length, and automatic text vs. hex dump formatting integrated with USMP's ANSI logger.
 - **ESP-IDF Port & Core HAL — Zero-Heap Static Transport Initializers (`usmp_transport_tcp_init_static`, `usmp_transport_udp_init_static`)**: Exposed `usmp_tcp_ctx_t` and `usmp_udp_ctx_t` context types in `core/include/usmp_transport.h` along with static initializers accepting caller-managed static/`.bss` memory buffers. Implemented static transport destroy hooks (`destroy_static`) that safely shut down sockets without calling `free()`. Eliminates mandatory dynamic memory (`malloc`) for transports in safety-critical and zero-heap embedded environments (#DX-06).
+- **Build & Tooling — MbedTLS 3.x Assertion & UV Build Upper Bound**: Added minimum version assert in `CMakeLists.txt` enforcing MbedTLS >= 3.0.0 for host builds. Expanded `uv_build` upper bound in `sdk/python/pyproject.toml` to `<0.14.0` for clean build compatibility with modern uv toolchains.
 
-### 🧪 Verification & Core Tests
+---
+
+<details>
+<summary><b>🛠️ Tooling, CI/CD & Developer Experience (Maintainers)</b></summary>
 
 - **Tests — Zero-Heap Static Transport Initialization Suite**: Added `test_static_transport_initialization()` in `core/tests/test_main.c` asserting NULL argument validation guards, struct layout sizing, static context binding, socket creation, and safe static teardown without heap freeing.
 - **Tests — Error Translation & Graceful Teardown Suite**: Added `test_usmp_strerror()` to `core/tests/test_main.c` validating string mapping for all defined error codes and invalid fallback values. Updated `test_bye_on_close()` to verify `USMP_ERR_PEER_CLOSED` return status.
@@ -41,6 +45,10 @@ Embedded reliability, zero-heap memory architecture, split RTOS concurrency, CoA
 - **Tests — Split Mutex Concurrency & Multi-Threaded Serialization Suite**: Added `test_split_mutex_concurrency()` in `core/tests/test_main.c` asserting lock/unlock balance, non-blocking full-duplex send execution while `rx_mutex` is held, safe NULL de-referencing on teardown, and multi-threaded race condition resistance across 4 concurrent threads executing 100 total transmissions with 0 duplicate nonces. Added `_Static_assert` validations for `tx_mutex` and `rx_mutex` struct offsets.
 - **Tests — C Core Handshake & Scratchpad Verification**: Added `test_zero_heap_handshake()` in `core/tests/test_main.c` validating complete mock handshake execution, session key derivation parity, and post-handshake memory zeroization. Added `_Static_assert` validations for `cipher_suite`, `scratch`, and `scratch_len` struct offsets between C Core and Arduino headers.
 - **Tests — CoAP RTT & Watchdog Feed Unit Test Suite**: Added `test_coap_rtt_estimation()` to `core/tests/test_main.c` validating Jacobson/Karn RTT convergence, retransmission ambiguity exclusion, min/max timeout clamping ($100\text{ ms} \dots 5000\text{ ms}$), binary exponential backoff progression, and `usmp_port_wdt_feed()` invocation counters.
+
+</details>
+
+---
 
 ## [1.2.2] — 2026-09-24
 

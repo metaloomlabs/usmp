@@ -17,7 +17,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Locate mbedtls
-find_package(MbedTLS QUIET)
+find_package(MbedTLS 3.0 QUIET)
+if(MbedTLS_FOUND AND MbedTLS_VERSION AND MbedTLS_VERSION VERSION_LESS "3.0.0")
+    message(FATAL_ERROR "USMP requires MbedTLS >= 3.0.0 for constant-time cryptographic operations (found ${MbedTLS_VERSION}).")
+endif()
 if(TARGET MbedTLS::mbedcrypto)
     set(MBEDTLS_LIBRARIES MbedTLS::mbedcrypto)
     if(TARGET MbedTLS::mbedx509)

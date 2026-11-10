@@ -71,7 +71,7 @@ void app_main(void) {
       uint32_t heap = esp_get_free_heap_size();
       snprintf(telemetry, sizeof(telemetry), "ESP32 UDP count=%d uptime=%lums heap=%lu",
                counter, (unsigned long)usmp_port_millis(), (unsigned long)heap);
-      ESP_LOGI(TAG, "📤 TX: %s", telemetry);
+      ESP_LOGI(TAG, "TX: %s", telemetry);
       if (usmp_send(&ctx, (const uint8_t*)telemetry, strlen(telemetry)) != 0) {
         ESP_LOGE(TAG, "Failed to send UDP telemetry: %s", usmp_strerror(ctx.last_err));
       }
@@ -83,7 +83,7 @@ void app_main(void) {
       int n = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
       if (n > 0) {
         rx_buf[n] = '\0';
-        ESP_LOGI(TAG, "📩 RX Echoed: %s", (char*)rx_buf);
+        ESP_LOGI(TAG, "RX Echoed: %s", (char*)rx_buf);
       }
     }
 
