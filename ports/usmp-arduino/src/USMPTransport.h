@@ -8,6 +8,7 @@
 extern "C" {
 #endif
 #include "usmp_frame.h"
+#include "usmp_port.h"
 #include "usmp_transport.h"
 
 #ifdef __cplusplus
@@ -46,7 +47,7 @@ struct USMPArduinoTcpCtx {
   WiFiClient client;
   char host[64];
   uint16_t port;
-  bool session_active;  // false during handshake (recv unbounded), true once established
+  bool session_active;  // false during handshake (uses USMP_HANDSHAKE_RECV_TIMEOUT_MS), true once established
 };
 
 // TCP transport factory ─────────────────────────────────────────────────────
@@ -62,6 +63,7 @@ class USMPTCPTransport : public USMPTransportBase {
   }
 
   bool init(usmp_transport_t* t) const;
+  bool init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx) const;
 };
 
 // Internal UDP context ──────────────────────────────────────────────────────
@@ -77,6 +79,11 @@ struct USMPArduinoUdpCtx {
   uint8_t tx_key[32];  // S3: authenticates ACKs we receive (peer signs with its rx_key)
   uint8_t rx_key[32];  // S3: signs ACKs we send for frames we received
   bool keys_set;
+
+  // RFC 7252 (CoAP) / Jacobson-Karn RTT estimation state
+  uint32_t srtt;    // Smoothed Round-Trip Time in milliseconds
+  uint32_t rttvar;  // RTT Variation in milliseconds
+  uint32_t rto;     // Retransmission Timeout in milliseconds
 };
 
 // UDP transport factory ─────────────────────────────────────────────────────
@@ -90,6 +97,7 @@ class USMPUDPTransport : public USMPTransportBase {
   }
 
   bool init(usmp_transport_t* t) const;
+  bool init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx) const;
 };
 
 // Ergonomic namespace: USMP::TCP("ip", port).wifi("ssid", "pass")

@@ -43,11 +43,19 @@ typedef usmp_t arduino_usmp_t;
 #include "usmp.h"
 #endif
 
+#include "usmp_transport.h"
 #include "usmp_crypto.h"
 #include "usmp_frame.h"
+#include "usmp_handshake.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/ecdh.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/hkdf.h"
+#include "mbedtls/md.h"
+#include "mbedtls/platform_util.h"
 
 // Assert layout compatibility between core and Arduino usmp_t structures (A1)
-// All 13 fields must have identical offsets to ensure binary compatibility.
+// All fields must have identical offsets to ensure binary compatibility.
 _Static_assert(sizeof(arduino_usmp_t) == sizeof(usmp_t),
                "usmp_t size mismatch between Core and Arduino!");
 _Static_assert(offsetof(arduino_usmp_t, device_id) == offsetof(usmp_t, device_id),
@@ -72,9 +80,23 @@ _Static_assert(offsetof(arduino_usmp_t, last_tx_ms) == offsetof(usmp_t, last_tx_
                "last_tx_ms offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, rx_window_bitmap) == offsetof(usmp_t, rx_window_bitmap),
                "rx_window_bitmap offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, cipher_suite) == offsetof(usmp_t, cipher_suite),
+               "cipher_suite offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, psk) == offsetof(usmp_t, psk), "psk offset mismatch!");
 _Static_assert(offsetof(arduino_usmp_t, psk_len) == offsetof(usmp_t, psk_len),
                "psk_len offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, scratch) == offsetof(usmp_t, scratch),
+               "scratch offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, scratch_len) == offsetof(usmp_t, scratch_len),
+               "scratch_len offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, tx_mutex) == offsetof(usmp_t, tx_mutex),
+               "tx_mutex offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, rx_mutex) == offsetof(usmp_t, rx_mutex),
+               "rx_mutex offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, state) == offsetof(usmp_t, state),
+               "state offset mismatch!");
+_Static_assert(offsetof(arduino_usmp_t, hs_ctx) == offsetof(usmp_t, hs_ctx),
+               "hs_ctx offset mismatch!");
 
 // Forward declaration from test_golden.c
 void test_golden(void);
@@ -282,6 +304,41 @@ void test_malformed_frames(void) {
     // Present only the header (cutting off the payload entirely)
     assert(usmp_parse_packet(frame, USMP_HEADER_SIZE, &pkt) != 0);
     printf("  - Short payload rejected\n");
+  }
+
+  // 6. Early rejection: corrupted payload does not overwrite destination payload buffer
+  {
+    usmp_packet_t corrupt_frame;
+    memset(&corrupt_frame, 0, sizeof(corrupt_frame));
+    corrupt_frame.magic = USMP_MAGIC;
+    corrupt_frame.version = USMP_VERSION;
+    corrupt_frame.type = USMP_TYPE_DATA;
+    corrupt_frame.seq = 1;
+    corrupt_frame.length = 4;
+    corrupt_frame.payload[0] = 0xDE;
+    corrupt_frame.payload[1] = 0xAD;
+    corrupt_frame.payload[2] = 0xBE;
+    corrupt_frame.payload[3] = 0xEF;
+
+    uint8_t frame[USMP_HEADER_SIZE + 4];
+    uint16_t frame_len = 0;
+    usmp_build_packet(&corrupt_frame, frame, &frame_len);
+
+    // Corrupt payload byte on the wire
+    frame[USMP_HEADER_SIZE] ^= 0xFF;
+
+    // Pre-populate target packet payload with sentinel pattern
+    usmp_packet_t target_pkt;
+    memset(target_pkt.payload, 0x5A, sizeof(target_pkt.payload));
+
+    int ret = usmp_parse_packet(frame, (int)frame_len, &target_pkt);
+    assert(ret != 0);
+    // Ensure target_pkt.payload was NOT touched/polluted by memcpy
+    assert(target_pkt.payload[0] == 0x5A);
+    assert(target_pkt.payload[1] == 0x5A);
+    assert(target_pkt.payload[2] == 0x5A);
+    assert(target_pkt.payload[3] == 0x5A);
+    printf("  - Corrupted packet rejected without polluting destination payload\n");
   }
 
   printf("[TEST] Malformed frame rejection tests passed!\n");
@@ -553,14 +610,42 @@ void test_bye_on_close(void) {
   assert(loopback.buffer[before + 3] == USMP_TYPE_BYE);
   assert(client.established == false);
 
-  // The peer decodes it as a peer-initiated session close (usmp_recv → -1).
+  // The peer decodes it as a peer-initiated session close (usmp_recv → USMP_ERR_PEER_CLOSED).
   uint8_t recv_buf[64];
   int r = usmp_recv(&server, recv_buf, sizeof(recv_buf));
-  assert(r == -1);
+  assert(r == USMP_ERR_PEER_CLOSED);
   assert(server.established == false);
 
   printf("  - usmp_close emits a BYE the peer decodes as session close\n");
   printf("[TEST] BYE-on-close test passed!\n");
+}
+
+void test_usmp_strerror(void) {
+  printf("[TEST] Running usmp_strerror tests...\n");
+  assert(strcmp(usmp_strerror(USMP_OK), "Success") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_INVALID_ARG), "Invalid argument") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_TRANSPORT_FAILED), "Transport I/O failed") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_AUTH_FAILED), "Authentication failed (bad PSK or corrupted handshake)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_TIMEOUT), "Operation timed out") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_REPLAY_DETECTED), "Replay attack detected or duplicate sequence") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_BUFFER_OVERFLOW), "Buffer overflow or payload exceeds capacity") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_SEQ_EXHAUSTED), "Sequence numbers exhausted (rekey required)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_CRYPTO_FAILED), "Cryptographic operation failed (tag mismatch or corrupted ciphertext)") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_NOT_CONNECTED), "Session is not connected or established") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_MUTEX_FAILED), "RTOS mutex lock or acquisition failed") == 0);
+  assert(strcmp(usmp_strerror(USMP_ERR_PEER_CLOSED), "Session closed gracefully by remote peer") == 0);
+  assert(strcmp(usmp_strerror((usmp_err_t)-999), "Unknown USMP error") == 0);
+  printf("  - All error strings validated\n");
+
+  // Validate context-bound error tracking
+  usmp_t ctx = {0};
+  ctx.last_err = USMP_ERR_TRANSPORT_FAILED;
+  assert(usmp_last_error(&ctx) == USMP_ERR_TRANSPORT_FAILED);
+  assert(strcmp(usmp_strerror(ctx.last_err), "Transport I/O failed") == 0);
+  assert(usmp_last_error(NULL) == USMP_ERR_INVALID_ARG);
+  printf("  - Context error fields validated\n");
+
+  printf("[TEST] usmp_strerror tests passed!\n");
 }
 
 extern char g_last_log_level;
@@ -694,6 +779,663 @@ static void test_chacha20_poly1305(void) {
   printf("  - ChaCha20-Poly1305 test passed!\n");
 }
 
+typedef struct {
+  mbedtls_ecdh_context srv_ecdh;
+  mbedtls_entropy_context entropy;
+  mbedtls_ctr_drbg_context ctr_drbg;
+  const uint8_t* psk;
+  size_t psk_len;
+  uint8_t server_nonce[USMP_NONCE_LEN];
+  uint8_t server_pub[32];
+  uint8_t client_pub[32];
+  uint8_t client_device_id[USMP_DEVICE_ID_LEN];
+  uint8_t session_id[USMP_SESSION_ID_LEN];
+  uint8_t srv_tx_key[32];
+  uint8_t srv_rx_key[32];
+  uint8_t rx_queue[512];
+  size_t rx_queue_len;
+  size_t rx_queue_pos;
+  int step;
+} mock_hs_server_t;
+
+static int mock_hs_entropy(void* data, unsigned char* output, size_t len, size_t* olen) {
+  (void)data;
+  for (size_t i = 0; i < len; i++) {
+    output[i] = (unsigned char)(rand() & 0xFF);
+  }
+  *olen = len;
+  return 0;
+}
+
+static int mock_hs_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  usmp_packet_t pkt;
+  if (usmp_parse_packet((uint8_t*)(uintptr_t)data, (int)len, &pkt) != 0) return -1;
+
+  if (pkt.type == USMP_TYPE_HELLO) {
+    srv->step = 1;
+    memcpy(srv->client_device_id, pkt.payload, USMP_DEVICE_ID_LEN);
+    memcpy(srv->client_pub, pkt.payload + USMP_DEVICE_ID_LEN, 32);
+
+    mbedtls_ecdh_init(&srv->srv_ecdh);
+    mbedtls_entropy_init(&srv->entropy);
+    mbedtls_ctr_drbg_init(&srv->ctr_drbg);
+    mbedtls_entropy_add_source(&srv->entropy, mock_hs_entropy, NULL, 32, MBEDTLS_ENTROPY_SOURCE_STRONG);
+    mbedtls_ctr_drbg_seed(&srv->ctr_drbg, mbedtls_entropy_func, &srv->entropy,
+                          (const unsigned char*)"srv-rng", 7);
+    mbedtls_ecdh_setup(&srv->srv_ecdh, MBEDTLS_ECP_DP_CURVE25519);
+
+    uint8_t srv_pub_buf[65];
+    size_t srv_pub_len = 0;
+    mbedtls_ecdh_make_public(&srv->srv_ecdh, &srv_pub_len, srv_pub_buf, sizeof(srv_pub_buf),
+                             mbedtls_ctr_drbg_random, &srv->ctr_drbg);
+    memcpy(srv->server_pub, srv_pub_buf + (srv_pub_len - 32), 32);
+
+    uint8_t peer_buf[33];
+    peer_buf[0] = 32;
+    memcpy(peer_buf + 1, srv->client_pub, 32);
+    mbedtls_ecdh_read_public(&srv->srv_ecdh, peer_buf, sizeof(peer_buf));
+
+    uint8_t shared_secret[32];
+    size_t shared_len = 0;
+    mbedtls_ecdh_calc_secret(&srv->srv_ecdh, &shared_len, shared_secret, sizeof(shared_secret),
+                             mbedtls_ctr_drbg_random, &srv->ctr_drbg);
+
+    memset(srv->server_nonce, 0x5A, USMP_NONCE_LEN);
+
+    const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+    uint8_t info[7 + 32 + 32];
+    memcpy(info, "usmp-v2", 7);
+    memcpy(info + 7, srv->client_pub, 32);
+    memcpy(info + 7 + 32, srv->server_pub, 32);
+
+    uint8_t key_material[64];
+    mbedtls_hkdf(md, srv->server_nonce, USMP_NONCE_LEN, shared_secret, shared_len,
+                 info, sizeof(info), key_material, sizeof(key_material));
+    memcpy(srv->srv_rx_key, key_material, 32);       // client tx is server rx
+    memcpy(srv->srv_tx_key, key_material + 32, 32);  // client rx is server tx
+    mbedtls_platform_zeroize(key_material, sizeof(key_material));
+    mbedtls_platform_zeroize(shared_secret, sizeof(shared_secret));
+
+    usmp_packet_t chal = {0};
+    chal.magic = USMP_MAGIC;
+    chal.version = USMP_VERSION;
+    chal.type = USMP_TYPE_CHALLENGE;
+    chal.seq = 1;
+    chal.length = USMP_NONCE_LEN + 32;
+    memcpy(chal.payload, srv->server_nonce, USMP_NONCE_LEN);
+    memcpy(chal.payload + USMP_NONCE_LEN, srv->server_pub, 32);
+
+    uint16_t out_len = 0;
+    usmp_build_packet(&chal, srv->rx_queue, &out_len);
+    srv->rx_queue_len = out_len;
+    srv->rx_queue_pos = 0;
+    return 0;
+  }
+
+  if (pkt.type == USMP_TYPE_HELLO_ACK) {
+    srv->step = 2;
+    const mbedtls_md_info_t* md = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
+
+    uint8_t input_c[4 + 32 + 6 + 32 + 32];
+    input_c[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input_c[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input_c[2] = USMP_VERSION;
+    input_c[3] = USMP_TYPE_HELLO_ACK;
+    memcpy(input_c + 4, srv->server_nonce, 32);
+    memcpy(input_c + 36, srv->client_device_id, 6);
+    memcpy(input_c + 42, srv->client_pub, 32);
+    memcpy(input_c + 74, srv->server_pub, 32);
+
+    uint8_t expected_c_hmac[32];
+    mbedtls_md_hmac(md, srv->psk, srv->psk_len, input_c, sizeof(input_c), expected_c_hmac);
+    assert(memcmp(pkt.payload, expected_c_hmac, 32) == 0);
+
+    memset(srv->session_id, 0x77, USMP_SESSION_ID_LEN);
+    uint8_t input_s[4 + 32 + 16 + 32 + 32];
+    input_s[0] = (uint8_t)(USMP_MAGIC & 0xFF);
+    input_s[1] = (uint8_t)((USMP_MAGIC >> 8) & 0xFF);
+    input_s[2] = USMP_VERSION;
+    input_s[3] = USMP_TYPE_SESSION_OK;
+    memcpy(input_s + 4, srv->server_nonce, 32);
+    memcpy(input_s + 36, srv->session_id, 16);
+    memcpy(input_s + 52, srv->client_pub, 32);
+    memcpy(input_s + 84, srv->server_pub, 32);
+
+    uint8_t srv_hmac[32];
+    mbedtls_md_hmac(md, srv->psk, srv->psk_len, input_s, sizeof(input_s), srv_hmac);
+
+    usmp_packet_t ok_pkt = {0};
+    ok_pkt.magic = USMP_MAGIC;
+    ok_pkt.version = USMP_VERSION;
+    ok_pkt.type = USMP_TYPE_SESSION_OK;
+    ok_pkt.seq = 3;
+    ok_pkt.length = USMP_SESSION_ID_LEN + 32;
+    memcpy(ok_pkt.payload, srv->session_id, USMP_SESSION_ID_LEN);
+    memcpy(ok_pkt.payload + USMP_SESSION_ID_LEN, srv_hmac, 32);
+
+    uint16_t out_len = 0;
+    usmp_build_packet(&ok_pkt, srv->rx_queue, &out_len);
+    srv->rx_queue_len = out_len;
+    srv->rx_queue_pos = 0;
+    return 0;
+  }
+
+  return -1;
+}
+
+static int mock_hs_recv(usmp_transport_t* t, uint8_t* buf, size_t max_len) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  if (srv->rx_queue_len == 0 || srv->rx_queue_pos >= srv->rx_queue_len) return -1;
+  size_t avail = srv->rx_queue_len - srv->rx_queue_pos;
+  if (avail > max_len) return -1;
+  memcpy(buf, srv->rx_queue + srv->rx_queue_pos, avail);
+  srv->rx_queue_pos += avail;
+  return (int)avail;
+}
+
+static int mock_hs_available(usmp_transport_t* t) {
+  mock_hs_server_t* srv = (mock_hs_server_t*)t->ctx;
+  if (!srv || srv->rx_queue_len == 0 || srv->rx_queue_pos >= srv->rx_queue_len) return 0;
+  return (int)(srv->rx_queue_len - srv->rx_queue_pos);
+}
+
+static int mock_hs_reconnect(usmp_transport_t* t) {
+  (void)t;
+  return 0;
+}
+
+static void test_zero_heap_handshake(void) {
+  printf("Running zero-heap handshake test...\n");
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
+
+  mock_hs_server_t srv = {0};
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  usmp_transport_t transport = {0};
+  transport.send = mock_hs_send;
+  transport.recv = mock_hs_recv;
+  transport.ctx = &srv;
+
+  uint8_t scratch[USMP_HANDSHAKE_SCRATCH_LEN];
+  memset(scratch, 0xEE, sizeof(scratch));
+
+  usmp_t session = {0};
+  session.psk = psk;
+  session.psk_len = sizeof(psk);
+  session.scratch = scratch;
+  session.scratch_len = sizeof(scratch);
+
+  int ret = usmp_handshake(&transport, &session);
+  assert(ret == USMP_OK);
+  assert(session.established == true);
+  assert(memcmp(session.tx_key, srv.srv_rx_key, 32) == 0);
+  assert(memcmp(session.rx_key, srv.srv_tx_key, 32) == 0);
+
+  // Validate that scratchpad buffers were wiped (zeroized) upon completion
+  uint8_t zero_block[USMP_HANDSHAKE_SCRATCH_LEN] = {0};
+  assert(memcmp(scratch, zero_block, sizeof(scratch)) == 0);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  // Test usmp_connect propagation of scratchpad
+  memset(&srv, 0, sizeof(srv));
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+  memset(scratch, 0xCC, sizeof(scratch));
+
+  usmp_t client_ctx = {0};
+  client_ctx.psk = psk;
+  client_ctx.psk_len = sizeof(psk);
+  client_ctx.scratch = scratch;
+  client_ctx.scratch_len = sizeof(scratch);
+
+  ret = usmp_connect(&client_ctx, &transport);
+  assert(ret == USMP_OK);
+  assert(client_ctx.established == true);
+  assert(client_ctx.scratch == scratch);
+  assert(client_ctx.scratch_len == sizeof(scratch));
+  assert(memcmp(scratch, zero_block, sizeof(scratch)) == 0);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  printf("  - Zero-heap handshake test passed!\n");
+}
+
+static void test_async_handshake_fsm(void) {
+  printf("Running async non-blocking handshake FSM tests...\n");
+  const uint8_t psk[16] = {'u', 's', 'm', 'p', '-', 't', 'e', 's', 't', '-', 'p', 's', 'k', '-', '1', '6'};
+
+  mock_hs_server_t srv = {0};
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  usmp_transport_t transport = {0};
+  transport.send = mock_hs_send;
+  transport.recv = mock_hs_recv;
+  transport.available = mock_hs_available;
+  transport.reconnect = mock_hs_reconnect;
+  transport.ctx = &srv;
+
+  usmp_t session = {0};
+  session.psk = psk;
+  session.psk_len = sizeof(psk);
+
+  // 1. Initial connect async
+  usmp_err_t err = usmp_connect_async(&session, &transport);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+  assert(session.established == false);
+  assert(session.hs_ctx != NULL);
+  assert(usmp_get_state(&session) == USMP_STATE_AWAITING_CHALLENGE);
+
+  // At this point, HELLO was sent to mock server, and mock server generated CHALLENGE in rx_queue
+  // Test non-blocking tick: if we simulate no data available yet
+  size_t saved_len = srv.rx_queue_len;
+  srv.rx_queue_len = 0;  // temporarily hide incoming packet
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+
+  // Restore incoming packet (CHALLENGE)
+  srv.rx_queue_len = saved_len;
+
+  // 2. Next step consumes CHALLENGE, computes ECDH, and sends HELLO_ACK
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_SESSION_OK);
+  assert(usmp_get_state(&session) == USMP_STATE_AWAITING_SESSION_OK);
+
+  // 3. Next step consumes SESSION_OK, verifies server HMAC, and finishes handshake
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_ESTABLISHED);
+  assert(session.established == true);
+  assert(session.hs_ctx == NULL);
+  assert(memcmp(session.tx_key, srv.srv_rx_key, 32) == 0);
+  assert(memcmp(session.rx_key, srv.srv_tx_key, 32) == 0);
+
+  // 4. Stepping an established session is healthy and non-blocking
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+
+  // 5. Reconnect async resets session and restarts handshake FSM
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+  memset(&srv, 0, sizeof(srv));
+  srv.psk = psk;
+  srv.psk_len = sizeof(psk);
+
+  err = usmp_reconnect_async(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_CHALLENGE);
+  assert(session.established == false);
+  assert(session.hs_ctx != NULL);
+
+  // Complete reconnected handshake step-by-step
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_AWAITING_SESSION_OK);
+
+  err = usmp_step(&session);
+  assert(err == USMP_OK);
+  assert(session.state == USMP_STATE_ESTABLISHED);
+  assert(session.established == true);
+  assert(session.hs_ctx == NULL);
+
+  // 6. Close session transitions state to IDLE
+  usmp_close(&session);
+  assert(session.state == USMP_STATE_IDLE);
+  assert(session.established == false);
+
+  mbedtls_ecdh_free(&srv.srv_ecdh);
+  mbedtls_entropy_free(&srv.entropy);
+  mbedtls_ctr_drbg_free(&srv.ctr_drbg);
+
+  printf("  - Async non-blocking handshake FSM tests passed!\n");
+}
+
+extern uint32_t usmp_test_get_wdt_feed_count(void);
+extern void usmp_test_reset_wdt_feed_count(void);
+
+extern uint32_t usmp_test_get_mutex_lock_count(void);
+extern uint32_t usmp_test_get_mutex_unlock_count(void);
+extern void usmp_test_reset_mutex_counts(void);
+
+typedef struct {
+  uint32_t srtt;
+  uint32_t rttvar;
+  uint32_t rto;
+} test_rtt_ctx_t;
+
+static void update_rtt(test_rtt_ctx_t* ctx, uint32_t sample, int attempt) {
+  if (attempt == 0) {
+    if (sample == 0) sample = 1;
+    if (ctx->srtt == 0) {
+      ctx->srtt = sample;
+      ctx->rttvar = sample / 2;
+    } else {
+      int32_t delta = (int32_t)sample - (int32_t)ctx->srtt;
+      int32_t abs_delta = delta < 0 ? -delta : delta;
+      ctx->rttvar = (uint32_t)((int32_t)ctx->rttvar + (abs_delta - (int32_t)ctx->rttvar) / 4);
+      ctx->srtt = (uint32_t)((int32_t)ctx->srtt + delta / 8);
+    }
+    uint32_t new_rto = ctx->srtt + 4 * ctx->rttvar;
+    if (new_rto < 100) new_rto = 100;
+    if (new_rto > 5000) new_rto = 5000;
+    ctx->rto = new_rto;
+  }
+}
+
+static uint32_t compute_backoff_timeout(uint32_t base_rto, int attempt) {
+  if (base_rto < 100) base_rto = 100;
+  if (base_rto > 5000) base_rto = 5000;
+  uint32_t timeout_ms = base_rto * (1U << attempt);
+  if (timeout_ms > 5000) timeout_ms = 5000;
+  if (timeout_ms < 100) timeout_ms = 100;
+  return timeout_ms;
+}
+
+static void test_coap_rtt_estimation(void) {
+  printf("Running CoAP RTT estimation and WDT guard tests...\n");
+
+  test_rtt_ctx_t ctx = {
+      .srtt = 200,
+      .rttvar = 100,
+      .rto = 500,
+  };
+
+  // 1. Initial State
+  assert(ctx.srtt == 200);
+  assert(ctx.rttvar == 100);
+  assert(ctx.rto == 500);
+
+  // 2. High latency sample (400 ms on attempt 0)
+  update_rtt(&ctx, 400, 0);
+  // delta = 400 - 200 = 200
+  // rttvar = 100 + (200 - 100)/4 = 125
+  // srtt = 200 + 200/8 = 225
+  // rto = 225 + 4 * 125 = 725
+  assert(ctx.srtt == 225);
+  assert(ctx.rttvar == 125);
+  assert(ctx.rto == 725);
+
+  // 3. Karn's Algorithm: retransmitted frames (attempt > 0) MUST NOT update RTT
+  uint32_t prev_srtt = ctx.srtt;
+  uint32_t prev_rttvar = ctx.rttvar;
+  uint32_t prev_rto = ctx.rto;
+  update_rtt(&ctx, 900, 1);  // attempt 1 (retry)
+  assert(ctx.srtt == prev_srtt);
+  assert(ctx.rttvar == prev_rttvar);
+  assert(ctx.rto == prev_rto);
+
+  update_rtt(&ctx, 10, 2);  // attempt 2 (retry)
+  assert(ctx.srtt == prev_srtt);
+  assert(ctx.rttvar == prev_rttvar);
+  assert(ctx.rto == prev_rto);
+
+  // 4. Low latency sample (50 ms on attempt 0)
+  update_rtt(&ctx, 50, 0);
+  // delta = 50 - 225 = -175, abs_delta = 175
+  // rttvar = 125 + (175 - 125)/4 = 137
+  // srtt = 225 + (-175)/8 = 225 - 21 = 204
+  // rto = 204 + 4 * 137 = 752
+  assert(ctx.srtt == 204);
+  assert(ctx.rttvar == 137);
+  assert(ctx.rto == 752);
+
+  // 5. Binary Exponential Backoff Progression
+  assert(compute_backoff_timeout(500, 0) == 500);
+  assert(compute_backoff_timeout(500, 1) == 1000);
+  assert(compute_backoff_timeout(500, 2) == 2000);
+  assert(compute_backoff_timeout(500, 3) == 4000);
+  assert(compute_backoff_timeout(500, 4) == 5000);  // 8000 clamped to 5000 max
+
+  // 6. Minimum & Maximum Clamping Bounds
+  assert(compute_backoff_timeout(10, 0) == 100);    // clamped to 100ms min
+  assert(compute_backoff_timeout(9999, 0) == 5000); // clamped to 5000ms max
+
+  // Drive RTT down with repeated low samples
+  for (int i = 0; i < 50; i++) {
+    update_rtt(&ctx, 1, 0);
+  }
+  assert(ctx.rto >= 100);  // Min RTO clamp
+
+  // Drive RTT up with massive samples
+  for (int i = 0; i < 50; i++) {
+    update_rtt(&ctx, 6000, 0);
+  }
+  assert(ctx.rto <= 5000);  // Max RTO clamp
+
+  // 7. Watchdog Timer (WDT) Feed Hook Verification
+  usmp_test_reset_wdt_feed_count();
+  assert(usmp_test_get_wdt_feed_count() == 0);
+  for (int i = 0; i < 15; i++) {
+    usmp_port_wdt_feed();
+  }
+  assert(usmp_test_get_wdt_feed_count() == 15);
+
+  printf("  - CoAP RTT estimation and WDT guard tests passed!\n");
+}
+
+#ifdef _WIN32
+#include <windows.h>
+typedef HANDLE test_thread_t;
+typedef DWORD(WINAPI* test_thread_fn_t)(LPVOID);
+static inline int test_thread_create(test_thread_t* t, test_thread_fn_t fn, void* arg) {
+  *t = CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)fn, arg, 0, NULL);
+  return (*t != NULL) ? 0 : -1;
+}
+static inline void test_thread_join(test_thread_t t) {
+  WaitForSingleObject(t, INFINITE);
+  CloseHandle(t);
+}
+#else
+#include <pthread.h>
+typedef pthread_t test_thread_t;
+typedef void* (*test_thread_fn_t)(void*);
+static inline int test_thread_create(test_thread_t* t, test_thread_fn_t fn, void* arg) {
+  return pthread_create(t, NULL, fn, arg);
+}
+static inline void test_thread_join(test_thread_t t) {
+  pthread_join(t, NULL);
+}
+#endif
+
+#define CONCURRENT_SENDS_PER_THREAD 25
+#define CONCURRENT_THREAD_COUNT 4
+#define TOTAL_CONCURRENT_SENDS (CONCURRENT_SENDS_PER_THREAD * CONCURRENT_THREAD_COUNT)
+
+typedef struct {
+  usmp_t* session;
+  int thread_id;
+} concurrent_worker_arg_t;
+
+static uint32_t g_concurrent_seen_seqs[TOTAL_CONCURRENT_SENDS];
+#ifdef _WIN32
+static volatile LONG g_concurrent_seen_count = 0;
+#else
+static volatile long g_concurrent_seen_count = 0;
+#endif
+
+static int concurrent_mock_send(usmp_transport_t* t, const uint8_t* data, size_t len) {
+  (void)t;
+  usmp_packet_t pkt;
+  if (usmp_parse_packet((uint8_t*)data, (int)len, &pkt) == 0) {
+    if (pkt.type == USMP_TYPE_DATA || pkt.type == USMP_TYPE_DATA_FRAG) {
+#ifdef _WIN32
+      LONG idx = InterlockedIncrement(&g_concurrent_seen_count) - 1;
+#else
+      long idx = __sync_fetch_and_add(&g_concurrent_seen_count, 1);
+#endif
+      if (idx < TOTAL_CONCURRENT_SENDS) {
+        g_concurrent_seen_seqs[idx] = pkt.seq;
+      }
+    }
+  }
+  return 0;
+}
+
+#ifdef _WIN32
+static DWORD WINAPI __attribute__((force_align_arg_pointer)) concurrent_send_worker(LPVOID param)
+#else
+static void* concurrent_send_worker(void* param)
+#endif
+{
+  concurrent_worker_arg_t* arg = (concurrent_worker_arg_t*)param;
+  for (int i = 0; i < CONCURRENT_SENDS_PER_THREAD; i++) {
+    char payload[32];
+    snprintf(payload, sizeof(payload), "Worker %d Msg %d", arg->thread_id, i);
+    usmp_err_t err = usmp_send(arg->session, (const uint8_t*)payload, (uint16_t)strlen(payload));
+    assert(err == USMP_OK);
+  }
+#ifdef _WIN32
+  return 0;
+#else
+  return NULL;
+#endif
+}
+
+static void test_split_mutex_concurrency(void) {
+  printf("Running split RTOS mutex architecture and concurrency tests...\n");
+
+  // 1. Mutex lifecycle & basic lock balance verification
+  usmp_test_reset_mutex_counts();
+  assert(usmp_test_get_mutex_lock_count() == 0);
+  assert(usmp_test_get_mutex_unlock_count() == 0);
+
+  usmp_t session = {0};
+  int ret_m = usmp_port_mutex_create(&session.tx_mutex);
+  assert(ret_m == 0 && session.tx_mutex != NULL);
+  ret_m = usmp_port_mutex_create(&session.rx_mutex);
+  assert(ret_m == 0 && session.rx_mutex != NULL);
+
+  session.established = true;
+  session.transport.send = concurrent_mock_send;
+  memset(session.session_id, 0x42, 16);
+  memset(session.tx_key, 0xAA, 32);
+  memset(session.rx_key, 0xBB, 32);
+
+  // Single send lock/unlock balance
+  const char* msg = "Single send test";
+  usmp_err_t send_err = usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg));
+  assert(send_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 1);
+  assert(usmp_test_get_mutex_unlock_count() == 1);
+
+  // Ping lock/unlock balance
+  usmp_err_t ping_err = usmp_ping(&session);
+  assert(ping_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 2);
+  assert(usmp_test_get_mutex_unlock_count() == 2);
+
+  // Rekey hierarchical locking: acquires tx_mutex then rx_mutex
+  usmp_err_t rekey_err = usmp_rekey(&session);
+  assert(rekey_err == USMP_OK);
+  assert(usmp_test_get_mutex_lock_count() == 4);
+  assert(usmp_test_get_mutex_unlock_count() == 4);
+
+  // 2. Full-duplex non-blocking send while rx_mutex is held
+  // In a split mutex design, an rx task holding rx_mutex must NOT block usmp_send()
+  assert(usmp_port_mutex_lock(session.rx_mutex) == 0);
+  // While rx_mutex is held by "rx task", usmp_send() should proceed freely
+  send_err = usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg));
+  assert(send_err == USMP_OK);
+  assert(usmp_port_mutex_unlock(session.rx_mutex) == 0);
+
+  // 3. Multi-threaded Concurrent Senders Serialization & Nonce Reuse Elimination
+  g_concurrent_seen_count = 0;
+  memset(g_concurrent_seen_seqs, 0xFF, sizeof(g_concurrent_seen_seqs));
+  session.tx_seq = 0;
+
+  test_thread_t threads[CONCURRENT_THREAD_COUNT];
+  concurrent_worker_arg_t args[CONCURRENT_THREAD_COUNT];
+
+  for (int i = 0; i < CONCURRENT_THREAD_COUNT; i++) {
+    args[i].session = &session;
+    args[i].thread_id = i;
+    int cr = test_thread_create(&threads[i], concurrent_send_worker, &args[i]);
+    assert(cr == 0);
+  }
+
+  for (int i = 0; i < CONCURRENT_THREAD_COUNT; i++) {
+    test_thread_join(threads[i]);
+  }
+
+  assert(g_concurrent_seen_count == TOTAL_CONCURRENT_SENDS);
+  assert(session.tx_seq == TOTAL_CONCURRENT_SENDS);
+
+  // Verify all sequence numbers [0 .. TOTAL_CONCURRENT_SENDS - 1] were emitted exactly once (no duplicates/collisions)
+  bool seq_present[TOTAL_CONCURRENT_SENDS] = {false};
+  for (int i = 0; i < TOTAL_CONCURRENT_SENDS; i++) {
+    uint32_t s = g_concurrent_seen_seqs[i];
+    assert(s < TOTAL_CONCURRENT_SENDS);
+    assert(seq_present[s] == false);  // Nonce reuse check: NO DUPLICATE SEQUENCE NUMBERS!
+    seq_present[s] = true;
+  }
+  for (int i = 0; i < TOTAL_CONCURRENT_SENDS; i++) {
+    assert(seq_present[i] == true);
+  }
+
+  // All locks were properly released
+  assert(usmp_test_get_mutex_lock_count() == usmp_test_get_mutex_unlock_count());
+
+  // 4. Session Teardown & Safe NULL De-referencing
+  usmp_close(&session);
+  assert(session.established == false);
+  assert(session.tx_mutex == NULL);
+  assert(session.rx_mutex == NULL);
+
+  // Calling usmp_send, usmp_ping, or usmp_close on closed session is safe
+  assert(usmp_send(&session, (const uint8_t*)msg, (uint16_t)strlen(msg)) == USMP_ERR_NOT_CONNECTED);
+  assert(usmp_ping(&session) == USMP_ERR_NOT_CONNECTED);
+  usmp_close(&session);  // idempotent safe no-op
+
+  printf("  - Split RTOS mutex architecture and concurrency tests passed!\n");
+}
+
+static void test_static_transport_initialization(void) {
+  printf("Running zero-heap static transport initialization tests...\n");
+
+  usmp_transport_t t = {0};
+  usmp_tcp_ctx_t tcp_ctx;
+  usmp_udp_ctx_t udp_ctx;
+
+  // 1. Argument validation and NULL checks
+  assert(usmp_transport_tcp_init_static(NULL, &tcp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_tcp_init_static(&t, &tcp_ctx, NULL, 9000) == -1);
+
+  assert(usmp_transport_udp_init_static(NULL, &udp_ctx, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, NULL, "127.0.0.1", 9000) == -1);
+  assert(usmp_transport_udp_init_static(&t, &udp_ctx, NULL, 9000) == -1);
+
+  // 2. Struct layout and size verification
+  assert(sizeof(usmp_tcp_ctx_t) >= sizeof(int) + 64 + sizeof(int));
+  assert(sizeof(usmp_udp_ctx_t) >= sizeof(int) + 64 + sizeof(int) + USMP_HEADER_SIZE + USMP_MAX_PAYLOAD);
+
+  // 3. UDP static transport initialization to local unbound port (UDP dial always creates socket)
+  int rc = usmp_transport_udp_init_static(&t, &udp_ctx, "127.0.0.1", 19876);
+  assert(rc == 0);
+  assert(t.ctx == &udp_ctx);
+  assert(udp_ctx.sock >= 0);
+  assert(t.send != NULL);
+  assert(t.recv != NULL);
+  assert(t.destroy != NULL);
+
+  // 4. Teardown static transport (verifies safe teardown and t.ctx becomes NULL)
+  t.destroy(&t);
+  assert(t.ctx == NULL);
+
+  printf("  - Zero-heap static transport initialization tests passed!\n");
+}
+
 int main(void) {
   printf("==================================================\n");
   printf("         USMP C CORE UNIT TESTS RUNNER            \n");
@@ -707,9 +1449,15 @@ int main(void) {
   test_send_failure_no_nonce_reuse();
   test_control_seq_overflow();
   test_bye_on_close();
+  test_usmp_strerror();
   test_logging();
   test_rekey();
   test_chacha20_poly1305();
+  test_zero_heap_handshake();
+  test_async_handshake_fsm();
+  test_coap_rtt_estimation();
+  test_split_mutex_concurrency();
+  test_static_transport_initialization();
 
   printf("All C core unit tests passed successfully!\n");
   return 0;

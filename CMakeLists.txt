@@ -17,13 +17,34 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # Locate mbedtls
-find_package(MbedTLS QUIET)
-if(NOT MbedTLS_FOUND)
+find_package(MbedTLS 3.0 QUIET)
+if(MbedTLS_FOUND AND MbedTLS_VERSION AND MbedTLS_VERSION VERSION_LESS "3.0.0")
+    message(FATAL_ERROR "USMP requires MbedTLS >= 3.0.0 for constant-time cryptographic operations (found ${MbedTLS_VERSION}).")
+endif()
+if(TARGET MbedTLS::mbedcrypto)
+    set(MBEDTLS_LIBRARIES MbedTLS::mbedcrypto)
+    if(TARGET MbedTLS::mbedx509)
+        list(APPEND MBEDTLS_LIBRARIES MbedTLS::mbedx509)
+    endif()
+    if(TARGET MbedTLS::mbedtls)
+        list(APPEND MBEDTLS_LIBRARIES MbedTLS::mbedtls)
+    endif()
+    set(MbedTLS_FOUND TRUE)
+elseif(TARGET mbedcrypto)
+    set(MBEDTLS_LIBRARIES mbedcrypto)
+    if(TARGET mbedx509)
+        list(APPEND MBEDTLS_LIBRARIES mbedx509)
+    endif()
+    if(TARGET mbedtls)
+        list(APPEND MBEDTLS_LIBRARIES mbedtls)
+    endif()
+    set(MbedTLS_FOUND TRUE)
+elseif(NOT MbedTLS_FOUND OR NOT MBEDTLS_LIBRARIES)
     # Manual fallback for standard installations
-    find_path(MBEDTLS_INCLUDE_DIRS NAMES mbedtls/gcm.h mbedtls/mbedtls_config.h mbedtls/config.h mbedtls/ssl.h HINTS C:/MinGW/include)
-    find_library(MBEDTLS_LIBRARY mbedtls HINTS C:/MinGW/lib)
-    find_library(MBEDX509_LIBRARY mbedx509 HINTS C:/MinGW/lib)
-    find_library(MBEDCRYPTO_LIBRARY mbedcrypto HINTS C:/MinGW/lib)
+    find_path(MBEDTLS_INCLUDE_DIRS NAMES mbedtls/gcm.h mbedtls/mbedtls_config.h mbedtls/config.h mbedtls/ssl.h HINTS C:/MinGW/include /usr/include /usr/local/include)
+    find_library(MBEDTLS_LIBRARY mbedtls HINTS C:/MinGW/lib /usr/lib /usr/local/lib)
+    find_library(MBEDX509_LIBRARY mbedx509 HINTS C:/MinGW/lib /usr/lib /usr/local/lib)
+    find_library(MBEDCRYPTO_LIBRARY mbedcrypto HINTS C:/MinGW/lib /usr/lib /usr/local/lib)
     
     if(MBEDTLS_LIBRARY AND MBEDCRYPTO_LIBRARY)
         set(MBEDTLS_LIBRARIES ${MBEDTLS_LIBRARY} ${MBEDX509_LIBRARY} ${MBEDCRYPTO_LIBRARY})
@@ -51,6 +72,7 @@ add_executable(usmp_tests
     core/tests/test_main.c
     core/tests/test_golden.c
     core/tests/usmp_port_posix.c
+    core/tests/usmp_transport_posix.c
 )
 
 target_include_directories(usmp_tests PRIVATE 
@@ -76,13 +98,21 @@ target_include_directories(usmp_interop_client PRIVATE
 
 target_link_libraries(usmp_interop_client PRIVATE usmp-core)
 
+find_package(Threads)
+if(Threads_FOUND)
+    target_link_libraries(usmp_tests PRIVATE Threads::Threads)
+    target_link_libraries(usmp_interop_client PRIVATE Threads::Threads)
+endif()
+
 # If mbedtls include directories and libraries were found, link them explicitly to the tests
-if(MbedTLS_FOUND)
-    target_include_directories(usmp-core PUBLIC ${MBEDTLS_INCLUDE_DIRS})
+if(MbedTLS_FOUND AND MBEDTLS_LIBRARIES)
+    if(MBEDTLS_INCLUDE_DIRS)
+        target_include_directories(usmp-core PUBLIC ${MBEDTLS_INCLUDE_DIRS})
+        target_include_directories(usmp_tests PRIVATE ${MBEDTLS_INCLUDE_DIRS})
+        target_include_directories(usmp_interop_client PRIVATE ${MBEDTLS_INCLUDE_DIRS})
+    endif()
     target_link_libraries(usmp-core PUBLIC ${MBEDTLS_LIBRARIES})
-    target_include_directories(usmp_tests PRIVATE ${MBEDTLS_INCLUDE_DIRS})
     target_link_libraries(usmp_tests PRIVATE usmp-core ${MBEDTLS_LIBRARIES} ${MBEDTLS_LIBRARIES})
-    target_include_directories(usmp_interop_client PRIVATE ${MBEDTLS_INCLUDE_DIRS})
     target_link_libraries(usmp_interop_client PRIVATE usmp-core ${MBEDTLS_LIBRARIES} ${MBEDTLS_LIBRARIES})
 endif()
 

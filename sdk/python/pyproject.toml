@@ -1,6 +1,6 @@
 [project]
 name = "usmp"
-version = "1.2.2"
+version = "1.3.0"
 description = "USMP - Unified Secure Multi-transport Protocol. Secure, encrypted device communication for ESP32, Arduino and IoT."
 readme = "README.md"
 license = "Apache-2.0"
@@ -35,9 +35,12 @@ Repository = "https://github.com/metaloomlabs/usmp"
 Documentation = "https://usmp.metaloom.in/docs"
 "Bug Tracker" = "https://github.com/metaloomlabs/usmp/issues"
 
+[project.scripts]
+usmp-server = "usmp.server:main"
+
 
 [build-system]
-requires = ["uv_build>=0.11.6,<0.12.0"]
+requires = ["uv_build>=0.11.6,<0.14.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
@@ -45,6 +48,7 @@ module-name = "usmp"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 timeout = 60
 
 [dependency-groups]

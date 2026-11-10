@@ -7,37 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-09-26
+
+Embedded reliability, zero-heap memory architecture, split RTOS concurrency, CoAP RTT estimation with watchdog protection, and non-blocking handshake state machine.
+
+### 🚀 Protocol & Library Additions
+
+- **C Core & Arduino — Asynchronous Non-Blocking Handshake State Machine (`usmp_step`, `beginAsync`)**: Introduced explicit non-blocking finite state machine (`USMP_STATE_IDLE`, `USMP_STATE_CONNECTING_SOCKET`, `USMP_STATE_AWAITING_CHALLENGE`, `USMP_STATE_CALCULATING_ECDH`, `USMP_STATE_AWAITING_SESSION_OK`, `USMP_STATE_ESTABLISHED`). Added `usmp_connect_async()`, `usmp_reconnect_async()`, and `usmp_step()` in C core. Refactored Arduino `USMPClient` with `beginAsync()` overloads, `state()` / `isConnecting()` queries, and non-blocking `maintain()` driving connection bring-up and reconnects without synchronous 2–5 second CPU stalls or watchdog timer resets.
+- **C Core — Split RTOS Mutex Architecture (`tx_mutex` & `rx_mutex`)**: Embedded dedicated transmission and reception synchronization handles in `usmp_t` (`core/include/usmp.h`). Decouples egress encryption from ingress defragmentation, eliminating full-duplex socket deadlocks when `usmp_recv()` blocks while completely serializing concurrent `usmp_send()` calls to prevent AES-GCM nonce reuse. In-band rekeying (`usmp_rekey`) and session teardown (`usmp_close`) enforce strict hierarchical lock order (`tx_mutex` followed by `rx_mutex`) to guarantee deadlock freedom.
+- **Core HAL — Mutex Primitives (`usmp_port_mutex_*`) & Typed Status Code**: Added `usmp_mutex_t`, `usmp_port_mutex_create()`, `usmp_port_mutex_lock()`, `usmp_port_mutex_unlock()`, and `usmp_port_mutex_destroy()` declarations to `core/include/usmp_port.h`. Implemented priority-inheriting FreeRTOS mutexes (`xSemaphoreCreateMutex()`) on ESP32, FreeRTOS/no-op stubs on Arduino, and Win32 `CRITICAL_SECTION` / POSIX `pthread_mutex_t` on test platforms. Added `USMP_ERR_MUTEX_FAILED = -10` to `usmp_err_t`.
+- **C Core — Zero-Heap Handshake Scratchpad Memory**: Added `scratch` and `scratch_len` fields to `usmp_t` and `#define USMP_HANDSHAKE_SCRATCH_LEN 1024` in `core/include/usmp.h`. When provided, `usmp_handshake()` slices caller-managed memory into 512-byte TX and RX frame buffers with **zero dynamic heap allocations**, securely zeroizes scratchpad contents upon completion via `mbedtls_platform_zeroize()`, and preserves scratchpad pointers across `usmp_connect()` and `usmp_reconnect()`. Includes `#ifdef USMP_ZERO_HEAP` guard for strict static-only build verification.
+- **Arduino Port — Static Memory Transport Contexts (`init_static`)**: Added `init_static(usmp_transport_t* t, USMPArduinoTcpCtx* ctx)` and `init_static(usmp_transport_t* t, USMPArduinoUdpCtx* ctx)` to `USMPTCPTransport` and `USMPUDPTransport`. Enables caller/BSS allocation of transport contexts, delegating standard `init()` to `init_static()` and installing `destroy_static()` hooks that safely stop sockets without calling `delete` on static pointers.
+- **Arduino Port — Zero-Heap Client Architecture & `USMPClientStatic`**: Refactored `USMPClient` to decouple RX buffer storage into pointer + capacity (`_rx_buf`, `_rx_buf_capacity`, `_owns_rx_buf`). Added constructor overload accepting external buffer memory, `setHandshakeScratch()` for cryptographic scratchpad injection, and `begin(transport, static_ctx = nullptr)` overloads. Added `USMPClientStatic<RxBufferSize, ScratchBufferSize>` template wrapper embedding both buffers directly in object memory for pure `.bss` zero-heap embedded deployments.
+- **Arduino Examples — Zero-Heap Reference Sketch**: Added [`ports/usmp-arduino/examples/zero_heap/zero_heap.ino`](ports/usmp-arduino/examples/zero_heap/zero_heap.ino) demonstrating 100% static allocation with `USMPClientStatic` and static transport contexts.
+- **Core HAL — Watchdog Timer Service Hook (`usmp_port_wdt_feed`)**: Added `usmp_port_wdt_feed(void)` HAL declaration to `core/include/usmp_port.h` with implementations for Arduino (`yield()` / `ESP.wdtFeed()`), ESP32 ESP-IDF (`esp_task_wdt_reset()`), and POSIX test runners.
+- **Arduino & ESP32 Ports — CoAP RTT Estimation & Watchdog Guard for UDP ARQ**: Implemented RFC 7252 / Jacobson-Karn smoothed RTT (`srtt`), variance (`rttvar`), and dynamic timeout (`rto`) in `USMPArduinoUdpCtx`. Retransmission timeout scales with binary exponential backoff ($100\text{ ms} \dots 5000\text{ ms}$) on packet loss while avoiding retransmission ambiguity by measuring samples only on first-attempt ACKs. Integrated `usmp_port_wdt_feed()` inside transmission and reception wait loops to guard against hardware watchdog timer resets during link outages.
+- **C Core — Fast Table-Driven CRC-16 Lookup Engine**: Replaced bitwise 8-iteration software shifting loop in `usmp_crc16_step()` with a precomputed 256-word Flash lookup table (`.rodata`, 512 bytes ROM, 0 bytes RAM). Delivers ~8x faster single-cycle per-byte CRC-16 calculation across all incoming and outgoing frames on microcontrollers (ESP32/ARM Cortex-M/AVR) with 100% bit-exact wire-compatibility (#51).
+- **Arduino Port — Bounded Handshake Timeouts & Watchdog Protection**: Introduced `USMP_HANDSHAKE_RECV_TIMEOUT_MS` (default 5000 ms). Replaced unbounded handshake receive loops in `USMPTransport.cpp` (both TCP and UDP) with bounded timeouts to prevent MCU hangs when the server is unresponsive. Added `usmp_port_wdt_feed()` in all TCP byte reception and progress loops to guard against hardware watchdog timer and FreeRTOS Task Watchdog Timer (TWDT) reset loops during link negotiation.
+- **C Core — Early Corrupted Packet Rejection**: Hardened `usmp_parse_packet()` to compute and verify the frame CRC directly over the incoming wire buffer before executing `memcpy(pkt->payload, ...)`. Discards corrupted, incomplete, or spoofed frames in zero copy cycles, preventing internal buffer pollution and eliminating CPU waste during frame floods.
+- **C Core & Arduino — Human-Readable Error Translation (`usmp_strerror`, `lastError`, `lastErrorString`)**: Added `const char* usmp_strerror(usmp_err_t err)` in C core returning descriptive static string literals for all library error codes. Added `lastError()` and `lastErrorString()` to Arduino `USMPClient`, automatically capturing and exposing status codes from handshake, transmission, and background maintenance.
+- **C Core & Python SDK — Graceful Teardown Status Code (`USMP_ERR_PEER_CLOSED`)**: Added `USMP_ERR_PEER_CLOSED = -11` to `usmp_err_t` and `USMPErrorCode.PEER_CLOSED = -11` in Python SDK. Graceful peer disconnects via `PKT_BYE` frames now return `-11` instead of ambiguous generic argument errors (`-1`), enabling clients to cleanly distinguish peer shutdown from malformed traffic.
+- **Arduino Port — Binary PSK Constructors**: Added `USMPClient(const uint8_t* psk, size_t psk_len)` and `USMPClientStatic(const uint8_t* psk, size_t psk_len)` overloads accepting explicit binary key buffers. Prevents `strlen()` from prematurely truncating random high-entropy pre-shared keys containing `0x00` bytes.
+- **Arduino Port — Standard Print Interface Inheritance (`usmp.print`, `usmp.println`)**: Inherited `USMPClient` from Arduino's standard `Print` class, implementing `write(uint8_t)`, `write(const uint8_t*, size_t)`, `flush()`, and `availableForWrite()`. Enables idiomatic stream printing (`usmp.print("Sensor: ")`, `usmp.println(val)`) with intelligent zero-heap line buffering that aggregates prints into single encrypted frames upon encountering `\n` or explicit `flush()` calls.
+- **Python SDK — Built-in CLI Dev / Echo Server (`python -m usmp.server`, `usmp-server`)**: Added command-line development and test server with ANSI colored logging, interactive startup banner, `--echo` mode for loopback verification, `--generate-psk` 256-bit key generation, and hex-encoded PSK parsing (`hex:<bytes>`). Added `is_connected` and `info` properties to `USMPSession`.
+- **Python SDK — String Transmission, Direct Text Receiving & Payload Inspector (`session.send(str)`, `session.recv_str()`, `session.print()`)**: Enhanced `USMPSession.send()` to natively accept `bytes | str` (automatically encoding `str` as UTF-8). Added `session.recv_str()` for direct string reception. Added `session.print(data, tag=...)` providing rich console payload inspection with timestamps, device ID badges, payload length, and automatic text vs. hex dump formatting integrated with USMP's ANSI logger.
+- **ESP-IDF Port & Core HAL — Zero-Heap Static Transport Initializers (`usmp_transport_tcp_init_static`, `usmp_transport_udp_init_static`)**: Exposed `usmp_tcp_ctx_t` and `usmp_udp_ctx_t` context types in `core/include/usmp_transport.h` along with static initializers accepting caller-managed static/`.bss` memory buffers. Implemented static transport destroy hooks (`destroy_static`) that safely shut down sockets without calling `free()`. Eliminates mandatory dynamic memory (`malloc`) for transports in safety-critical and zero-heap embedded environments (#DX-06).
+- **Build & Tooling — MbedTLS 3.x Assertion & UV Build Upper Bound**: Added minimum version assert in `CMakeLists.txt` enforcing MbedTLS >= 3.0.0 for host builds. Expanded `uv_build` upper bound in `sdk/python/pyproject.toml` to `<0.14.0` for clean build compatibility with modern uv toolchains.
+
+---
+
+<details>
+<summary><b>🛠️ Tooling, CI/CD & Developer Experience (Maintainers)</b></summary>
+
+- **Tests — Zero-Heap Static Transport Initialization Suite**: Added `test_static_transport_initialization()` in `core/tests/test_main.c` asserting NULL argument validation guards, struct layout sizing, static context binding, socket creation, and safe static teardown without heap freeing.
+- **Tests — Error Translation & Graceful Teardown Suite**: Added `test_usmp_strerror()` to `core/tests/test_main.c` validating string mapping for all defined error codes and invalid fallback values. Updated `test_bye_on_close()` to verify `USMP_ERR_PEER_CLOSED` return status.
+- **Tests — Asynchronous Handshake State Machine Suite**: Added `test_async_handshake_fsm()` in `core/tests/test_main.c` asserting non-blocking tick progression, state transitions (`IDLE` -> `AWAITING_CHALLENGE` -> `CALCULATING_ECDH` -> `AWAITING_SESSION_OK` -> `ESTABLISHED`), non-blocking empty reads, reconnect FSM reset, and static assert layout verification for `state` and `hs_ctx`.
+- **Tests — Split Mutex Concurrency & Multi-Threaded Serialization Suite**: Added `test_split_mutex_concurrency()` in `core/tests/test_main.c` asserting lock/unlock balance, non-blocking full-duplex send execution while `rx_mutex` is held, safe NULL de-referencing on teardown, and multi-threaded race condition resistance across 4 concurrent threads executing 100 total transmissions with 0 duplicate nonces. Added `_Static_assert` validations for `tx_mutex` and `rx_mutex` struct offsets.
+- **Tests — C Core Handshake & Scratchpad Verification**: Added `test_zero_heap_handshake()` in `core/tests/test_main.c` validating complete mock handshake execution, session key derivation parity, and post-handshake memory zeroization. Added `_Static_assert` validations for `cipher_suite`, `scratch`, and `scratch_len` struct offsets between C Core and Arduino headers.
+- **Tests — CoAP RTT & Watchdog Feed Unit Test Suite**: Added `test_coap_rtt_estimation()` to `core/tests/test_main.c` validating Jacobson/Karn RTT convergence, retransmission ambiguity exclusion, min/max timeout clamping ($100\text{ ms} \dots 5000\text{ ms}$), binary exponential backoff progression, and `usmp_port_wdt_feed()` invocation counters.
+
+</details>
+
+---
+
 ## [1.2.2] — 2026-09-24
 
-Core error handling modernization, Python SDK server resilience and logging UI overhaul, alongside DevOps and developer experience improvements spanning automated pre-flight release validation, release dry-run simulations, CI workflow parallelization across Python matrices, cross-platform local developer tooling (`Makefile`), and stability fixes.
+Core error handling modernization, typed status codes, Python SDK server shutdown resilience, and developer logging overhaul.
 
-### ✨ Added
+### 🚀 Protocol & Library Additions
 
+- **Core & SDK — Programmatic `usmp_err_t` Typed Status Codes**: Introduced `usmp_err_t` enum across C core API, Arduino wrappers, and Python SDK (`USMPErrorCode` IntEnum and `code: USMPErrorCode` attributes on all exception classes) (#27).
 - **Python SDK — Graceful Server Shutdown & Signal Traps**: Added programmatic `server.stop()`, OS signal traps (`SIGINT`, `SIGTERM`) on the running asyncio event loop, and clean cancellation/teardown awaiting all active client session tasks without hanging coroutines.
 - **Python SDK — Immediate TCP Socket Rebinding**: Added `reuse_address=True` to `TCPListener` to enable immediate server restarts without `EADDRINUSE` / socket `TIME_WAIT` errors.
 - **Python SDK — Dev-Tool Colored Logging UI**: Added `usmp._logging` module featuring a sleek ANSI `ColoredFormatter` with pill-style level badges (`INFO`, `WARN`, `ERROR`, `CRIT`, `DEBUG`), dimmed timestamps, shortened logger namespaces (`[server]`, `[client]`), and `usmp.setup_logging()` helper with UTF-8 stream handling.
-- **Core & SDK — Programmatic `usmp_err_t` Typed Status Codes**: Introduced `usmp_err_t` enum across C core API, Arduino wrappers, and Python SDK (`USMPErrorCode` IntEnum and `code: USMPErrorCode` attributes on all exception classes) (#27).
-- **CI/CD — Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
-- **CI/CD — Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
-- **CI/CD — Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
-- **CI/CD — Toolchain Caching**: Integrated GitHub Actions caching for Arduino CLI cores (`esp32:esp32`) and ESP-IDF tools, slashing build times (#35).
-- **CI/CD — Unified Branch Protection Check**: Added aggregate `ci-checks` gate job requiring `c-core`, `python-tests`, `python-lint-security`, and `arduino-esp32-compile` before PR merges (#35).
-- **CI/CD — Release Pre-Flight Validation**: Automated multi-manifest version consistency checks (`scripts/preflight-release.py`) before release deployments, verifying matching version numbers across Python, C Core, ESP32, and Arduino manifests (#34).
-- **CI/CD — Automated C-Python Interoperability Testing**: Added `libmbedtls-dev` to CI Python test runners, enabling automated end-to-end wire compatibility tests (`test_c_interop.py`) between the compiled C core client binary and Python `USMPServer` across TCP and UDP.
-- **CI/CD — Workflow Concurrency Controls**: Enforced `concurrency` groups (`cancel-in-progress: true`) across test and release workflows to prevent redundant runner execution and race conditions (#34).
-- **Developer Experience — Root Makefile**: Added cross-platform `Makefile` with targets for testing (`test`, `test-v`, `test-c`, `test-all`), linting & formatting (`lint`, `format`), security scanning (`security`), port packaging (`bundle-arduino`, `bundle-esp32`), and artifact cleaning (`clean-ports`, `clean`). Automatically detects `uv` with fallback to active virtual environments.
-- **Tests — Pytest Timeout Guard**: Added `pytest-timeout` (`--timeout=60`) to guard against hung event loops and deadlock regressions during integration test execution.
 
-### 🐛 Fixed
+### 🐛 Bug Fixes & Runtime Reliability
 
 - **C Core — Handshake Entropy Source Registration**: Registered `usmp_mbedtls_entropy_callback` using `usmp_port_random` with `mbedtls_entropy_add_source` to prevent `mbedtls_ctr_drbg_seed` failures on platforms without default system entropy (#38).
-- **CI/CD — Node 24 Action Enforcement**: Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` across CI workflows to enforce Node 24 runtime (#28).
 - **Python SDK — Python 3.11 Datagram Transport**: Fixed `AttributeError: '_SelectorDatagramTransport' object has no attribute '_address'` in `USMPClient.connect()` on Python 3.11 by safely resolving endpoint addresses using standard socket peer discovery (#35).
-- **Tests — Rate Limiter State Pollution**: Added autouse session-isolation fixture in `conftest.py` ensuring global rate-limiter caches are reset before and after every test, preventing cascading flaky test failures in test suites.
-- **Tests — Concurrent Handshake Teardown**: Optimized listener shutdown in `test_concurrent_handshakes_exceeding_capacity` using cancellation task groups, preventing hanging background tasks.
-- **Tests — UDP Teardown Test Session Liveness**: Kept server sessions alive in `test_udp_integration.py` until client teardown, allowing the server to acknowledge `BYE` frames with instant ACKs instead of triggering 15-second ARQ timeouts under Python 3.12/3.13 eager scheduling.
-- **Ports — Shim Alignment**: Synchronized `usmp_api.h` shim in `scripts/bundle-ports.py` with port development shims, ensuring `bundle-ports.py --clean` leaves working trees completely clean.
-- **DevOps & Tooling — Scripts Audit & Port Packaging Hardening**: Hardened utility scripts across Windows PowerShell and POSIX Bash. Resolved working-directory path sensitivity in `build-arduino-zip.ps1`, eliminated case-insensitive filesystem collisions during Arduino staging, included `.cpp` files in include patching, cleaned `dist/` before builds in SDK test scripts to prevent stale wheel conflicts, expanded release tag validation to verify `core/include/usmp.h`, `__init__.py`, and root `pyproject.toml`, added base SemVer fallback to release notes extraction, and pruned obsolete local `publish-pypi.{ps1,sh}` scripts in favor of downstream OIDC trusted publishing.
+
+---
+
+<details>
+<summary><b>🛠️ Tooling, CI/CD & Developer Experience (Maintainers)</b></summary>
+
+### ⚙️ CI/CD & Automation
+
+- **Hybrid GitHub Release Automation**: Added automated monorepo GitHub Release creation to `.github/workflows/split-release.yml` with Option 3 hybrid notes (curated notes extracted from `CHANGELOG.md` via `scripts/extract-release-notes.py`, automated PR/commit changelog fallback, and downloadable Arduino ZIP and Python wheel asset distribution).
+- **Release Dry-Run Mode**: Added `dry_run` simulation support to `.github/workflows/split-release.yml` with `workflow_dispatch` trigger. Validates tag format, checks version synchronization across all manifests, executes build steps, and outputs simulated publication logs without publishing packages or uploading release assets.
+- **Multi-Version Python Matrix**: Expanded CI pipeline to test across Python 3.11, 3.12, and 3.13 concurrently in parallel with Ubuntu 22.04 runners (#35).
+- **Toolchain Caching**: Integrated GitHub Actions caching for Arduino CLI cores (`esp32:esp32`) and ESP-IDF tools, slashing build times (#35).
+- **Unified Branch Protection Check**: Added aggregate `ci-checks` gate job requiring `c-core`, `python-tests`, `python-lint-security`, and `arduino-esp32-compile` before PR merges (#35).
+- **Release Pre-Flight Validation**: Automated multi-manifest version consistency checks (`scripts/preflight-release.py`) before release deployments, verifying matching version numbers across Python, C Core, ESP32, and Arduino manifests (#34).
+- **Automated C-Python Interoperability Testing**: Added `libmbedtls-dev` to CI Python test runners, enabling automated end-to-end wire compatibility tests (`test_c_interop.py`) between the compiled C core client binary and Python `USMPServer` across TCP and UDP.
+- **Workflow Concurrency Controls**: Enforced `concurrency` groups (`cancel-in-progress: true`) across test and release workflows to prevent redundant runner execution and race conditions (#34).
+- **Node 24 Action Enforcement**: Added `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"` across CI workflows to enforce Node 24 runtime (#28).
+
+### 🛠️ Developer Tooling & Test Infrastructure
+
+- **Root Makefile**: Added cross-platform `Makefile` with targets for testing (`test`, `test-v`, `test-c`, `test-all`), linting & formatting (`lint`, `format`), security scanning (`security`), port packaging (`bundle-arduino`, `bundle-esp32`), and artifact cleaning (`clean-ports`, `clean`). Automatically detects `uv` with fallback to active virtual environments.
+- **Pytest Timeout Guard**: Added `pytest-timeout` (`--timeout=60`) to guard against hung event loops and deadlock regressions during integration test execution.
+- **Rate Limiter State Pollution**: Added autouse session-isolation fixture in `conftest.py` ensuring global rate-limiter caches are reset before and after every test, preventing cascading flaky test failures in test suites.
+- **Concurrent Handshake Teardown**: Optimized listener shutdown in `test_concurrent_handshakes_exceeding_capacity` using cancellation task groups, preventing hanging background tasks.
+- **UDP Teardown Test Session Liveness**: Kept server sessions alive in `test_udp_integration.py` until client teardown, allowing the server to acknowledge `BYE` frames with instant ACKs instead of triggering 15-second ARQ timeouts under Python 3.12/3.13 eager scheduling.
+- **Ports Shim Alignment**: Synchronized `usmp_api.h` shim in `scripts/bundle-ports.py` with port development shims, ensuring `bundle-ports.py --clean` leaves working trees completely clean.
+- **Scripts Audit & Port Packaging Hardening**: Hardened utility scripts across Windows PowerShell and POSIX Bash. Resolved working-directory path sensitivity in `build-arduino-zip.ps1`, eliminated case-insensitive filesystem collisions during Arduino staging, included `.cpp` files in include patching, cleaned `dist/` before builds in SDK test scripts to prevent stale wheel conflicts, expanded release tag validation to verify `core/include/usmp.h`, `__init__.py`, and root `pyproject.toml`, added base SemVer fallback to release notes extraction, and pruned obsolete local `publish-pypi.{ps1,sh}` scripts in favor of downstream OIDC trusted publishing.
+
+</details>
 
 ---
 

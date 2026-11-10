@@ -55,9 +55,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  uint8_t scratch[USMP_HANDSHAKE_SCRATCH_LEN];
   usmp_t ctx = {0};
   ctx.psk = psk;
   ctx.psk_len = (size_t)psk_len;
+  ctx.scratch = scratch;
+  ctx.scratch_len = sizeof(scratch);
 
   if (device_id_hex) {
     uint8_t device_id[6];

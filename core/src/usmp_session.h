@@ -8,5 +8,8 @@ int usmp_recv(usmp_t* ctx, uint8_t* out, uint16_t max_len);
  * Send a best-effort graceful BYE control frame. Internal to the library
  * (used by usmp_close()); not part of the public API. Returns USMP_OK (0) on success,
  * negative usmp_err_t code if the session is not established or the transport write failed.
+ * usmp_send_bye acquires tx_mutex.
+ * usmp_send_bye_locked assumes tx_mutex is already held by caller (e.g. usmp_close).
  */
 usmp_err_t usmp_send_bye(usmp_t* ctx);
+usmp_err_t usmp_send_bye_locked(usmp_t* ctx);

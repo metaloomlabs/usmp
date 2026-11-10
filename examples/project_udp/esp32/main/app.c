@@ -26,8 +26,8 @@ void app_main(void) {
   ctx.psk = s_psk;
   ctx.psk_len = sizeof(s_psk) - 1;  // exclude null terminator
 
-  // By default, only errors are logged. Uncomment below to see details.
-  // usmp_set_log_level(USMP_LOG_LEVEL_INFO);
+  // Enable verbose logging to observe handshake and packet exchanges
+  usmp_set_log_level(USMP_LOG_LEVEL_INFO);
 
   // ── Initial connect with retries ──────────────────────────────────────────
   bool connected = false;
@@ -47,7 +47,7 @@ void app_main(void) {
   }
 
   if (usmp_connect(&ctx, &transport) != 0) {
-    ESP_LOGE(TAG, "USMP connect failed over UDP");
+    ESP_LOGE(TAG, "USMP connect failed over UDP: %s (code %d)", usmp_strerror(ctx.last_err), ctx.last_err);
     return;
   }
 
@@ -56,9 +56,26 @@ void app_main(void) {
   const char* msg = "hello from esp32 over UDP";
   if (usmp_send(&ctx, (const uint8_t*)msg, strlen(msg)) == 0) ESP_LOGI(TAG, "Message sent");
 
-  // ── Main loop — keepalive + reconnect ─────────────────────────────────────
+  // ── Main loop — periodic telemetry, receive & keepalive ────────────────────
+  int counter = 0;
+  TickType_t last_send_tick = xTaskGetTickCount();
+
   while (true) {
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    // Send telemetry periodically every 3 seconds
+    if (xTaskGetTickCount() - last_send_tick >= pdMS_TO_TICKS(3000)) {
+      last_send_tick = xTaskGetTickCount();
+      counter++;
+      char telemetry[80];
+      uint32_t heap = esp_get_free_heap_size();
+      snprintf(telemetry, sizeof(telemetry), "ESP32 UDP count=%d uptime=%lums heap=%lu",
+               counter, (unsigned long)usmp_port_millis(), (unsigned long)heap);
+      ESP_LOGI(TAG, "TX: %s", telemetry);
+      if (usmp_send(&ctx, (const uint8_t*)telemetry, strlen(telemetry)) != 0) {
+        ESP_LOGE(TAG, "Failed to send UDP telemetry: %s", usmp_strerror(ctx.last_err));
+      }
+    }
 
     // Read incoming messages if available
     if (ctx.transport.available && ctx.transport.available(&ctx.transport) > 0) {
@@ -66,7 +83,7 @@ void app_main(void) {
       int n = usmp_recv(&ctx, rx_buf, USMP_MAX_DATA_LEN * USMP_MAX_FRAMES);
       if (n > 0) {
         rx_buf[n] = '\0';
-        ESP_LOGI(TAG, "RX-UDP: %s", (char*)rx_buf);
+        ESP_LOGI(TAG, "RX Echoed: %s", (char*)rx_buf);
       }
     }
 

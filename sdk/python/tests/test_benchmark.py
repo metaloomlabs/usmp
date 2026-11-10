@@ -31,7 +31,7 @@ def stats(times: list[float]) -> dict:
 
 def print_benchmark(name: str, times: list[float], target_ms: float):
     s = stats(times)
-    status = "✓" if s["p95"] <= target_ms else "✗"
+    status = "[OK]" if s["p95"] <= target_ms else "[FAIL]"
     print(f"\n{status} {name}")
     print(f"  target:  <{target_ms}ms")
     print(f"  min:     {s['min']}ms")

@@ -253,7 +253,7 @@ class USMPServer:
 
             proto_str = "TCP" if transport.is_reliable else "UDP"
             logger.info(
-                "🔒 Session established (%s): device=%s session=%s",
+                "Session established (%s): device=%s session=%s",
                 proto_str,
                 info.device_id_str,
                 info.session_id_str,
@@ -321,7 +321,7 @@ class USMPServer:
                 if self._udp_sessions.get(addr) is transport:
                     self._udp_sessions.pop(addr, None)
 
-            logger.info("🔌 Disconnected (%s): %s", "TCP" if transport.is_reliable else "UDP", addr)
+            logger.info("Disconnected (%s): %s", "TCP" if transport.is_reliable else "UDP", addr)
 
             if watchdog_task is not None and not watchdog_task.done():
                 watchdog_task.cancel()
@@ -359,7 +359,7 @@ class USMPServer:
         signals = (signal.SIGINT, signal.SIGTERM) if hasattr(signal, "SIGINT") else ()
 
         def _on_signal() -> None:
-            logger.info("⚡ Received signal to stop server")
+            logger.info("Received signal to stop server")
             if self._shutdown_event is not None:
                 self._shutdown_event.set()
 
@@ -373,7 +373,7 @@ class USMPServer:
         try:
             await self._shutdown_event.wait()
         except (asyncio.CancelledError, KeyboardInterrupt):
-            logger.info("⚡ Server received interrupt signal")
+            logger.info("Server received interrupt signal")
         finally:
             for sig in signals:
                 try:
@@ -391,4 +391,4 @@ class USMPServer:
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
 
-            logger.info("✨ USMP Server shut down gracefully.")
+            logger.info("USMP Server shut down gracefully.")
